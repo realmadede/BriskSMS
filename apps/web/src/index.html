@@ -106,7 +106,20 @@
       transform: translateY(0);
     }
 
-    /* Authentic Glisse Liquid Glass Material Classes */
+    
+    /* Scroll-Driven Dynamic Building Engine */
+    .scroll-build {
+      opacity: 0.15;
+      transform: translateY(28px);
+      transition: opacity 0.65s cubic-bezier(0.16, 1, 0.3, 1), transform 0.65s cubic-bezier(0.16, 1, 0.3, 1);
+      will-change: opacity, transform;
+    }
+
+    .scroll-build.built {
+      opacity: 1;
+      transform: translateY(0);
+    }
+\n    /* Authentic Glisse Liquid Glass Material Classes */
     .liquid-glass-nav {
       background-color: var(--glisse-surface);
       -webkit-backdrop-filter: blur(var(--glisse-blur)) saturate(1.4);
@@ -275,36 +288,7 @@
       padding: 34px 44px 28px 44px;
     }
 
-    /* Left Dock */
-    .hero-dock {
-      position: absolute;
-      left: 36px;
-      top: 50%;
-      transform: translateY(-56%);
-      z-index: 20;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-
-    .hero-dock-box {
-      width: 20px;
-      height: 20px;
-      border: 1px solid rgba(11, 10, 9, 0.4);
-      border-radius: 4px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: transparent;
-    }
-
-    .hero-dock-box svg {
-      width: 11px;
-      height: 11px;
-      stroke: var(--text-main);
-      stroke-width: 1.5;
-      fill: none;
-    }
+    
 
     /* 3D DYNAMIC CHROME SPHERES (Responsive Kinetic Movement) */
     .sphere-layer {
@@ -1080,9 +1064,6 @@
         min-height: 640px;
         padding: 24px;
       }
-      .hero-dock {
-        display: none;
-      }
       .sphere-1-wrap {
         width: 100px;
         height: 100px;
@@ -1180,16 +1161,7 @@
       <div class="container">
         <div class="hero-bezel-card" id="heroCard">
 
-          <!-- Left Dock -->
-          <aside class="hero-dock" aria-label="Tool mode dock">
-            <div class="hero-dock-box"><svg viewBox="0 0 16 16"><rect x="2" y="2" width="12" height="12" rx="2"></rect></svg></div>
-            <div class="hero-dock-box"><svg viewBox="0 0 16 16"><path d="M3 5h10M3 8h10M3 11h6"></path></svg></div>
-            <div class="hero-dock-box"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="4"></circle></svg></div>
-            <div class="hero-dock-box"><svg viewBox="0 0 16 16"><path d="M8 2l5 9H3z"></path></svg></div>
-            <div class="hero-dock-box"><svg viewBox="0 0 16 16"><circle cx="5" cy="8" r="1.5"></circle><circle cx="11" cy="8" r="1.5"></circle></svg></div>
-            <div class="hero-dock-box"><svg viewBox="0 0 16 16"><path d="M4 4h8v8H4z"></path></svg></div>
-            <div class="hero-dock-box"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5"></circle></svg></div>
-          </aside>
+          
 
           <!-- Dynamic 3D Chrome Spheres with Parallax Motion -->
           <!-- Sphere A: Main Foreground Sphere -->
@@ -1253,9 +1225,7 @@
               <span style="font-size: 1.2rem; font-weight: 300;">+</span>
             </div>
 
-            <div class="hero-pagination">
-              <span>Onan</span>&nbsp;&nbsp;&nbsp;&nbsp;<span>8</span>&nbsp;&nbsp;&nbsp;&nbsp;<span>00</span>
-            </div>
+            
 
             <div style="width: 40px;"></div>
           </div>
@@ -1277,7 +1247,7 @@
 
         <div class="product-cards-grid">
           <!-- Product 01: Payment Intelligence -->
-          <div class="product-card" id="payment-intelligence">
+          <div class="product-card scroll-build" id="payment-intelligence">
             <div>
               <span class="product-card-badge">Product 01</span>
               <h3 class="product-card-title">From payment notifications to business clarity.</h3>
@@ -1302,7 +1272,7 @@
           </div>
 
           <!-- Product 02: Bulk Messaging -->
-          <div class="product-card" id="bulk-sms">
+          <div class="product-card scroll-build" id="bulk-sms">
             <div>
               <span class="product-card-badge">Product 02</span>
               <h3 class="product-card-title">Reach your customers without the busywork.</h3>
@@ -1342,7 +1312,7 @@
 
         <div class="journey-timeline">
           <!-- Stage 1 -->
-          <div class="journey-stage">
+          <div class="journey-stage scroll-build">
             <div>
               <div class="stage-badge">STAGE 01</div>
               <h3 class="stage-title">A customer makes a payment</h3>
@@ -1360,7 +1330,7 @@
           </div>
 
           <!-- Stage 2 -->
-          <div class="journey-stage">
+          <div class="journey-stage scroll-build">
             <div>
               <div class="stage-badge">STAGE 02</div>
               <h3 class="stage-title">Your business receives a notification</h3>
@@ -1381,7 +1351,7 @@
           </div>
 
           <!-- Stage 3 -->
-          <div class="journey-stage">
+          <div class="journey-stage scroll-build">
             <div>
               <div class="stage-badge">STAGE 03</div>
               <h3 class="stage-title">BriskSMS organizes the payment</h3>
@@ -1400,7 +1370,7 @@
           </div>
 
           <!-- Stage 4 -->
-          <div class="journey-stage">
+          <div class="journey-stage scroll-build">
             <div>
               <div class="stage-badge">STAGE 04</div>
               <h3 class="stage-title">The payment is matched to an invoice</h3>
@@ -1424,7 +1394,7 @@
           </div>
 
           <!-- Stage 5 -->
-          <div class="journey-stage">
+          <div class="journey-stage scroll-build">
             <div>
               <div class="stage-badge">STAGE 05</div>
               <h3 class="stage-title">Your business sees what needs attention</h3>
@@ -1463,7 +1433,7 @@
 
         <div class="sms-journey-grid">
           <!-- Stage 1 -->
-          <div class="sms-stage-card">
+          <div class="sms-stage-card scroll-build">
             <div>
               <div class="sms-stage-num">01</div>
               <h3 class="sms-stage-title">Organize contacts</h3>
@@ -1480,19 +1450,19 @@
           </div>
 
           <!-- Stage 2 -->
-          <div class="sms-stage-card">
+          <div class="sms-stage-card scroll-build">
             <div>
               <div class="sms-stage-num">02</div>
               <h3 class="sms-stage-title">Prepare message</h3>
               <p class="sms-stage-text">Write a message once, use a template, and personalize it for the people receiving it.</p>
             </div>
             <div class="sms-mock-visual">
-              <span style="background: var(--bg-bone); padding: 2px 6px; border-radius: 4px; font-weight: 600;">{customer_name}</span> your order is ready for pickup!
+              <span style="background: var(--bg-bone); padding: 2px 6px; border-radius: 4px; font-weight: 600;"><span style="background: var(--bg-bone); padding: 2px 6px; border-radius: 4px; font-weight: 600;">Juma</span></span> your order is ready for pickup!
             </div>
           </div>
 
           <!-- Stage 3 -->
-          <div class="sms-stage-card">
+          <div class="sms-stage-card scroll-build">
             <div>
               <div class="sms-stage-num">03</div>
               <h3 class="sms-stage-title">Choose when to send</h3>
@@ -1506,7 +1476,7 @@
           </div>
 
           <!-- Stage 4 -->
-          <div class="sms-stage-card">
+          <div class="sms-stage-card scroll-build">
             <div>
               <div class="sms-stage-num">04</div>
               <h3 class="sms-stage-title">Reach customers</h3>
@@ -1520,7 +1490,7 @@
           </div>
 
           <!-- Stage 5 -->
-          <div class="sms-stage-card">
+          <div class="sms-stage-card scroll-build">
             <div>
               <div class="sms-stage-num">05</div>
               <h3 class="sms-stage-title">Review delivery</h3>
@@ -1555,25 +1525,25 @@
         </h2>
 
         <div class="steps-grid">
-          <div class="step-card">
+          <div class="step-card scroll-build">
             <div class="step-number">01</div>
             <h3 class="step-title">Connect your device</h3>
             <p class="step-text">Install the BriskSMS Android application and authorize the payment notification access needed for your business workflow.</p>
           </div>
 
-          <div class="step-card">
+          <div class="step-card scroll-build">
             <div class="step-number">02</div>
             <h3 class="step-title">Receive notifications</h3>
             <p class="step-text">Supported payment notifications are securely forwarded to your BriskSMS workspace for processing.</p>
           </div>
 
-          <div class="step-card">
+          <div class="step-card scroll-build">
             <div class="step-number">03</div>
             <h3 class="step-title">Organize and reconcile</h3>
             <p class="step-text">Transactions are structured and compared against your business invoices and records. Potential matches and exceptions are made visible.</p>
           </div>
 
-          <div class="step-card">
+          <div class="step-card scroll-build">
             <div class="step-number">04</div>
             <h3 class="step-title">Review and take action</h3>
             <p class="step-text">Your team can review uncertain transactions, resolve outstanding items, and maintain an accountable reconciliation history.</p>
@@ -1594,22 +1564,22 @@
         </p>
 
         <div class="usecases-grid">
-          <div class="usecase-card">
+          <div class="usecase-card scroll-build">
             <h3 class="usecase-title">Retail and shops</h3>
             <p class="usecase-text">Organize customer payments, match transactions to sales, and identify payments that need attention.</p>
           </div>
 
-          <div class="usecase-card">
+          <div class="usecase-card scroll-build">
             <h3 class="usecase-title">Service businesses</h3>
             <p class="usecase-text">Keep invoice payments organized and understand which customer balances remain outstanding.</p>
           </div>
 
-          <div class="usecase-card">
+          <div class="usecase-card scroll-build">
             <h3 class="usecase-title">Online businesses</h3>
             <p class="usecase-text">Bring payment notification records into a structured workflow for reviewing customer orders and invoices.</p>
           </div>
 
-          <div class="usecase-card">
+          <div class="usecase-card scroll-build">
             <h3 class="usecase-title">Growing teams</h3>
             <p class="usecase-text">Give authorized team members access to the information and workflows relevant to their responsibilities.</p>
           </div>
@@ -1629,27 +1599,27 @@
         </p>
 
         <div class="security-grid">
-          <div class="sec-card">
+          <div class="sec-card scroll-build">
             <h3 class="sec-card-title">Controlled access</h3>
             <p class="sec-card-text">Business information and actions should only be available to authorized users.</p>
           </div>
 
-          <div class="sec-card">
+          <div class="sec-card scroll-build">
             <h3 class="sec-card-title">Purpose-limited</h3>
             <p class="sec-card-text">Android notification access is intended for authorized payment notifications relevant to business workflows.</p>
           </div>
 
-          <div class="sec-card">
+          <div class="sec-card scroll-build">
             <h3 class="sec-card-title">Traceable actions</h3>
             <p class="sec-card-text">Important reconciliation and administrative actions should have an accountable history.</p>
           </div>
 
-          <div class="sec-card">
+          <div class="sec-card scroll-build">
             <h3 class="sec-card-title">Careful verification</h3>
             <p class="sec-card-text">A payment notification alone is not treated as definitive settlement confirmation.</p>
           </div>
 
-          <div class="sec-card">
+          <div class="sec-card scroll-build">
             <h3 class="sec-card-title">Reliable records</h3>
             <p class="sec-card-text">Transaction evidence and reconciliation decisions should remain distinguishable.</p>
           </div>
@@ -1894,7 +1864,19 @@
 
     kineticElements.forEach(el => kineticObserver.observe(el));
 
-    // 3. Responsive 3D Chrome Spheres Motion Engine
+    
+    // Scroll-Driven Building Animation Observer
+    const buildElements = document.querySelectorAll('.scroll-build');
+    const buildObserver = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('built');
+        }
+      });
+    }, { threshold: 0.18 });
+
+    buildElements.forEach(el => buildObserver.observe(el));
+\n    // 3. Responsive 3D Chrome Spheres Motion Engine
     const s1 = document.getElementById('sphere1');
     const s1Shadow = document.getElementById('sphereShadow1');
     const s2 = document.getElementById('sphere2');
