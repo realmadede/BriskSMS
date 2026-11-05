@@ -72,4 +72,6 @@ Comprehensive engineering specifications, standards, and architecture decisions 
 
 ## License
 
-Proprietary — All rights reserved. Unauthorized copying, distribution, or reproduction of this repository and its contents is strictly prohibited.
+Copyright (c) 2026 BriskSMS Team. All rights reserved. Proprietary and confidential.  
+See [LICENSE](./LICENSE) for terms and conditions. Unauthorized copying, distribution, or reproduction of this repository and its contents is strictly prohibited.
+

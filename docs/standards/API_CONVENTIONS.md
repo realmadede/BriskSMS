@@ -115,3 +115,4 @@ To eliminate floating-point inaccuracies:
 - **All monetary amounts are represented as integers in minor currency units (cents).**
   - E.g., `50,000.00 TZS` is represented as `5000000` (assuming 2 decimal minor units).
 - Field names explicitly indicate units where appropriate (e.g., `amountCents` or `amount` paired with `currency`).
+

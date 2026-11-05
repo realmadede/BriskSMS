@@ -54,3 +54,4 @@
    - Journey 2: Android device pairs -> Relays M-Pesa payment -> Backend parses -> Auto-matches open invoice -> Invoices marked PAID -> Webhook dispatched.
    - Journey 3: Merchant buys bulk SMS credits -> Launches campaign -> Messages queued -> Delivery reports update credit ledger.
 2. **Execution Environment:** E2E tests run automatically in GitHub Actions on every pull request to `main`.
+

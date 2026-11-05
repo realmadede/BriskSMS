@@ -165,3 +165,4 @@ To respect capital constraints while guaranteeing production reliability, the in
   - Managed Redis Cluster (16 GB).
   - Cloudflare Enterprise / Business tier with dedicated WAF rules.
 - **Estimated Monthly Operating Cost:** **$1,800 – $2,500 / month**.
+

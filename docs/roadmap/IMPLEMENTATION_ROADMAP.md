@@ -240,3 +240,4 @@ Phase 9: Security Hardening, Penetration Testing & Production Launch
   - Penetration testing remediations confirmed.
 - **Security Gate:** Formal sign-off on Threat Model, PDPA compliance, and zero critical/high vulnerabilities.
 - **Acceptance Criteria:** Production launch readiness with 99.95% availability SLA.
+

@@ -90,3 +90,4 @@ All outbound webhooks to merchant endpoints are cryptographically signed to prev
    - Brute-force login attempts are blocked using Redis-backed IP/Account rate limiters.
 3. **Breach Notification Protocol:**
    - In accordance with the Tanzania Personal Data Protection Act (PDPA 2022), any confirmed security breach impacting personal data must be escalated to the Data Protection Officer (DPO) and reported to the PDPC within 72 hours.
+

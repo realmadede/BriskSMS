@@ -89,3 +89,4 @@ When an AI agent operates in this repository:
 2. Do not introduce new third-party dependencies without demonstrating a clear engineering need and verifying licensing/maintenance.
 3. Keep documentation in `docs/` synchronised with actual code changes.
 4. Report concrete file changes, executed commands, and test verification results in every turn.
+

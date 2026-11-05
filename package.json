@@ -3,8 +3,8 @@
   "version": "1.0.0",
   "private": true,
   "description": "BriskSMS - Commercial Payment Intelligence, Reconciliation, Business Automation, and Messaging Platform",
-  "author": "realmadede <bagomwaraphael@gmail.com>",
-  "license": "UNLICENSED",
+  "author": "BriskSMS Team",
+  "license": "SEE LICENSE IN LICENSE",
   "workspaces": [
     "apps/*",
     "packages/*"

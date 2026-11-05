@@ -206,3 +206,4 @@ BriskSMS enforces strict role-based access control across organization boundarie
 | **AC-4** | Device Revocation | An API request from a revoked Android device is rejected with HTTP 401 Unauthorized within 1 second of revocation in the dashboard. |
 | **AC-5** | MikroTik Fulfillment | When a payment matching an active MikroTik rule is verified, the worker connects to the RouterOS API and enables the target user; if the router is unreachable, the action enters `FULFILLMENT_PENDING` with retry backoff without canceling payment verification. |
 | **AC-6** | Data Privacy (PDPA) | The Android application strictly discards any incoming SMS that does not originate from an approved provider shortcode/sender before transmitting data to the backend. |
+

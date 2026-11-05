@@ -39,3 +39,4 @@ Before submitting a Pull Request, ensure:
 3. `npm run test` passes with 100% success rate.
 4. If modifying financial or ledger code, corresponding invariant tests are included.
 5. No credentials, tokens, or private environment variables are included in the diff.
+

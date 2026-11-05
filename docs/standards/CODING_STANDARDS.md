@@ -49,3 +49,4 @@
 1. **Prettier:** Enforced via `.prettierrc` (2 spaces, single quotes, trailing commas, 100 character print width).
 2. **ESLint:** Configured with `@typescript-eslint` recommended rules. Unused variables and unresolved promises are treated as errors.
 3. **Git Pre-Commit Hook:** Husky / lint-staged runs linter and formatting checks automatically before commits.
+

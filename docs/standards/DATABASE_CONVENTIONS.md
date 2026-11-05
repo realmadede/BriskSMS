@@ -67,3 +67,4 @@ updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
      3. Release 3: Switch reads to new column.
      4. Release 4: Drop old column.
 3. **Destructive Operations:** Dropping tables or executing destructive data migrations requires explicit technical lead review and a verified database backup snapshot.
+

@@ -100,3 +100,4 @@ The following foundational artifacts are required before starting core business 
 - **Preserved Files:**
   - Local `.git/` folder and Git configuration settings (specifically user identity `realmadede` and SSH commit signing configurations).
   - Newly generated `AGENTS.md` and `README.md`.
+

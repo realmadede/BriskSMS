@@ -203,3 +203,4 @@ Every security-sensitive or financial operation produces an append-only audit ev
 ```
 
 Audit records are strictly read-only and indexed by `organization_id`, `resource_id`, and `created_at`.
+
