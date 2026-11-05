@@ -1,0 +1,17 @@
+{
+  "name": "brisksms-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "BriskSMS - Commercial Payment Intelligence, Reconciliation, Business Automation, and Messaging Platform",
+  "author": "realmadede <bagomwaraphael@gmail.com>",
+  "license": "UNLICENSED",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run --workspaces --if-present build",
+    "lint": "npm run --workspaces --if-present lint",
+    "test": "npm run --workspaces --if-present test"
+  }
+}
