@@ -34,7 +34,9 @@ const server = createServer((req: IncomingMessage, res: ServerResponse) => {
     if (existsSync(HTML_PATH)) {
       res.writeHead(200, {
         'Content-Type': 'text/html; charset=utf-8',
-        'Cache-Control': 'no-cache',
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0',
+        'Pragma': 'no-cache',
+        'Expires': '0',
       });
       res.end(readFileSync(HTML_PATH, 'utf-8'));
       return;
@@ -49,7 +51,9 @@ const server = createServer((req: IncomingMessage, res: ServerResponse) => {
     if (existsSync(DEVELOPERS_PATH)) {
       res.writeHead(200, {
         'Content-Type': 'text/html; charset=utf-8',
-        'Cache-Control': 'no-cache',
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0',
+        'Pragma': 'no-cache',
+        'Expires': '0',
       });
       res.end(readFileSync(DEVELOPERS_PATH, 'utf-8'));
       return;
