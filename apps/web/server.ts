@@ -1,9 +1,18 @@
-import { serve } from 'bun';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 
+// Ambient declaration for Bun HTTP server
+declare const Bun: {
+  serve: (options: {
+    port: number;
+    fetch: (req: Request) => Response | Promise<Response>;
+  }) => { port: number };
+} | undefined;
+
 const PORT = 4200;
-const SRC_DIR = join(import.meta.dir, 'src');
+const SRC_DIR = existsSync(join(process.cwd(), 'apps/web/src'))
+  ? join(process.cwd(), 'apps/web/src')
+  : join(process.cwd(), 'src');
 const HTML_PATH = join(SRC_DIR, 'index.html');
 const DEVELOPERS_PATH = join(SRC_DIR, 'developers.html');
 
@@ -16,9 +25,13 @@ const MIME_TYPES: Record<string, string> = {
   '.json': 'application/json; charset=utf-8',
 };
 
-const server = serve({
+if (typeof Bun === 'undefined') {
+  throw new Error('This development server requires Bun runtime (bun apps/web/server.ts)');
+}
+
+const server = Bun.serve({
   port: PORT,
-  fetch(req) {
+  fetch(req: Request): Response | Promise<Response> {
     const url = new URL(req.url);
     const path = url.pathname;
 
