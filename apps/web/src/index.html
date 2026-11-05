@@ -1844,40 +1844,73 @@
 
     const headlineEl = document.getElementById('heroHeadline');
     const descEl = document.getElementById('heroDescription');
-    
+    const heroStageEl = document.querySelector('.hero-stage');
 
     function switchHero(index) {
-      switcherBtns.forEach((btn, i) => {
-        if (i === index) {
-          btn.classList.add('active');
-        } else {
-          btn.classList.remove('active');
-        }
-      });
+      if (!headlineEl || !descEl) return;
 
+      // Smooth fade-out and slight downward reset
+      headlineEl.classList.remove('revealed');
       headlineEl.style.opacity = '0';
-      descEl.style.opacity = '0';
       headlineEl.style.transform = 'translateY(6px)';
+      descEl.style.opacity = '0';
+      descEl.style.transform = 'translateY(6px)';
 
       setTimeout(() => {
-        // Build progressive kinetic words
+        // Build progressive kinetic words with staggered reveal
         const words = heroData[index].headline.split(' ');
         headlineEl.innerHTML = words.map((w, idx) => 
-          `<span class="kinetic-word" style="transition-delay: ${idx * 55}ms;">${w}</span>`
+          `<span class="kinetic-word" style="transition-delay: ${idx * 45}ms;">${w}</span>`
         ).join(' ');
 
         descEl.textContent = heroData[index].description;
+
+        // Force browser layout reflow to trigger sequential reveal transitions
+        void headlineEl.offsetHeight;
+
+        headlineEl.classList.add('revealed');
         headlineEl.style.opacity = '1';
-        descEl.style.opacity = '1';
         headlineEl.style.transform = 'translateY(0)';
-      }, 180);
+        descEl.style.opacity = '1';
+        descEl.style.transform = 'translateY(0)';
+      }, 200);
     }
 
     let currentHeroIndex = 0;
-    let autoCycle = setInterval(() => {
-      currentHeroIndex = (currentHeroIndex + 1) % heroData.length;
-      switchHero(currentHeroIndex);
-    }, 6500);
+    let autoCycle = null;
+
+    function startHeroCycle() {
+      if (autoCycle) clearInterval(autoCycle);
+      autoCycle = setInterval(() => {
+        currentHeroIndex = (currentHeroIndex + 1) % heroData.length;
+        switchHero(currentHeroIndex);
+      }, 5500);
+    }
+
+    function stopHeroCycle() {
+      if (autoCycle) {
+        clearInterval(autoCycle);
+        autoCycle = null;
+      }
+    }
+
+    // Start auto-rotation
+    startHeroCycle();
+
+    // Pause on hover so users can finish reading comfortably
+    if (heroStageEl) {
+      heroStageEl.addEventListener('mouseenter', stopHeroCycle);
+      heroStageEl.addEventListener('mouseleave', startHeroCycle);
+    }
+
+    // Pause when tab is hidden, resume when visible
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        stopHeroCycle();
+      } else {
+        startHeroCycle();
+      }
+    });
 
 
 
