@@ -1,147 +1,259 @@
 /**
- * BriskSMS Liquid Glass Design System
- * Adapted from Glisse (https://github.com/0kzh/glisse)
- * Apple Liquid Glass aesthetic with hardware-accelerated CSS
+ * BriskSMS Liquid Glass Design System Tokens
+ * Stitch Editorial Warmth + Glisse Optical Refraction
  */
 
-:where(:root, [data-theme="light"]) {
-  --lg-foreground: rgb(0 0 0 / 0.88);
-  --lg-muted: rgb(60 60 67 / 0.6);
-  --lg-glass: rgb(255 255 255 / 0.65);
-  --lg-glass-active: rgb(236 236 240 / 0.85);
-  --lg-edge: rgb(0 0 0 / 0.08);
-  --lg-drop: rgb(0 0 0 / 0.06);
-  --lg-selection: rgb(0 0 0 / 0.1);
-  --lg-surface: rgb(250 250 252 / 0.86);
-  --lg-surface-edge: rgb(0 0 0 / 0.08);
-  --lg-shadow: rgb(25 25 35 / 0.12);
-  --lg-highlight: rgb(60 60 67 / 0.09);
-  --lg-separator: rgb(60 60 67 / 0.15);
-  --lg-destructive: #ff383c;
-  --lg-success: #34c759;
-  --lg-accent: #0088ff;
-  --lg-rim-shine: 0.3;
+:root,
+[data-theme="light"] {
+  /* Canvas & Atmospheric Palette */
+  --brisk-canvas-base: #EAE6DF;
+  --brisk-canvas-deep: #DCD6CB;
+  --brisk-canvas-gradient: linear-gradient(145deg, #EAE6DF 0%, #DCD6CB 100%);
+  
+  /* Glass Material Surfaces */
+  --brisk-surface-glass: rgba(255, 255, 255, 0.65);
+  --brisk-surface-glass-active: rgba(236, 236, 240, 0.85);
+  --brisk-surface-solid: #F5F3EF;
+  --brisk-surface-edge: rgba(18, 18, 18, 0.08);
+
+  /* Action & Accent Colors */
+  --brisk-accent-primary: #C2B28F;
+  --brisk-accent-hover: #B2A27E;
+  --brisk-contrast-pill: #121212;
+
+  /* Typography Colors */
+  --brisk-text-primary: #121212;
+  --brisk-text-secondary: #666666;
+  --brisk-text-tertiary: #8E8A82;
+
+  /* Status Colors */
+  --brisk-status-verified: #2E7D32;
+  --brisk-status-review: #ED6C02;
+  --brisk-status-rejected: #D32F2F;
+
+  /* Optical Glass Parameters */
   --lg-blur: 16px;
-  --lg-ease: cubic-bezier(0.25, 0.1, 0.25, 1);
+  --lg-rim-shine: 0.3;
+  --lg-glass-bend: 0;
+  --lg-rim: none;
+
+  /* Elevations & Radii */
+  --brisk-shadow-diffuse: 0 8px 32px -4px rgba(45, 40, 30, 0.06), 0 1px 2px rgba(45, 40, 30, 0.04);
+  --brisk-shadow-floating: 0 16px 48px -8px rgba(45, 40, 30, 0.12), 0 2px 6px rgba(45, 40, 30, 0.06);
+  --brisk-radius-pill: 9999px;
+  --brisk-radius-card: 18px;
+  --brisk-radius-surface: 24px;
+  --brisk-radius-control: 10px;
+
+  /* Typography */
+  --brisk-font-sans: 'Plus Jakarta Sans', 'Inter Display', -apple-system, BlinkMacSystemFont, sans-serif;
+  --brisk-font-mono: 'JetBrains Mono', monospace;
 }
 
-:where([data-theme="dark"]) {
-  --lg-foreground: rgb(255 255 255);
-  --lg-muted: rgb(235 235 245 / 0.6);
-  --lg-glass: rgb(30 30 34 / 0.65);
-  --lg-glass-active: rgb(60 60 65 / 0.75);
-  --lg-edge: rgb(255 255 255 / 0.12);
-  --lg-drop: transparent;
-  --lg-selection: rgb(255 255 255 / 0.145);
-  --lg-surface: rgb(22 22 25 / 0.86);
-  --lg-surface-edge: rgb(255 255 255 / 0.13);
-  --lg-shadow: rgb(0 0 0 / 0.45);
-  --lg-highlight: rgb(235 235 245 / 0.13);
-  --lg-separator: rgb(235 235 245 / 0.16);
-  --lg-destructive: #ff4245;
-  --lg-success: #30d158;
-  --lg-accent: #0091ff;
-  --lg-rim-shine: 0.15;
+[data-theme="dark"] {
+  --brisk-canvas-base: #141416;
+  --brisk-canvas-deep: #1A1A1E;
+  --brisk-canvas-gradient: linear-gradient(145deg, #141416 0%, #1A1A1E 100%);
+  
+  --brisk-surface-glass: rgba(32, 32, 36, 0.65);
+  --brisk-surface-glass-active: rgba(60, 60, 65, 0.75);
+  --brisk-surface-solid: #1E1E22;
+  --brisk-surface-edge: rgba(255, 255, 255, 0.12);
+
+  --brisk-accent-primary: #D4C5A2;
+  --brisk-accent-hover: #C5B590;
+  --brisk-contrast-pill: #FFFFFF;
+
+  --brisk-text-primary: #FFFFFF;
+  --brisk-text-secondary: #A0A0A8;
+  --brisk-text-tertiary: #6E6E76;
+
+  --brisk-status-verified: #4CAF50;
+  --brisk-status-review: #FF9800;
+  --brisk-status-rejected: #F44336;
+
   --lg-blur: 20px;
+  --lg-rim-shine: 0.15;
+
+  --brisk-shadow-diffuse: 0 8px 32px -4px rgba(0, 0, 0, 0.4);
+  --brisk-shadow-floating: 0 16px 48px -8px rgba(0, 0, 0, 0.6);
 }
 
-@media (prefers-color-scheme: dark) {
-  :where(:root:not([data-theme="light"])) {
-    --lg-foreground: rgb(255 255 255);
-    --lg-muted: rgb(235 235 245 / 0.6);
-    --lg-glass: rgb(30 30 34 / 0.65);
-    --lg-glass-active: rgb(60 60 65 / 0.75);
-    --lg-edge: rgb(255 255 255 / 0.12);
-    --lg-drop: transparent;
-    --lg-selection: rgb(255 255 255 / 0.145);
-    --lg-surface: rgb(22 22 25 / 0.86);
-    --lg-surface-edge: rgb(255 255 255 / 0.13);
-    --lg-shadow: rgb(0 0 0 / 0.45);
-    --lg-highlight: rgb(235 235 245 / 0.13);
-    --lg-separator: rgb(235 235 245 / 0.16);
-    --lg-destructive: #ff4245;
-    --lg-success: #30d158;
-    --lg-accent: #0091ff;
-    --lg-rim-shine: 0.15;
-    --lg-blur: 20px;
-  }
+/* Enclosing Viewport Container Frame (Stitch Reference Frame) */
+.brisk-viewport-frame {
+  min-height: 100vh;
+  background: var(--brisk-canvas-gradient);
+  color: var(--brisk-text-primary);
+  font-family: var(--brisk-font-sans);
+  position: relative;
+  overflow-x: hidden;
 }
 
-/* Base Glass Container */
+/* Base Liquid Glass Component */
 .brisk-glass {
   position: relative;
-  background-color: var(--lg-glass);
+  background-color: var(--brisk-surface-glass);
   background-image: var(--lg-rim, none);
   background-size: 100% 100%;
   -webkit-backdrop-filter: blur(var(--lg-blur)) saturate(1.4);
   backdrop-filter: blur(var(--lg-blur)) saturate(1.4);
   box-shadow:
-    inset 0 0 0 0.5px var(--lg-edge),
-    0 4px 20px -2px var(--lg-shadow);
-  border-radius: 16px;
-  transition: background-color 200ms var(--lg-ease), box-shadow 200ms var(--lg-ease);
+    inset 0 0 0 0.5px var(--brisk-surface-edge),
+    var(--brisk-shadow-diffuse);
+  border-radius: var(--brisk-radius-card);
+  transition: background-color 200ms ease, box-shadow 200ms ease;
 }
 
-/* Glass Card */
-.brisk-glass-card {
-  composes: brisk-glass;
-  padding: 24px;
-}
-
-/* Navigation & Header Glass Bar */
+/* Floating Navigation Header */
 .brisk-glass-nav {
   position: sticky;
   top: 0;
   z-index: 50;
-  background-color: var(--lg-surface);
+  background-color: var(--brisk-surface-glass);
   -webkit-backdrop-filter: blur(24px) saturate(1.5);
   backdrop-filter: blur(24px) saturate(1.5);
-  border-bottom: 0.5px solid var(--lg-surface-edge);
+  border-bottom: 0.5px solid var(--brisk-surface-edge);
 }
 
-/* Liquid Button */
-.brisk-glass-button {
+/* Vertical Micro Navigation Rail (Stitch Reference) */
+.brisk-nav-rail {
+  position: fixed;
+  left: 24px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 12px 8px;
+  border-radius: var(--brisk-radius-pill);
+  background-color: var(--brisk-surface-glass);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  border: 0.5px solid var(--brisk-surface-edge);
+  box-shadow: var(--brisk-shadow-diffuse);
+  z-index: 40;
+}
+
+/* Pill Action Buttons */
+.brisk-pill-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  height: 40px;
-  padding: 0 18px;
-  font-size: 14px;
-  font-weight: 500;
-  border-radius: 10px;
+  height: 44px;
+  padding: 0 24px;
+  font-family: var(--brisk-font-sans);
+  font-size: 15px;
+  font-weight: 600;
+  border-radius: var(--brisk-radius-pill);
   cursor: pointer;
-  background-color: var(--lg-glass);
-  color: var(--lg-foreground);
-  box-shadow: inset 0 0 0 0.5px var(--lg-edge);
-  -webkit-backdrop-filter: blur(12px);
-  backdrop-filter: blur(12px);
-  transition: transform 120ms ease, background-color 150ms ease;
   user-select: none;
   border: none;
+  transition: transform 120ms ease, background-color 150ms ease, box-shadow 150ms ease;
+  text-decoration: none;
 }
 
-.brisk-glass-button:hover {
-  background-color: var(--lg-glass-active);
-}
-
-.brisk-glass-button:active {
+.brisk-pill-button:active {
   transform: scale(0.97);
 }
 
-.brisk-glass-button[data-variant="primary"] {
-  background-color: var(--lg-accent);
-  color: #ffffff;
-  box-shadow: 0 2px 8px -1px rgba(0, 136, 255, 0.4);
+.brisk-pill-button:focus-visible {
+  outline: 2px solid var(--brisk-accent-primary);
+  outline-offset: 2px;
 }
 
-/* Graceful Degradation: Reduced Motion or Low-Power Hardware */
+/* Primary Pill Variant (Warm Ochre) */
+.brisk-pill-button[data-variant="primary"],
+.brisk-pill-button-primary {
+  background-color: var(--brisk-accent-primary);
+  color: var(--brisk-contrast-pill);
+  box-shadow: 0 2px 10px -2px rgba(194, 178, 143, 0.4);
+}
+
+.brisk-pill-button[data-variant="primary"]:hover,
+.brisk-pill-button-primary:hover {
+  background-color: var(--brisk-accent-hover);
+}
+
+/* Contrast Pill Variant (Deep Obsidian) */
+.brisk-pill-button[data-variant="contrast"],
+.brisk-pill-button-contrast {
+  background-color: var(--brisk-contrast-pill);
+  color: #FFFFFF;
+  box-shadow: 0 2px 10px -2px rgba(18, 18, 18, 0.3);
+}
+
+.brisk-pill-button[data-variant="contrast"]:hover,
+.brisk-pill-button-contrast:hover {
+  background-color: #2A2A2A;
+}
+
+/* Glass Pill Variant (Translucent) */
+.brisk-pill-button[data-variant="glass"],
+.brisk-pill-button-glass {
+  background-color: var(--brisk-surface-glass);
+  color: var(--brisk-text-primary);
+  box-shadow: inset 0 0 0 0.5px var(--brisk-surface-edge);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+
+.brisk-pill-button[data-variant="glass"]:hover,
+.brisk-pill-button-glass:hover {
+  background-color: var(--brisk-surface-glass-active);
+}
+
+/* Status Indicator Badges (Non-color dependency) */
+.brisk-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: var(--brisk-radius-pill);
+  box-shadow: inset 0 0 0 0.5px var(--brisk-surface-edge);
+}
+
+.brisk-status-badge[data-status="verified"] {
+  background-color: rgba(46, 125, 50, 0.12);
+  color: var(--brisk-status-verified);
+}
+
+.brisk-status-badge[data-status="review"] {
+  background-color: rgba(237, 108, 2, 0.12);
+  color: var(--brisk-status-review);
+}
+
+.brisk-status-badge[data-status="rejected"] {
+  background-color: rgba(211, 47, 47, 0.12);
+  color: var(--brisk-status-rejected);
+}
+
+/* Responsive & Accessibility Overrides */
 @media (prefers-reduced-motion: reduce) {
-  .brisk-glass,
-  .brisk-glass-card,
-  .brisk-glass-button {
-    transition: none !important;
-    animation: none !important;
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
   }
 }
 
+@media (prefers-reduced-transparency: reduce) {
+  .brisk-glass,
+  .brisk-glass-nav,
+  .brisk-nav-rail {
+    background-color: var(--brisk-surface-solid) !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+}
+
+/* Mobile responsive collapse for left rail */
+@media (max-width: 768px) {
+  .brisk-nav-rail {
+    display: none;
+  }
+}

@@ -143,3 +143,4 @@ When an AI agent operates in this repository:
 2. Do not introduce new third-party dependencies without demonstrating a clear engineering need and verifying licensing/maintenance.
 3. Keep documentation in `docs/` synchronised with actual code changes.
 4. Report concrete file changes, executed commands, and test verification results in every turn.
+5. **Design System Governance:** Before creating, editing, or styling any UI component (Angular or Jetpack Compose), consult `docs/skills/brisksms-design/SKILL.md`. Adhere to the Stitch warm palette, geometric typography, and performance-guarded Liquid Glass guidelines. Never introduce raw unapproved colors or unvetted UI frameworks.

@@ -48,3 +48,29 @@ export function generateRimMap(
   return { columns, rows, data };
 }
 
+/**
+ * Converts RimMapData into an optimized CSS data URL via offscreen canvas
+ */
+export function generateRimDataUrl(shape: LensShape, shine: number, density: number): string | null {
+  if (typeof document === 'undefined') {
+    return null;
+  }
+
+  const rim = generateRimMap(shape, shine, density);
+  if (rim.columns <= 0 || rim.rows <= 0) {
+    return null;
+  }
+
+  const canvas = document.createElement('canvas');
+  canvas.width = rim.columns;
+  canvas.height = rim.rows;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    return null;
+  }
+
+  const imageData = new ImageData(rim.data, rim.columns, rim.rows);
+  ctx.putImageData(imageData, 0, 0);
+
+  return canvas.toDataURL('image/png');
+}

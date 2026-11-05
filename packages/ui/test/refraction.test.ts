@@ -4,6 +4,7 @@ import {
   distanceToRoundedRect,
   calculateDisplacementScale,
   generateRimMap,
+  generateRimDataUrl,
   RefractionManager,
 } from '../src/index.js';
 
@@ -13,15 +14,12 @@ describe('UI Refraction & Liquid Glass Engine', () => {
     const halfHeight = 50;
     const radius = 10;
 
-    // Center point (0, 0) should be deeply inside (negative distance)
     const centerDist = distanceToRoundedRect(0, 0, halfWidth, halfHeight, radius);
     assert.ok(centerDist < 0);
 
-    // Exact edge (100, 0) should be on boundary (distance ~ 0)
     const edgeDist = distanceToRoundedRect(100, 0, halfWidth, halfHeight, radius);
     assert.equal(Math.round(edgeDist), 0);
 
-    // Outside point (110, 0) should have positive distance ~ 10
     const outsideDist = distanceToRoundedRect(110, 0, halfWidth, halfHeight, radius);
     assert.equal(Math.round(outsideDist), 10);
   });
@@ -32,7 +30,6 @@ describe('UI Refraction & Liquid Glass Engine', () => {
 
     assert.equal(typeof scale, 'number');
     assert.ok(scale > 0);
-    // minDimension = 200, strength = 0.45, scale = 200 * 0.45 * 0.5 = 45
     assert.equal(scale, 45);
   });
 
@@ -43,15 +40,19 @@ describe('UI Refraction & Liquid Glass Engine', () => {
     assert.equal(rim.columns, 100);
     assert.equal(rim.rows, 50);
     assert.equal(rim.data.length, 100 * 50 * 4);
-    // Ensure data buffer is populated
     assert.ok(rim.data instanceof Uint8ClampedArray);
   });
 
-  it('should instantiate RefractionManager with safe graceful degradation', () => {
+  it('should safely return null for rim data URL in headless environment', () => {
+    const shape = { width: 100, height: 50, radius: 12 };
+    const dataUrl = generateRimDataUrl(shape, 0.3, 1);
+    // In node/bun test environment without window/document, returns null safely
+    assert.equal(dataUrl, null);
+  });
+
+  it('should instantiate RefractionManager with safe capability fallback', () => {
     const manager = new RefractionManager();
     assert.ok(manager);
-    // In headless Node/Bun environment without window, should safely default
     assert.equal(manager.detectHardwareCapability(), false);
   });
 });
-
