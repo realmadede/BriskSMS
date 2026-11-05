@@ -370,6 +370,97 @@
       box-shadow: 0 18px 40px -10px rgba(20, 18, 14, 0.1);
     }
 
+    /* 3.1 QUICKSTART GUIDE */
+    .quickstart-lang-bar {
+      margin-top: 2rem;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .qs-lang-btn {
+      background: #FFFFFF;
+      border: 1px solid rgba(11, 10, 9, 0.12);
+      color: var(--text-sub);
+      padding: 6px 18px;
+      border-radius: 9999px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.18s ease;
+    }
+
+    .qs-lang-btn.active, .qs-lang-btn:hover {
+      background: var(--color-dark-surface);
+      color: #C6B480;
+      border-color: #0B0A09;
+    }
+
+    .quickstart-steps-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1.5rem;
+      margin-top: 2rem;
+    }
+
+    .qs-step-card {
+      background: #FFFFFF;
+      border: 1px solid rgba(11, 10, 9, 0.06);
+      border-radius: 24px;
+      padding: 28px;
+      box-shadow: 0 12px 32px -8px rgba(20, 18, 14, 0.05);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .qs-step-card:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 18px 40px -10px rgba(20, 18, 14, 0.1);
+    }
+
+    .qs-step-num {
+      width: 28px;
+      height: 28px;
+      border-radius: 9999px;
+      background: #0B0A09;
+      color: #C6B480;
+      font-size: 12px;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 1.25rem;
+    }
+
+    .qs-step-title {
+      font-size: 1.1rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+      letter-spacing: -0.02em;
+      color: var(--text-main);
+    }
+
+    .qs-step-desc {
+      font-size: 0.875rem;
+      color: var(--text-sub);
+      line-height: 1.55;
+      margin-bottom: 1.25rem;
+    }
+
+    .qs-code-box {
+      background: #0B0A09;
+      color: #F4F1EA;
+      padding: 14px 16px;
+      border-radius: 14px;
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      overflow-x: auto;
+      line-height: 1.55;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
     .cap-icon-box {
       width: 48px;
       height: 48px;
@@ -467,6 +558,7 @@
       background: rgba(255, 255, 255, 0.06);
       padding: 4px;
       border-radius: 9999px;
+      flex-wrap: wrap;
     }
 
     .lang-btn {
@@ -701,6 +793,7 @@
       .hero-bezel-card { padding: 24px 16px; min-height: 480px; }
       .section-title { font-size: 1.65rem; }
       .cap-grid { grid-template-columns: 1fr; }
+      .quickstart-steps-grid { grid-template-columns: 1fr; }
       .terminal-body { grid-template-columns: 1fr; }
       .terminal-header { flex-direction: column; align-items: flex-start; }
       .footer-grid { grid-template-columns: 1fr; }
@@ -712,6 +805,7 @@
       .container { padding: 0 1.25rem; }
       .hero-bezel-card { padding: 32px 20px; }
       .cap-grid { grid-template-columns: 1fr; }
+      .quickstart-steps-grid { grid-template-columns: 1fr; }
       .terminal-body { grid-template-columns: 1fr; }
       .code-panel { border-right: none; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
       .footer-grid { grid-template-columns: 1fr; }
@@ -721,6 +815,7 @@
     @media (min-width: 641px) and (max-width: 1024px) {
       /* Foldable Unfolded & Tablets */
       .cap-grid { grid-template-columns: 1fr 1fr; }
+      .quickstart-steps-grid { grid-template-columns: 1fr; }
       .terminal-body { grid-template-columns: 1fr; }
       .footer-grid { grid-template-columns: 1fr 1fr; }
     }
@@ -803,6 +898,30 @@
       </div>
     </section>
 
+    <!-- 2.5 QUICKSTART GUIDE -->
+    <section class="section-padding" id="quickstart" style="border-top: 1px solid rgba(11, 10, 9, 0.06);">
+      <div class="container">
+        <span class="eyebrow">FAST INTEGRATION</span>
+        <h2 class="section-title">3-minute backend quickstart.</h2>
+        <p class="section-desc">Choose your backend environment to initialize BriskSMS and start reconciling payments immediately.</p>
+
+        <!-- Quickstart Lang Pills -->
+        <div class="quickstart-lang-bar">
+          <button class="qs-lang-btn active" onclick="setQsLang('node', this)">Node.js</button>
+          <button class="qs-lang-btn" onclick="setQsLang('ts', this)">TypeScript</button>
+          <button class="qs-lang-btn" onclick="setQsLang('python', this)">Python</button>
+          <button class="qs-lang-btn" onclick="setQsLang('go', this)">Go</button>
+          <button class="qs-lang-btn" onclick="setQsLang('php', this)">PHP</button>
+          <button class="qs-lang-btn" onclick="setQsLang('java', this)">Java</button>
+          <button class="qs-lang-btn" onclick="setQsLang('csharp', this)">C# (.NET)</button>
+        </div>
+
+        <div class="quickstart-steps-grid" id="qsSteps">
+          <!-- Dynamically populated via setQsLang -->
+        </div>
+      </div>
+    </section>
+
     <!-- 3. PLATFORM CAPABILITIES -->
     <section class="section-padding" id="capabilities">
       <div class="container">
@@ -866,16 +985,21 @@
             </div>
 
             <div class="endpoint-tabs">
-              <button class="ep-btn active" onclick="setEndpoint('ingest')">POST /v1/payments/ingest</button>
-              <button class="ep-btn" onclick="setEndpoint('match')">POST /v1/reconcile/match</button>
-              <button class="ep-btn" onclick="setEndpoint('dispatch')">POST /v1/messages/send-bulk</button>
-              <button class="ep-btn" onclick="setEndpoint('device')">GET /v1/devices/status</button>
+              <button class="ep-btn active" onclick="setEndpoint('ingest', this)">POST /v1/payments/ingest</button>
+              <button class="ep-btn" onclick="setEndpoint('match', this)">POST /v1/reconcile/match</button>
+              <button class="ep-btn" onclick="setEndpoint('dispatch', this)">POST /v1/messages/send-bulk</button>
+              <button class="ep-btn" onclick="setEndpoint('device', this)">GET /v1/devices/status</button>
             </div>
 
             <div class="lang-tabs">
-              <button class="lang-btn active" onclick="setLang('curl')">cURL</button>
-              <button class="lang-btn" onclick="setLang('ts')">TypeScript</button>
-              <button class="lang-btn" onclick="setLang('python')">Python</button>
+              <button class="lang-btn active" onclick="setLang('curl', this)">cURL</button>
+              <button class="lang-btn" onclick="setLang('node', this)">Node.js</button>
+              <button class="lang-btn" onclick="setLang('ts', this)">TypeScript</button>
+              <button class="lang-btn" onclick="setLang('python', this)">Python</button>
+              <button class="lang-btn" onclick="setLang('go', this)">Go</button>
+              <button class="lang-btn" onclick="setLang('php', this)">PHP</button>
+              <button class="lang-btn" onclick="setLang('java', this)">Java</button>
+              <button class="lang-btn" onclick="setLang('csharp', this)">C# (.NET)</button>
             </div>
           </div>
 
@@ -1003,34 +1127,66 @@
 
         <div class="cap-grid" style="margin-top: 2.5rem;">
           <div class="cap-card">
-            <h3 class="cap-title">Node &amp; TypeScript</h3>
-            <p class="cap-desc" style="margin-bottom: 1rem;">Full TypeScript definitions with strict Zod validation.</p>
-            <div style="background: var(--bg-canvas); padding: 8px 12px; border-radius: 8px; font-family: var(--font-mono); font-size: 11px;">
+            <h3 class="cap-title">Node.js (CommonJS &amp; ESM)</h3>
+            <p class="cap-desc" style="margin-bottom: 1rem;">Fast asynchronous backend SDK with full event streaming and Promise support.</p>
+            <div style="background: var(--bg-canvas); padding: 8px 12px; border-radius: 9999px; font-family: var(--font-mono); font-size: 11px;">
               npm i @brisksms/sdk
             </div>
           </div>
 
           <div class="cap-card">
-            <h3 class="cap-title">Python (AsyncIO)</h3>
-            <p class="cap-desc" style="margin-bottom: 1rem;">Built for FastAPI, Django, and Celery pipelines.</p>
-            <div style="background: var(--bg-canvas); padding: 8px 12px; border-radius: 8px; font-family: var(--font-mono); font-size: 11px;">
+            <h3 class="cap-title">TypeScript &amp; Bun</h3>
+            <p class="cap-desc" style="margin-bottom: 1rem;">Full TypeScript definitions with strict runtime Zod validation and auto-complete.</p>
+            <div style="background: var(--bg-canvas); padding: 8px 12px; border-radius: 9999px; font-family: var(--font-mono); font-size: 11px;">
+              bun add @brisksms/sdk
+            </div>
+          </div>
+
+          <div class="cap-card">
+            <h3 class="cap-title">Python (AsyncIO &amp; Sync)</h3>
+            <p class="cap-desc" style="margin-bottom: 1rem;">Built for FastAPI, Django, Flask, and Celery asynchronous background queues.</p>
+            <div style="background: var(--bg-canvas); padding: 8px 12px; border-radius: 9999px; font-family: var(--font-mono); font-size: 11px;">
               pip install brisksms
             </div>
           </div>
 
           <div class="cap-card">
             <h3 class="cap-title">Go (Golang)</h3>
-            <p class="cap-desc" style="margin-bottom: 1rem;">Lightweight, zero-alloc client for high-load services.</p>
-            <div style="background: var(--bg-canvas); padding: 8px 12px; border-radius: 8px; font-family: var(--font-mono); font-size: 11px;">
+            <p class="cap-desc" style="margin-bottom: 1rem;">Lightweight, zero-allocation client built for concurrent telecom microservices.</p>
+            <div style="background: var(--bg-canvas); padding: 8px 12px; border-radius: 9999px; font-family: var(--font-mono); font-size: 11px;">
               go get github.com/brisksms/sdk-go
             </div>
           </div>
 
           <div class="cap-card">
             <h3 class="cap-title">PHP &amp; Laravel</h3>
-            <p class="cap-desc" style="margin-bottom: 1rem;">Driver for WHMCS, WooCommerce, and Laravel cashier.</p>
-            <div style="background: var(--bg-canvas); padding: 8px 12px; border-radius: 8px; font-family: var(--font-mono); font-size: 11px;">
+            <p class="cap-desc" style="margin-bottom: 1rem;">Official billing driver for WHMCS, WooCommerce, and Laravel Cashier integrations.</p>
+            <div style="background: var(--bg-canvas); padding: 8px 12px; border-radius: 9999px; font-family: var(--font-mono); font-size: 11px;">
               composer require brisksms/sdk
+            </div>
+          </div>
+
+          <div class="cap-card">
+            <h3 class="cap-title">Java &amp; Spring Boot</h3>
+            <p class="cap-desc" style="margin-bottom: 1rem;">Production client for enterprise banking engines, Maven, and Gradle pipelines.</p>
+            <div style="background: var(--bg-canvas); padding: 8px 12px; border-radius: 9999px; font-family: var(--font-mono); font-size: 11px;">
+              implementation 'com.brisksms:sdk:1.2.0'
+            </div>
+          </div>
+
+          <div class="cap-card">
+            <h3 class="cap-title">C# &amp; .NET 8</h3>
+            <p class="cap-desc" style="margin-bottom: 1rem;">Strongly typed async library for ASP.NET Core Web APIs and cloud workers.</p>
+            <div style="background: var(--bg-canvas); padding: 8px 12px; border-radius: 9999px; font-family: var(--font-mono); font-size: 11px;">
+              dotnet add package BriskSMS.Sdk
+            </div>
+          </div>
+
+          <div class="cap-card">
+            <h3 class="cap-title">Ruby &amp; Rails</h3>
+            <p class="cap-desc" style="margin-bottom: 1rem;">Native Gem with Sidekiq background jobs and automated webhook HMAC verification.</p>
+            <div style="background: var(--bg-canvas); padding: 8px 12px; border-radius: 9999px; font-family: var(--font-mono); font-size: 11px;">
+              bundle add brisksms
             </div>
           </div>
         </div>
@@ -1098,27 +1254,46 @@
     // 1. API Playground Data
     const endpointsData = {
       ingest: {
-        curl: `curl -X POST https://api.brisksms.com/v1/payments/ingest \
-  -H "Authorization: Bearer brk_live_9488291048291" \
-  -H "Content-Type: application/json" \
+        curl: `curl -X POST https://api.brisksms.com/v1/payments/ingest \\
+  -H "Authorization: Bearer brk_live_9488291048291" \\
+  -H "Content-Type: application/json" \\
   -d '{
     "deviceId": "dev_s23_relay_01",
     "provider": "MPESA_TZ",
     "rawPayload": "09B8291M Confirmed. Tsh 150,000 received from AMANI MTEMI 255754000111 on 05/11/2026 14:22. Ref: INV-8829",
     "receivedAt": "2026-11-05T14:22:18Z"
   }'`,
-        ts: `import { BriskClient } from "@brisksms/sdk";
+        node: `const { BriskClient } = require("@brisksms/sdk");
 
-const client = new BriskClient({ apiKey: process.env.BRISKSMS_API_KEY });
+const client = new BriskClient({
+  apiKey: process.env.BRISKSMS_API_KEY
+});
 
-const result = await client.payments.ingestRaw({
+async function ingestPayment() {
+  const result = await client.payments.ingest({
+    deviceId: "dev_s23_relay_01",
+    provider: "MPESA_TZ",
+    rawPayload: "09B8291M Confirmed. Tsh 150,000 received from AMANI MTEMI 255754000111 on 05/11/2026 14:22. Ref: INV-8829",
+    receivedAt: new Date().toISOString()
+  });
+
+  console.log("Settlement ID: " + result.paymentId);
+  console.log("Deduplication Hash: " + result.deterministicHash);
+}
+
+ingestPayment();`,
+        ts: `import { BriskClient, type PaymentIngestResult } from "@brisksms/sdk";
+
+const client = new BriskClient({ apiKey: process.env.BRISKSMS_API_KEY! });
+
+const result: PaymentIngestResult = await client.payments.ingestRaw({
   deviceId: "dev_s23_relay_01",
   provider: "MPESA_TZ",
   rawPayload: "09B8291M Confirmed. Tsh 150,000 received from AMANI MTEMI...",
   receivedAt: new Date()
 });
 
-console.log("Ingested payment:", result.paymentId, result.deterministicHash);`,
+console.log("Payment State: " + result.state);`,
         python: `from brisksms import BriskClient
 
 client = BriskClient(api_key="brk_live_9488291048291")
@@ -1129,7 +1304,75 @@ response = await client.payments.ingest(
     raw_payload="09B8291M Confirmed. Tsh 150,000 received...",
     received_at="2026-11-05T14:22:18Z"
 )
-print("Settlement status:", response.status)`,
+print("Settlement status: " + response.status)`,
+        go: `package main
+
+import (
+    "context"
+    "fmt"
+    "github.com/brisksms/sdk-go"
+)
+
+func main() {
+    client := brisksms.NewClient("brk_live_9488291048291")
+
+    payment, err := client.Payments.Ingest(context.Background(), &brisksms.IngestParams{
+        DeviceId:   "dev_s23_relay_01",
+        Provider:   "MPESA_TZ",
+        RawPayload: "09B8291M Confirmed. Tsh 150,000 received from AMANI MTEMI...",
+        ReceivedAt: "2026-11-05T14:22:18Z",
+    })
+    if err != nil {
+        panic(err)
+    }
+    fmt.Printf("Payment ID: %s, State: %s\\n", payment.ID, payment.State)
+}`,
+        php: `<?php
+use BriskSMS\\BriskClient;
+
+$client = new BriskClient(['api_key' => getenv('BRISKSMS_API_KEY')]);
+
+$payment = $client->payments->ingest([
+    'deviceId'   => 'dev_s23_relay_01',
+    'provider'   => 'MPESA_TZ',
+    'rawPayload' => '09B8291M Confirmed. Tsh 150,000 received from AMANI MTEMI...',
+    'receivedAt' => date(DATE_ATOM)
+]);
+
+echo "Payment: " . $payment->paymentId . " | Status: " . $payment->state;`,
+        java: `import com.brisksms.BriskClient;
+import com.brisksms.model.PaymentIngestRequest;
+import com.brisksms.model.PaymentRecord;
+
+public class PaymentService {
+    public static void main(String[] args) {
+        BriskClient client = BriskClient.withApiKey(System.getenv("BRISKSMS_API_KEY"));
+
+        PaymentRecord record = client.payments().ingest(
+            PaymentIngestRequest.builder()
+                .deviceId("dev_s23_relay_01")
+                .provider("MPESA_TZ")
+                .rawPayload("09B8291M Confirmed. Tsh 150,000 received...")
+                .build()
+        );
+
+        System.out.println("Ingested Payment: " + record.getPaymentId());
+    }
+}`,
+        csharp: `using BriskSMS;
+using BriskSMS.Models;
+
+var client = new BriskClient(Environment.GetEnvironmentVariable("BRISKSMS_API_KEY"));
+
+var payment = await client.Payments.IngestAsync(new IngestPaymentRequest
+{
+    DeviceId = "dev_s23_relay_01",
+    Provider = "MPESA_TZ",
+    RawPayload = "09B8291M Confirmed. Tsh 150,000 received from AMANI MTEMI...",
+    ReceivedAt = DateTime.UtcNow
+});
+
+Console.WriteLine("Settlement ID: " + payment.PaymentId + ", Status: " + payment.State);`,
         response: `{
   "status": "INGESTED",
   "paymentId": "pay_984920194829",
@@ -1146,14 +1389,30 @@ print("Settlement status:", response.status)`,
 }`
       },
       match: {
-        curl: `curl -X POST https://api.brisksms.com/v1/reconcile/match \
-  -H "Authorization: Bearer brk_live_9488291048291" \
-  -H "Content-Type: application/json" \
+        curl: `curl -X POST https://api.brisksms.com/v1/reconcile/match \\
+  -H "Authorization: Bearer brk_live_9488291048291" \\
+  -H "Content-Type: application/json" \\
   -d '{
     "invoiceId": "inv_8829_whmcs",
     "expectedAmountMinor": 15000000,
     "paymentId": "pay_984920194829"
   }'`,
+        node: `const { BriskClient } = require("@brisksms/sdk");
+const client = new BriskClient({ apiKey: process.env.BRISKSMS_API_KEY });
+
+async function matchInvoice() {
+  const match = await client.reconcile.matchInvoice({
+    invoiceId: "inv_8829_whmcs",
+    expectedAmountMinor: 15000000,
+    paymentId: "pay_984920194829"
+  });
+
+  if (match.matchType === "EXACT_MATCH") {
+    console.log("Invoice " + match.invoiceId + " settled!");
+  }
+}
+
+matchInvoice();`,
         ts: `const match = await client.reconcile.matchInvoice({
   invoiceId: "inv_8829_whmcs",
   expectedAmountMinor: 15000000,
@@ -1164,6 +1423,29 @@ print("Settlement status:", response.status)`,
     expected_amount_minor=15000000,
     payment_id="pay_984920194829"
 )`,
+        go: `match, err := client.Reconcile.MatchInvoice(ctx, &brisksms.MatchParams{
+    InvoiceID:           "inv_8829_whmcs",
+    ExpectedAmountMinor: 15000000,
+    PaymentID:           "pay_984920194829",
+})`,
+        php: `$match = $client->reconcile->matchInvoice([
+    'invoiceId'           => 'inv_8829_whmcs',
+    'expectedAmountMinor' => 15000000,
+    'paymentId'           => 'pay_984920194829'
+]);`,
+        java: `ReconciliationResult match = client.reconcile().matchInvoice(
+    MatchInvoiceRequest.builder()
+        .invoiceId("inv_8829_whmcs")
+        .expectedAmountMinor(15000000L)
+        .paymentId("pay_984920194829")
+        .build()
+);`,
+        csharp: `var match = await client.Reconcile.MatchInvoiceAsync(new MatchInvoiceRequest
+{
+    InvoiceId = "inv_8829_whmcs",
+    ExpectedAmountMinor = 15000000,
+    PaymentId = "pay_984920194829"
+});`,
         response: `{
   "reconciliationId": "rec_77492018",
   "invoiceId": "inv_8829_whmcs",
@@ -1175,14 +1457,28 @@ print("Settlement status:", response.status)`,
 }`
       },
       dispatch: {
-        curl: `curl -X POST https://api.brisksms.com/v1/messages/send-bulk \
-  -H "Authorization: Bearer brk_live_9488291048291" \
-  -H "Content-Type: application/json" \
+        curl: `curl -X POST https://api.brisksms.com/v1/messages/send-bulk \\
+  -H "Authorization: Bearer brk_live_9488291048291" \\
+  -H "Content-Type: application/json" \\
   -d '{
     "senderId": "BRISKSMS",
     "recipients": ["+255754000111", "+255713999222"],
     "message": "Habari Juma! Order #4829 dispatched. Pickup code: 8829."
   }'`,
+        node: `const { BriskClient } = require("@brisksms/sdk");
+const client = new BriskClient({ apiKey: process.env.BRISKSMS_API_KEY });
+
+async function sendBulk() {
+  const campaign = await client.messages.sendBulk({
+    senderId: "BRISKSMS",
+    recipients: ["+255754000111", "+255713999222"],
+    message: "Habari Juma! Order #4829 dispatched. Pickup code: 8829."
+  });
+
+  console.log("Queued messages: " + campaign.queued + ", Campaign: " + campaign.campaignId);
+}
+
+sendBulk();`,
         ts: `const campaign = await client.messages.sendBulk({
   senderId: "BRISKSMS",
   recipients: ["+255754000111", "+255713999222"],
@@ -1193,6 +1489,29 @@ print("Settlement status:", response.status)`,
     recipients=["+255754000111", "+255713999222"],
     message="Habari Juma! Order #4829 dispatched. Pickup code: 8829."
 )`,
+        go: `campaign, err := client.Messages.SendBulk(ctx, &brisksms.BulkParams{
+    SenderID:   "BRISKSMS",
+    Recipients: []string{"+255754000111", "+255713999222"},
+    Message:    "Habari Juma! Order #4829 dispatched. Pickup code: 8829.",
+})`,
+        php: `$campaign = $client->messages->sendBulk([
+    'senderId'   => 'BRISKSMS',
+    'recipients' => ['+255754000111', '+255713999222'],
+    'message'    => 'Habari Juma! Order #4829 dispatched. Pickup code: 8829.'
+]);`,
+        java: `CampaignResponse campaign = client.messages().sendBulk(
+    SendBulkRequest.builder()
+        .senderId("BRISKSMS")
+        .recipients(List.of("+255754000111", "+255713999222"))
+        .message("Habari Juma! Order #4829 dispatched. Pickup code: 8829.")
+        .build()
+);`,
+        csharp: `var campaign = await client.Messages.SendBulkAsync(new SendBulkRequest
+{
+    SenderId = "BRISKSMS",
+    Recipients = new[] { "+255754000111", "+255713999222" },
+    Message = "Habari Juma! Order #4829 dispatched. Pickup code: 8829."
+});`,
         response: `{
   "campaignId": "cmp_8829401",
   "queued": 2,
@@ -1203,10 +1522,25 @@ print("Settlement status:", response.status)`,
 }`
       },
       device: {
-        curl: `curl -X GET https://api.brisksms.com/v1/devices/status \
+        curl: `curl -X GET https://api.brisksms.com/v1/devices/status \\
   -H "Authorization: Bearer brk_live_9488291048291"`,
+        node: `const { BriskClient } = require("@brisksms/sdk");
+const client = new BriskClient({ apiKey: process.env.BRISKSMS_API_KEY });
+
+async function checkRelays() {
+  const devices = await client.devices.listStatus();
+  devices.forEach(dev => {
+    console.log("Relay: " + dev.model + " | Battery: " + dev.battery + "% | State: " + dev.state);
+  });
+}
+
+checkRelays();`,
         ts: `const devices = await client.devices.listStatus();`,
         python: `devices = await client.devices.get_status()`,
+        go: `devices, err := client.Devices.GetStatus(ctx)`,
+        php: `$devices = $client->devices->listStatus();`,
+        java: `DeviceListResponse devices = client.devices().listStatus();`,
+        csharp: `var devices = await client.Devices.ListStatusAsync();`,
         response: `{
   "devices": [
     {
@@ -1224,30 +1558,201 @@ print("Settlement status:", response.status)`,
       }
     };
 
+    // 1.5 Quickstart Interactive Data
+    const qsData = {
+      node: {
+        step1: {
+          title: "1. Install Node.js Package",
+          desc: "Install the official BriskSMS SDK via npm, yarn, or pnpm into your Node.js backend.",
+          code: "npm install @brisksms/sdk"
+        },
+        step2: {
+          title: "2. Initialize with Secret Key",
+          desc: "Import BriskClient and configure your live secret key from the Developer Settings.",
+          code: `const { BriskClient } = require("@brisksms/sdk");\nconst client = new BriskClient({ apiKey: process.env.BRISKSMS_API_KEY });`
+        },
+        step3: {
+          title: "3. Ingest or Dispatch",
+          desc: "Trigger deterministic payment matching or send instant branded SMS campaigns.",
+          code: `const payment = await client.payments.ingest({ ... });\nconsole.log("Settlement ID: " + payment.paymentId);`
+        }
+      },
+      ts: {
+        step1: {
+          title: "1. Install TypeScript SDK",
+          desc: "Full TypeScript declarations with strict Zod runtime validation and auto-complete.",
+          code: "npm i @brisksms/sdk zod"
+        },
+        step2: {
+          title: "2. Strongly Typed Client",
+          desc: "Import client and interfaces for compile-time safety across all endpoints.",
+          code: `import { BriskClient } from "@brisksms/sdk";\nconst client = new BriskClient({ apiKey: process.env.BRISKSMS_API_KEY! });`
+        },
+        step3: {
+          title: "3. Execute Typed Call",
+          desc: "Match invoice with automatic schema verification and error recovery.",
+          code: `const match = await client.reconcile.matchInvoice({ invoiceId: "INV-8829", expectedAmountMinor: 15000000 });`
+        }
+      },
+      python: {
+        step1: {
+          title: "1. Install via Pip",
+          desc: "Supports Python 3.9+ with full AsyncIO support for FastAPI, Django, and Celery.",
+          code: "pip install brisksms"
+        },
+        step2: {
+          title: "2. Initialize BriskClient",
+          desc: "Load secret credentials and set up the asynchronous connection pool.",
+          code: `from brisksms import BriskClient\nclient = BriskClient(api_key=os.environ["BRISKSMS_API_KEY"])`
+        },
+        step3: {
+          title: "3. Dispatch Async Request",
+          desc: "Send bulk SMS or query carrier relay status asynchronously.",
+          code: `res = await client.messages.send_bulk(sender_id="BRISKSMS", recipients=["+255754000111"], message="Code: 8829")`
+        }
+      },
+      go: {
+        step1: {
+          title: "1. Add Go Module",
+          desc: "Lightweight, zero-allocation Go client for high-throughput telecom microservices.",
+          code: "go get github.com/brisksms/sdk-go"
+        },
+        step2: {
+          title: "2. Create Go Client",
+          desc: "Initialize client with contextual timeout and HTTP connection reuse.",
+          code: `import "github.com/brisksms/sdk-go"\nclient := brisksms.NewClient(os.Getenv("BRISKSMS_API_KEY"))`
+        },
+        step3: {
+          title: "3. Execute with Context",
+          desc: "Ingest carrier payment notifications with strict deduplication check.",
+          code: `res, err := client.Payments.Ingest(ctx, &brisksms.IngestParams{ ... })`
+        }
+      },
+      php: {
+        step1: {
+          title: "1. Install via Composer",
+          desc: "Integrates directly with Laravel, WHMCS, WooCommerce, and pure PHP 8.1+.",
+          code: "composer require brisksms/sdk"
+        },
+        step2: {
+          title: "2. Configure in PHP",
+          desc: "Initialize the client or register the service provider in Laravel config/app.php.",
+          code: `use BriskSMS\\BriskClient;\n$client = new BriskClient(['api_key' => env('BRISKSMS_API_KEY')]);`
+        },
+        step3: {
+          title: "3. Settle Invoices",
+          desc: "Automatically reconcile M-Pesa till receipts against WHMCS invoices.",
+          code: `$match = $client->reconcile->matchInvoice(['invoiceId' => 'INV-8829', 'paymentId' => 'pay_123']);`
+        }
+      },
+      java: {
+        step1: {
+          title: "1. Add Maven / Gradle",
+          desc: "Enterprise client for Java 17+, Spring Boot 3, and Kotlin microservices.",
+          code: `// build.gradle\nimplementation 'com.brisksms:sdk:1.2.0'`
+        },
+        step2: {
+          title: "2. Inject Spring Bean",
+          desc: "Configure BriskClient as a Spring @Bean or standalone thread-safe singleton.",
+          code: `@Bean\npublic BriskClient briskClient() {\n    return BriskClient.withApiKey(System.getenv("BRISKSMS_API_KEY"));\n}`
+        },
+        step3: {
+          title: "3. Ingest Payment Record",
+          desc: "Process mobile money push alerts and emit internal Spring Domain Events.",
+          code: `PaymentRecord record = briskClient.payments().ingest(request);`
+        }
+      },
+      csharp: {
+        step1: {
+          title: "1. Install NuGet Package",
+          desc: "Async-first client for .NET 8 / .NET 9 ASP.NET Core web APIs and console workers.",
+          code: "dotnet add package BriskSMS.Sdk"
+        },
+        step2: {
+          title: "2. Register DI Services",
+          desc: "Register in Program.cs using builder.Services.AddBriskSms(apiKey).",
+          code: `builder.Services.AddBriskSms(options => {\n    options.ApiKey = builder.Configuration["BriskSMS:ApiKey"];\n});`
+        },
+        step3: {
+          title: "3. Await Settlement",
+          desc: "Strongly typed async methods with automatic exponential retry policy.",
+          code: `var match = await _briskClient.Reconcile.MatchInvoiceAsync(request);`
+        }
+      }
+    };
+
     let activeEndpoint = "ingest";
     let activeLang = "curl";
+    let activeQsLang = "node";
 
     function updatePlayground() {
       const reqEl = document.getElementById("reqCode");
       const respEl = document.getElementById("respCode");
       const data = endpointsData[activeEndpoint];
 
-      reqEl.innerHTML = `<pre style="margin: 0; white-space: pre-wrap;"><code>${escapeHtml(data[activeLang])}</code></pre>`;
+      reqEl.innerHTML = `<pre style="margin: 0; white-space: pre-wrap;"><code>${escapeHtml(data[activeLang] || data.curl)}</code></pre>`;
       respEl.innerHTML = `<pre style="margin: 0; white-space: pre-wrap;"><code>${escapeHtml(data.response)}</code></pre>`;
     }
 
-    function setEndpoint(ep) {
+    function setEndpoint(ep, el) {
       activeEndpoint = ep;
       document.querySelectorAll(".ep-btn").forEach(btn => btn.classList.remove("active"));
-      event.target.classList.add("active");
+      if (el) {
+        el.classList.add("active");
+      } else if (window.event && window.event.target) {
+        window.event.target.classList.add("active");
+      }
       updatePlayground();
     }
 
-    function setLang(lang) {
+    function setLang(lang, el) {
       activeLang = lang;
       document.querySelectorAll(".lang-btn").forEach(btn => btn.classList.remove("active"));
-      event.target.classList.add("active");
+      if (el) {
+        el.classList.add("active");
+      } else if (window.event && window.event.target) {
+        window.event.target.classList.add("active");
+      }
       updatePlayground();
+    }
+
+    function setQsLang(lang, el) {
+      activeQsLang = lang;
+      document.querySelectorAll(".qs-lang-btn").forEach(b => b.classList.remove("active"));
+      if (el) {
+        el.classList.add("active");
+      } else if (window.event && window.event.target) {
+        window.event.target.classList.add("active");
+      }
+      const steps = qsData[lang];
+      const container = document.getElementById("qsSteps");
+      if (!steps || !container) return;
+      container.innerHTML = `
+        <div class="qs-step-card">
+          <div>
+            <div class="qs-step-num">1</div>
+            <h4 class="qs-step-title">${escapeHtml(steps.step1.title)}</h4>
+            <p class="qs-step-desc">${escapeHtml(steps.step1.desc)}</p>
+          </div>
+          <div class="qs-code-box"><code>${escapeHtml(steps.step1.code)}</code></div>
+        </div>
+        <div class="qs-step-card">
+          <div>
+            <div class="qs-step-num">2</div>
+            <h4 class="qs-step-title">${escapeHtml(steps.step2.title)}</h4>
+            <p class="qs-step-desc">${escapeHtml(steps.step2.desc)}</p>
+          </div>
+          <div class="qs-code-box"><code>${escapeHtml(steps.step2.code)}</code></div>
+        </div>
+        <div class="qs-step-card">
+          <div>
+            <div class="qs-step-num">3</div>
+            <h4 class="qs-step-title">${escapeHtml(steps.step3.title)}</h4>
+            <p class="qs-step-desc">${escapeHtml(steps.step3.desc)}</p>
+          </div>
+          <div class="qs-code-box"><code>${escapeHtml(steps.step3.code)}</code></div>
+        </div>
+      `;
     }
 
     function escapeHtml(str) {
@@ -1323,16 +1828,26 @@ print("Settlement status:", response.status)`,
 }`
     };
 
-    function setWebhookEvent(evtKey) {
+    function setWebhookEvent(evtKey, el) {
       document.querySelectorAll(".wh-trigger-btn").forEach(btn => btn.classList.remove("active"));
-      event.target.classList.add("active");
+      if (el) {
+        el.classList.add("active");
+      } else if (typeof event !== "undefined" && event && event.target) {
+        event.target.classList.add("active");
+      } else {
+        const btn = document.querySelector(`.wh-trigger-btn[onclick*="${evtKey}"]`);
+        if (btn) btn.classList.add("active");
+      }
       const disp = document.getElementById("whPayload");
-      disp.innerHTML = `<pre style="margin: 0; white-space: pre-wrap;"><code>${escapeHtml(webhookEvents[evtKey])}</code></pre>`;
+      if (disp && webhookEvents[evtKey]) {
+        disp.innerHTML = `<pre style="margin: 0; white-space: pre-wrap;"><code>${escapeHtml(webhookEvents[evtKey])}</code></pre>`;
+      }
     }
 
     // Initialize UI on load
     updatePlayground();
-    setWebhookEvent("reconciled");
+    setQsLang("node", document.querySelector(".qs-lang-btn.active"));
+    setWebhookEvent("reconciled", document.querySelector(".wh-trigger-btn.active"));
 
     // 3. Grounded 3D Chrome Spheres Motion Engine
     const s1 = document.getElementById("sphere1");
