@@ -69,7 +69,7 @@ export function generateRimDataUrl(shape: LensShape, shine: number, density: num
     return null;
   }
 
-  const imageData = new ImageData(rim.data, rim.columns, rim.rows);
+  const imageData = new ImageData(rim.data as unknown as Uint8ClampedArray<ArrayBuffer>, rim.columns, rim.rows);
   ctx.putImageData(imageData, 0, 0);
 
   return canvas.toDataURL('image/png');

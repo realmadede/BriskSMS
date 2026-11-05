@@ -11,6 +11,11 @@
   ],
   "scripts": {
     "build": "bun build --target node packages/shared/src/index.ts --outdir packages/shared/dist && bun build --target node packages/db/src/index.ts --outdir packages/db/dist && bun build --target node packages/parser-engine/src/index.ts --outdir packages/parser-engine/dist && bun build --target node packages/ui/src/index.ts --outdir packages/ui/dist",
+    "typecheck": "tsc -b --noEmit",
     "test": "bun test packages/shared/test/ packages/parser-engine/test/ packages/ui/test/"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.6.3"
   }
 }

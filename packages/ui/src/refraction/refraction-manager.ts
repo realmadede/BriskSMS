@@ -32,17 +32,17 @@ export class RefractionManager {
     }
 
     // 1. Accessibility: Check user preference for reduced motion
-    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    if (typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)')?.matches) {
       return false;
     }
 
     // 2. Accessibility: Check user preference for reduced transparency
-    if (window.matchMedia && window.matchMedia('(prefers-reduced-transparency: reduce)').matches) {
+    if (typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-transparency: reduce)')?.matches) {
       return false;
     }
 
     // 3. Browser CSS Support: Must support backdrop-filter
-    if (typeof CSS === 'undefined' || !CSS.supports || !CSS.supports('backdrop-filter', 'blur(1px)')) {
+    if (typeof CSS === 'undefined' || typeof CSS.supports !== 'function' || !CSS.supports('backdrop-filter', 'blur(1px)')) {
       return false;
     }
 
@@ -54,7 +54,9 @@ export class RefractionManager {
     // 5. GPU Rendering Context: Test if WebGL context can be initialized without software fallback
     try {
       const canvas = document.createElement('canvas');
-      const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+      const gl =
+        canvas.getContext('webgl') ||
+        (canvas as HTMLCanvasElement).getContext('experimental-webgl' as any);
       if (!gl) {
         return false;
       }

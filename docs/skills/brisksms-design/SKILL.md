@@ -190,3 +190,4 @@ Every status indicator must display **both** an explicit symbol/icon and text:
    - Spheres and background ambient lighting: completely stationary.
 3. **Reduced Transparency:** When `prefers-reduced-transparency` is active, glass opacity increases to 95% solid tone.
 4. **Visual Regression Gate:** Pull requests modifying UI components must pass automated Playwright visual screenshot comparisons across all 9 documented breakpoints.
+
