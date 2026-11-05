@@ -1,13 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
-  <!-- BriskSMS Geometric Lens-B Symbol -->
-  <rect width="32" height="32" rx="7" fill="#0B0A09"/>
-  <!-- Spine -->
-  <rect x="6" y="5.5" width="5.5" height="21" rx="2.5" fill="#FFFFFF"/>
-  <!-- Upper Loop -->
-  <path fill-rule="evenodd" clip-rule="evenodd" d="M10 5.5H18.5C21.8 5.5 24.5 8 24.5 11.2C24.5 14.4 21.8 17 18.5 17H10V5.5ZM14.5 9H18C19.4 9 20.5 10 20.5 11.2C20.5 12.5 19.4 13.5 18 13.5H14.5V9Z" fill="#FFFFFF"/>
-  <!-- Lower Loop (Fluid Optical Refraction Curve) -->
-  <path fill-rule="evenodd" clip-rule="evenodd" d="M10 15H19.5C23.1 15 26 17.7 26 21C26 24.3 23.1 27 19.5 27H10V15ZM14.5 18.5H19C20.7 18.5 22 19.6 22 21C22 22.4 20.7 23.5 19 23.5H14.5V18.5Z" fill="#FFFFFF"/>
-  <!-- Optical Focus Signal Dot (Warm Ochre #C6B480) -->
-  <circle cx="18" cy="21" r="1.8" fill="#C6B480"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" fill="none">
+  <rect width="32" height="32" rx="8" fill="#0B0A09"/>
+  <path d="M7 8C7 6.34 8.34 5 10 5H22C23.66 5 25 6.34 25 8V17C25 18.66 23.66 20 22 20H13.5L9 24.5V20H10C8.34 20 7 18.66 7 17V8Z" fill="#F4F1EA"/>
+  <path d="M17.5 7.5L11.5 14H16L14 19.5L20.5 13H15.5L17.5 7.5Z" fill="#C6B480"/>
 </svg>
-
