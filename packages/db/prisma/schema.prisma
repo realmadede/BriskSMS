@@ -565,3 +565,4 @@ model AuditLog {
   @@index([organizationId, createdAt(sort: Desc)])
   @@map("audit_logs")
 }
+

@@ -90,3 +90,4 @@ export const VALID_TRANSACTION_TRANSITIONS: Readonly<Record<TransactionState, re
     TransactionState.FULFILLMENT_PENDING, // Safe retry
   ],
 };
+

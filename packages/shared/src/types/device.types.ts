@@ -39,3 +39,4 @@ export interface DeviceSummary {
   lastSyncAt: Date | null;
   createdAt: Date;
 }
+

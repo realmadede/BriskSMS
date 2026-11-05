@@ -47,3 +47,4 @@ export interface IProviderAdapter {
   /** Parses the text and returns structured financial result, or null if invalid */
   parse(body: string, defaultDate?: Date): ParsedPaymentResult | null;
 }
+

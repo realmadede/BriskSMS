@@ -20,3 +20,4 @@ export function assertTenantContext(context: unknown): asserts context is Tenant
     throw new Error('TenantContext violation: organizationId is required for this operation.');
   }
 }
+

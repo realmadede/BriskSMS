@@ -52,3 +52,4 @@ export class HalopesaAdapter extends BaseProviderAdapter {
     };
   }
 }
+

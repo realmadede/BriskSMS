@@ -1,0 +1,24 @@
+{
+  "name": "@brisksms/ui",
+  "version": "1.0.0",
+  "private": true,
+  "description": "BriskSMS Liquid Glass Design System and Optical Refraction Engine (adapted from Glisse)",
+  "author": "BriskSMS Team",
+  "license": "SEE LICENSE IN LICENSE",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./styles.css": "./src/styles/glisse-tokens.css"
+  },
+  "scripts": {
+    "build": "bun build --target node src/index.ts --outdir dist",
+    "test": "bun test test/"
+  },
+  "devDependencies": {
+    "@brisksms/config": "*"
+  }
+}

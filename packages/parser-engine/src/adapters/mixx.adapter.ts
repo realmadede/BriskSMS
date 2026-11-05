@@ -67,3 +67,4 @@ export class MixxAdapter extends BaseProviderAdapter {
     };
   }
 }
+

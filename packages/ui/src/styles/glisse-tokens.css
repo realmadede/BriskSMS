@@ -1,0 +1,146 @@
+/**
+ * BriskSMS Liquid Glass Design System
+ * Adapted from Glisse (https://github.com/0kzh/glisse)
+ * Apple Liquid Glass aesthetic with hardware-accelerated CSS
+ */
+
+:where(:root, [data-theme="light"]) {
+  --lg-foreground: rgb(0 0 0 / 0.88);
+  --lg-muted: rgb(60 60 67 / 0.6);
+  --lg-glass: rgb(255 255 255 / 0.65);
+  --lg-glass-active: rgb(236 236 240 / 0.85);
+  --lg-edge: rgb(0 0 0 / 0.08);
+  --lg-drop: rgb(0 0 0 / 0.06);
+  --lg-selection: rgb(0 0 0 / 0.1);
+  --lg-surface: rgb(250 250 252 / 0.86);
+  --lg-surface-edge: rgb(0 0 0 / 0.08);
+  --lg-shadow: rgb(25 25 35 / 0.12);
+  --lg-highlight: rgb(60 60 67 / 0.09);
+  --lg-separator: rgb(60 60 67 / 0.15);
+  --lg-destructive: #ff383c;
+  --lg-success: #34c759;
+  --lg-accent: #0088ff;
+  --lg-rim-shine: 0.3;
+  --lg-blur: 16px;
+  --lg-ease: cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+
+:where([data-theme="dark"]) {
+  --lg-foreground: rgb(255 255 255);
+  --lg-muted: rgb(235 235 245 / 0.6);
+  --lg-glass: rgb(30 30 34 / 0.65);
+  --lg-glass-active: rgb(60 60 65 / 0.75);
+  --lg-edge: rgb(255 255 255 / 0.12);
+  --lg-drop: transparent;
+  --lg-selection: rgb(255 255 255 / 0.145);
+  --lg-surface: rgb(22 22 25 / 0.86);
+  --lg-surface-edge: rgb(255 255 255 / 0.13);
+  --lg-shadow: rgb(0 0 0 / 0.45);
+  --lg-highlight: rgb(235 235 245 / 0.13);
+  --lg-separator: rgb(235 235 245 / 0.16);
+  --lg-destructive: #ff4245;
+  --lg-success: #30d158;
+  --lg-accent: #0091ff;
+  --lg-rim-shine: 0.15;
+  --lg-blur: 20px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :where(:root:not([data-theme="light"])) {
+    --lg-foreground: rgb(255 255 255);
+    --lg-muted: rgb(235 235 245 / 0.6);
+    --lg-glass: rgb(30 30 34 / 0.65);
+    --lg-glass-active: rgb(60 60 65 / 0.75);
+    --lg-edge: rgb(255 255 255 / 0.12);
+    --lg-drop: transparent;
+    --lg-selection: rgb(255 255 255 / 0.145);
+    --lg-surface: rgb(22 22 25 / 0.86);
+    --lg-surface-edge: rgb(255 255 255 / 0.13);
+    --lg-shadow: rgb(0 0 0 / 0.45);
+    --lg-highlight: rgb(235 235 245 / 0.13);
+    --lg-separator: rgb(235 235 245 / 0.16);
+    --lg-destructive: #ff4245;
+    --lg-success: #30d158;
+    --lg-accent: #0091ff;
+    --lg-rim-shine: 0.15;
+    --lg-blur: 20px;
+  }
+}
+
+/* Base Glass Container */
+.brisk-glass {
+  position: relative;
+  background-color: var(--lg-glass);
+  background-image: var(--lg-rim, none);
+  background-size: 100% 100%;
+  -webkit-backdrop-filter: blur(var(--lg-blur)) saturate(1.4);
+  backdrop-filter: blur(var(--lg-blur)) saturate(1.4);
+  box-shadow:
+    inset 0 0 0 0.5px var(--lg-edge),
+    0 4px 20px -2px var(--lg-shadow);
+  border-radius: 16px;
+  transition: background-color 200ms var(--lg-ease), box-shadow 200ms var(--lg-ease);
+}
+
+/* Glass Card */
+.brisk-glass-card {
+  composes: brisk-glass;
+  padding: 24px;
+}
+
+/* Navigation & Header Glass Bar */
+.brisk-glass-nav {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background-color: var(--lg-surface);
+  -webkit-backdrop-filter: blur(24px) saturate(1.5);
+  backdrop-filter: blur(24px) saturate(1.5);
+  border-bottom: 0.5px solid var(--lg-surface-edge);
+}
+
+/* Liquid Button */
+.brisk-glass-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 18px;
+  font-size: 14px;
+  font-weight: 500;
+  border-radius: 10px;
+  cursor: pointer;
+  background-color: var(--lg-glass);
+  color: var(--lg-foreground);
+  box-shadow: inset 0 0 0 0.5px var(--lg-edge);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  transition: transform 120ms ease, background-color 150ms ease;
+  user-select: none;
+  border: none;
+}
+
+.brisk-glass-button:hover {
+  background-color: var(--lg-glass-active);
+}
+
+.brisk-glass-button:active {
+  transform: scale(0.97);
+}
+
+.brisk-glass-button[data-variant="primary"] {
+  background-color: var(--lg-accent);
+  color: #ffffff;
+  box-shadow: 0 2px 8px -1px rgba(0, 136, 255, 0.4);
+}
+
+/* Graceful Degradation: Reduced Motion or Low-Power Hardware */
+@media (prefers-reduced-motion: reduce) {
+  .brisk-glass,
+  .brisk-glass-card,
+  .brisk-glass-button {
+    transition: none !important;
+    animation: none !important;
+  }
+}

@@ -5,8 +5,27 @@
 
 ---
 
-## 1. Universal Clean Code Principles
+## 1. Universal Clean Code Principles (Skarp Framework)
 
+All development in BriskSMS adheres strictly to the four Karpathy Invariants from the Skarp Framework:
+
+1. **Think Before Coding:**
+   - Never guess or make assumptions on financial logic, database structures, or tenant boundaries.
+   - Surface multiple interpretations and tradeoffs when requirements permit ambiguity.
+   - Stop immediately if context is missing or contradictory.
+2. **Simplicity First:**
+   - Write the minimum concrete code required to solve the task.
+   - Forbid speculative configurability, premature abstractions, and one-off helper wrappers.
+   - Apply the Senior Engineer Smell Test: simplify before presenting solutions.
+3. **Surgical Changes:**
+   - Touch only files, functions, and lines directly within scope.
+   - Zero orthogonal edits to adjacent whitespace, unrelated comments, or styles.
+   - The Diff Test: Every line in git diff must demonstrably trace to the prompt.
+4. **Goal-Driven Execution:**
+   - Define declarative, verifiable outcomes upfront.
+   - Formulate verification commands (`npm test`, linters) and verify before declaring completion.
+
+### General Engineering Standards:
 1. **Explicit Over Implicit:** Write clear, descriptive variable and function names. Avoid cryptic abbreviations.
 2. **Fail Fast & Explicit Error Handling:** Never catch exceptions without handling or logging them. Avoid empty `catch {}` blocks. Use custom domain error classes.
 3. **No Unsafe Type Assertions:** Avoid `any` in TypeScript. Use `unknown` and validate with runtime type guards or Zod schemas before casting.

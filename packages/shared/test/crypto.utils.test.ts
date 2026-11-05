@@ -52,3 +52,4 @@ describe('Crypto Utils', () => {
     assert.equal(isTampered, false);
   });
 });
+

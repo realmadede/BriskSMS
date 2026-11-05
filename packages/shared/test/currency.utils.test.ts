@@ -21,3 +21,4 @@ describe('Currency Utils', () => {
     assert.match(formatted, /50,000/);
   });
 });
+

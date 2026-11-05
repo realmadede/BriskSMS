@@ -39,3 +39,4 @@ export interface NormalizedTransaction {
   createdAt: Date;
   updatedAt: Date;
 }
+

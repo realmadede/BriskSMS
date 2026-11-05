@@ -39,3 +39,4 @@ export abstract class BaseProviderAdapter implements IProviderAdapter {
     return phone.trim();
   }
 }
+

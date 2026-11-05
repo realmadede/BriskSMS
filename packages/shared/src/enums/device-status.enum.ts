@@ -31,3 +31,4 @@ export enum DeviceIngestionMode {
   /** Hybrid: Both modes active concurrently */
   HYBRID = 'HYBRID',
 }
+

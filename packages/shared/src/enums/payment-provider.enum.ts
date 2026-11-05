@@ -46,3 +46,4 @@ export const PROVIDER_CATEGORIES: Readonly<Record<PaymentProvider, ProviderCateg
   [PaymentProvider.NMB_BANK]: ProviderCategory.COMMERCIAL_BANK,
   [PaymentProvider.MANUAL_BANK_TRANSFER]: ProviderCategory.MANUAL,
 };
+

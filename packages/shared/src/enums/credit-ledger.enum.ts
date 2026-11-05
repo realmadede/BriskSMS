@@ -24,3 +24,4 @@ export enum CurrencyCode {
   UGX = 'UGX',
   USD = 'USD',
 }
+

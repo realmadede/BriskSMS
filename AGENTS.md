@@ -15,7 +15,13 @@ Welcome to the **BriskSMS** engineering repository. This document defines the op
    - Never use mock data to represent real payment verification in production paths.
    - Differentiate strictly between verified facts, assumptions, and recommendations.
 
-3. **Product Boundaries (Non-Negotiable):**
+3. **Universal Karpathy Invariants (Skarp Framework):**
+   - **Think Before Coding:** Never guess. Surface tradeoffs and ambiguities explicitly before writing code.
+   - **Simplicity First:** Write the minimum code that solves the problem. No speculative abstractions, one-off wrappers, or premature flexibility.
+   - **Surgical Changes:** Touch only what must be touched. Zero orthogonal edits to unrelated formatting, whitespace, or comments.
+   - **Goal-Driven Execution:** Define verification commands upfront. Always run test suites and linters to verify changes before reporting completion.
+
+4. **Product Boundaries (Non-Negotiable):**
    - **Android & Web Only:** Android client for notification ingestion; Angular web application for administration. No iOS/Swift development.
    - **Product Separation:** Product A (Payment Intelligence) and Product B (Bulk Messaging) are independently monetized and logically separate. Payment reconciliation must **never** require bulk messaging credits.
    - **Non-Custodial:** BriskSMS never holds customer funds, operates an escrow, or acts as a payment clearing house.

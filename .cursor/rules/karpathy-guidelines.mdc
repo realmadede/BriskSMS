@@ -1,0 +1,12 @@
+---
+description: Universal Karpathy Guidelines for AI coding agents
+globs: *
+alwaysApply: true
+---
+
+# Karpathy Guidelines for BriskSMS (Skarp Framework)
+
+1. **Think Before Coding**: Do not guess or silently assume. Clarify tradeoffs and ambiguities before generating code.
+2. **Simplicity First**: Write the minimum code that solves the problem. No speculative abstractions, wrappers, or defensive cascades for impossible cases.
+3. **Surgical Changes**: Touch only what you must. Zero orthogonal edits to unrelated formatting, imports, or whitespace.
+4. **Goal-Driven Execution**: Define verification commands upfront. Execute tests and linters to verify changes before concluding.

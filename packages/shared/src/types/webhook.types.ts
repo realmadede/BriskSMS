@@ -16,3 +16,4 @@ export interface WebhookEndpointConfig {
   isActive: boolean;
   createdAt: Date;
 }
+

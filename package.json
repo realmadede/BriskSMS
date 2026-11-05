@@ -10,7 +10,7 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "bun build --target node packages/shared/src/index.ts --outdir packages/shared/dist && bun build --target node packages/db/src/index.ts --outdir packages/db/dist && bun build --target node packages/parser-engine/src/index.ts --outdir packages/parser-engine/dist",
-    "test": "bun test packages/shared/test/ packages/parser-engine/test/"
+    "build": "bun build --target node packages/shared/src/index.ts --outdir packages/shared/dist && bun build --target node packages/db/src/index.ts --outdir packages/db/dist && bun build --target node packages/parser-engine/src/index.ts --outdir packages/parser-engine/dist && bun build --target node packages/ui/src/index.ts --outdir packages/ui/dist",
+    "test": "bun test packages/shared/test/ packages/parser-engine/test/ packages/ui/test/"
   }
 }

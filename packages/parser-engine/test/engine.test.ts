@@ -96,3 +96,4 @@ describe('ParserEngine - Tanzanian Mobile Money & Bank Adapters', () => {
     assert.equal(engine.parseNotification('UNKNOWN_SENDER', 'Invalid body text', orgId), null);
   });
 });
+

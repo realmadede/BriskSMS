@@ -50,3 +50,4 @@ export function verifyWebhookSignature(
 
   return timingSafeEqual(computedBuffer, expectedBuffer);
 }
+
