@@ -47,3 +47,4 @@ export function generateRimMap(
 
   return { columns, rows, data };
 }
+

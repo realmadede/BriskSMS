@@ -54,3 +54,4 @@ describe('UI Refraction & Liquid Glass Engine', () => {
     assert.equal(manager.detectHardwareCapability(), false);
   });
 });
+

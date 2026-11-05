@@ -54,3 +54,4 @@ export function calculateDisplacementScale(shape: LensShape, config: LensConfig 
   const minDimension = Math.min(shape.width, shape.height);
   return Math.round(minDimension * config.strength * 0.5);
 }
+
