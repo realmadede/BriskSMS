@@ -10,8 +10,7 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run --workspaces --if-present build",
-    "lint": "npm run --workspaces --if-present lint",
-    "test": "npm run --workspaces --if-present test"
+    "build": "bun build --target node packages/shared/src/index.ts --outdir packages/shared/dist && bun build --target node packages/db/src/index.ts --outdir packages/db/dist && bun build --target node packages/parser-engine/src/index.ts --outdir packages/parser-engine/dist",
+    "test": "bun test packages/shared/test/ packages/parser-engine/test/"
   }
 }

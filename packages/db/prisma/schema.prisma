@@ -1,0 +1,567 @@
+// ==============================================================================
+// BriskSMS Canonical Relational Schema
+// Multi-Tenant Financial Reconciliation, Automation & Messaging Engine
+// ==============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ------------------------------------------------------------------------------
+// Enums
+// ------------------------------------------------------------------------------
+
+enum TransactionState {
+  OBSERVED
+  NORMALIZED
+  DUPLICATE_REJECTED
+  UNMATCHED
+  MATCHED
+  VERIFICATION_PENDING
+  VERIFIED
+  REJECTED
+  REVIEW_REQUIRED
+  FULFILLMENT_PENDING
+  FULFILLED
+  FULFILLMENT_FAILED
+}
+
+enum PaymentProvider {
+  MPESA
+  MIXX
+  AIRTEL_MONEY
+  HALOPESA
+  TTCL_PESA
+  CRDB_BANK
+  NMB_BANK
+  MANUAL_BANK_TRANSFER
+}
+
+enum UserRole {
+  OWNER
+  ADMIN
+  FINANCE
+  CASHIER
+  DEVELOPER
+}
+
+enum DeviceStatus {
+  PENDING_PAIRING
+  ACTIVE
+  DISCONNECTED
+  QUARANTINED
+  REVOKED
+}
+
+enum DeviceIngestionMode {
+  NOTIFICATION_LISTENER
+  SMS_RECEIVER
+  HYBRID
+}
+
+enum InvoiceStatus {
+  UNPAID
+  PARTIALLY_PAID
+  PAID
+  OVERPAID
+  VOID
+  REFUNDED
+}
+
+enum CreditLedgerEntryType {
+  PURCHASE
+  USAGE_DEDUCTION
+  REFUND
+  ADMIN_ADJUSTMENT
+}
+
+enum SmsStatus {
+  QUEUED
+  SUBMITTED
+  DELIVERED
+  UNDELIVERED
+  FAILED
+}
+
+enum CampaignStatus {
+  DRAFT
+  SCHEDULED
+  DISPATCHING
+  COMPLETED
+  PAUSED
+  CANCELLED
+}
+
+enum SenderIdStatus {
+  PENDING_DOCUMENTS
+  SUBMITTED_TO_TCRA
+  APPROVED
+  REJECTED
+}
+
+// ------------------------------------------------------------------------------
+// Identity & Organizations
+// ------------------------------------------------------------------------------
+
+model Organization {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name         String   @db.VarChar(255)
+  slug         String   @unique @db.VarChar(100)
+  countryCode  String   @default("TZA") @map("country_code") @db.VarChar(3)
+  timezone     String   @default("Africa/Dar_es_Salaam") @db.VarChar(50)
+  planTier     String   @default("STARTER") @map("plan_tier") @db.VarChar(50)
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // Relations
+  memberships           UserOrganization[]
+  devices               Device[]
+  rawEvidences          RawPaymentEvidence[]
+  normalizedPayments    NormalizedPayment[]
+  customers             Customer[]
+  invoices              Invoice[]
+  automationRules       AutomationRule[]
+  automationLogs        AutomationLog[]
+  messagingAccount      MessagingAccount?
+  messagingLedgers      MessagingCreditLedger[]
+  senderIds             SenderId[]
+  smsCampaigns          SmsCampaign[]
+  smsMessages           SmsMessage[]
+  apiKeys               ApiKey[]
+  webhookEndpoints      WebhookEndpoint[]
+  auditLogs             AuditLog[]
+
+  @@map("organizations")
+}
+
+model User {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email              String   @unique @db.VarChar(255)
+  passwordHash       String   @map("password_hash") @db.VarChar(255)
+  fullName           String   @map("full_name") @db.VarChar(255)
+  phoneNumber        String?  @map("phone_number") @db.VarChar(50)
+  isEmailVerified    Boolean  @default(false) @map("is_email_verified")
+  isActive           Boolean  @default(true) @map("is_active")
+  twoFactorSecret    String?  @map("two_factor_secret") @db.VarChar(100)
+  twoFactorEnabled   Boolean  @default(false) @map("two_factor_enabled")
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // Relations
+  memberships UserOrganization[]
+
+  @@map("users")
+}
+
+model UserOrganization {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  role           UserRole @default(FINANCE)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, userId])
+  @@index([userId])
+  @@map("users_organizations")
+}
+
+// ------------------------------------------------------------------------------
+// Devices & Android Telemetry
+// ------------------------------------------------------------------------------
+
+model Device {
+  id             String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String              @map("organization_id") @db.Uuid
+  label          String              @db.VarChar(100)
+  deviceModel    String              @map("device_model") @db.VarChar(100)
+  manufacturer   String              @db.VarChar(100)
+  androidVersion String              @map("android_version") @db.VarChar(20)
+  appVersion     String              @map("app_version") @db.VarChar(20)
+  publicKeyPem   String              @map("public_key_pem") @db.Text
+  status         DeviceStatus        @default(PENDING_PAIRING)
+  ingestionMode  DeviceIngestionMode @default(NOTIFICATION_LISTENER) @map("ingestion_mode")
+  lastSyncAt     DateTime?           @map("last_sync_at") @db.Timestamptz(6)
+  revokedAt      DateTime?           @map("revoked_at") @db.Timestamptz(6)
+  createdAt      DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  telemetries  DeviceTelemetry[]
+  evidences    RawPaymentEvidence[]
+  payments     NormalizedPayment[]
+
+  @@index([organizationId, status])
+  @@map("devices")
+}
+
+model DeviceTelemetry {
+  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  deviceId            String   @map("device_id") @db.Uuid
+  batteryPct          Int      @map("battery_pct") @db.SmallInt
+  isCharging          Boolean  @map("is_charging")
+  networkType         String   @map("network_type") @db.VarChar(20)
+  signalStrengthDbm   Int?     @map("signal_strength_dbm")
+  pendingOfflineCount Int      @default(0) @map("pending_offline_count")
+  recordedAt          DateTime @default(now()) @map("recorded_at") @db.Timestamptz(6)
+
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([deviceId, recordedAt(sort: Desc)])
+  @@map("device_telemetry")
+}
+
+// ------------------------------------------------------------------------------
+// Payment Evidence & Normalized Financial Records
+// ------------------------------------------------------------------------------
+
+model RawPaymentEvidence {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  deviceId       String   @map("device_id") @db.Uuid
+  senderAddress  String   @map("sender_address") @db.VarChar(100)
+  rawPayload     String   @map("raw_payload") @db.Text
+  simSlot        Int      @default(1) @map("sim_slot") @db.SmallInt
+  deviceTimestamp DateTime @map("device_timestamp") @db.Timestamptz(6)
+  signature      String   @db.Text
+  nonce          String   @db.VarChar(64)
+  sequenceNumber BigInt   @map("sequence_number")
+  receivedAt     DateTime @default(now()) @map("received_at") @db.Timestamptz(6)
+
+  // Explicitly IMMUTABLE: no updated_at column
+  organization       Organization       @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  device             Device             @relation(fields: [deviceId], references: [id], onDelete: Restrict)
+  normalizedPayment  NormalizedPayment?
+
+  @@index([organizationId, receivedAt(sort: Desc)])
+  @@index([deviceId, sequenceNumber])
+  @@map("raw_payment_evidence")
+}
+
+model NormalizedPayment {
+  id                String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId    String           @map("organization_id") @db.Uuid
+  deviceId          String           @map("device_id") @db.Uuid
+  rawEvidenceId     String           @unique @map("raw_evidence_id") @db.Uuid
+  provider          PaymentProvider
+  reference         String           @db.VarChar(100)
+  amountCents       BigInt           @map("amount_cents")
+  currency          String           @default("TZS") @db.VarChar(3)
+  senderPhone       String           @map("sender_phone") @db.VarChar(50)
+  senderName        String?          @map("sender_name") @db.VarChar(255)
+  recipientAccount  String?          @map("recipient_account") @db.VarChar(100)
+  customerMemo      String?          @map("customer_memo") @db.VarChar(255)
+  providerTimestamp DateTime         @map("provider_timestamp") @db.Timestamptz(6)
+  state             TransactionState @default(OBSERVED)
+  deduplicationHash String           @map("deduplication_hash") @db.VarChar(64)
+  matchedInvoiceId  String?          @map("matched_invoice_id") @db.Uuid
+  createdAt         DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization    Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  device          Device              @relation(fields: [deviceId], references: [id], onDelete: Restrict)
+  rawEvidence     RawPaymentEvidence  @relation(fields: [rawEvidenceId], references: [id], onDelete: Restrict)
+  matchedInvoice  Invoice?            @relation(fields: [matchedInvoiceId], references: [id], onDelete: SetNull)
+  invoicePayments InvoicePayment[]
+  automationLogs  AutomationLog[]
+
+  @@unique([organizationId, deduplicationHash])
+  @@index([organizationId, state, createdAt(sort: Desc)])
+  @@index([organizationId, reference])
+  @@index([organizationId, senderPhone])
+  @@map("normalized_payments")
+}
+
+// ------------------------------------------------------------------------------
+// Invoicing & Reconciliation Engine
+// ------------------------------------------------------------------------------
+
+model Customer {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  accountNumber  String   @map("account_number") @db.VarChar(100)
+  fullName       String   @map("full_name") @db.VarChar(255)
+  phoneNumber    String?  @map("phone_number") @db.VarChar(50)
+  email          String?  @db.VarChar(255)
+  metadata       Json?    @db.JsonB
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  invoices     Invoice[]
+
+  @@unique([organizationId, accountNumber])
+  @@index([organizationId, phoneNumber])
+  @@map("customers")
+}
+
+model Invoice {
+  id               String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId   String        @map("organization_id") @db.Uuid
+  customerId       String?       @map("customer_id") @db.Uuid
+  referenceNumber  String        @map("reference_number") @db.VarChar(100)
+  totalAmountCents BigInt        @map("total_amount_cents")
+  balanceCents     BigInt        @map("balance_cents")
+  currency         String        @default("TZS") @db.VarChar(3)
+  status           InvoiceStatus @default(UNPAID)
+  dueDate          DateTime      @map("due_date") @db.Timestamptz(6)
+  metadata         Json?         @db.JsonB
+  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  customer           Customer?           @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  items              InvoiceItem[]
+  payments           InvoicePayment[]
+  normalizedPayments NormalizedPayment[]
+
+  @@unique([organizationId, referenceNumber])
+  @@index([organizationId, status, dueDate])
+  @@map("invoices")
+}
+
+model InvoiceItem {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  invoiceId       String   @map("invoice_id") @db.Uuid
+  description     String   @db.VarChar(255)
+  quantity        Int      @default(1)
+  unitPriceCents  BigInt   @map("unit_price_cents")
+  totalPriceCents BigInt   @map("total_price_cents")
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@map("invoice_items")
+}
+
+model InvoicePayment {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  invoiceId          String   @map("invoice_id") @db.Uuid
+  paymentId          String   @map("payment_id") @db.Uuid
+  appliedAmountCents BigInt   @map("applied_amount_cents")
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  invoice Invoice           @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  payment NormalizedPayment @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+
+  @@index([invoiceId])
+  @@index([paymentId])
+  @@map("invoice_payments")
+}
+
+// ------------------------------------------------------------------------------
+// Business Automation Engine (MikroTik / WHMCS / Webhooks)
+// ------------------------------------------------------------------------------
+
+model AutomationRule {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  name           String   @db.VarChar(100)
+  triggerEvent   String   @map("trigger_event") @db.VarChar(100)
+  conditions     Json     @db.JsonB
+  actionType     String   @map("action_type") @db.VarChar(50)
+  actionConfig   Json     @map("action_config") @db.JsonB
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  automationLogs AutomationLog[]
+
+  @@index([organizationId, isActive])
+  @@map("automation_rules")
+}
+
+model AutomationLog {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  ruleId         String   @map("rule_id") @db.Uuid
+  paymentId      String?  @map("payment_id") @db.Uuid
+  actionType     String   @map("action_type") @db.VarChar(50)
+  status         String   @db.VarChar(20) // SUCCESS, FAILED, RETRYING
+  idempotencyKey String   @unique @map("idempotency_key") @db.VarChar(64)
+  attemptCount   Int      @default(1) @map("attempt_count")
+  lastError      String?  @map("last_error") @db.Text
+  executedAt     DateTime @default(now()) @map("executed_at") @db.Timestamptz(6)
+
+  organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  rule         AutomationRule     @relation(fields: [ruleId], references: [id], onDelete: Restrict)
+  payment      NormalizedPayment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, status])
+  @@map("automation_logs")
+}
+
+// ------------------------------------------------------------------------------
+// Product B: Bulk Messaging & Independent Credit Ledger
+// ------------------------------------------------------------------------------
+
+model MessagingAccount {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @unique @map("organization_id") @db.Uuid
+  creditBalance  Int      @default(0) @map("credit_balance")
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@map("messaging_accounts")
+}
+
+model MessagingCreditLedger {
+  id             String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String                @map("organization_id") @db.Uuid
+  entryType      CreditLedgerEntryType @map("entry_type")
+  amountCredits  Int                   @map("amount_credits")
+  balanceAfter   Int                   @map("balance_after")
+  referenceId    String?               @map("reference_id") @db.VarChar(100)
+  createdAt      DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  // Explicitly IMMUTABLE: no updated_at
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, createdAt(sort: Desc)])
+  @@map("messaging_credit_ledger")
+}
+
+model SenderId {
+  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId  String         @map("organization_id") @db.Uuid
+  senderId        String         @map("sender_id") @db.VarChar(11)
+  status          SenderIdStatus @default(PENDING_DOCUMENTS)
+  rejectionReason String?        @map("rejection_reason") @db.Text
+  createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  smsCampaigns SmsCampaign[]
+
+  @@unique([organizationId, senderId])
+  @@map("sender_ids")
+}
+
+model SmsCampaign {
+  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId  String         @map("organization_id") @db.Uuid
+  senderIdId      String         @map("sender_id_id") @db.Uuid
+  name            String         @db.VarChar(100)
+  messageTemplate String         @map("message_template") @db.Text
+  status          CampaignStatus @default(DRAFT)
+  recipientCount  Int            @default(0) @map("recipient_count")
+  scheduledAt     DateTime?      @map("scheduled_at") @db.Timestamptz(6)
+  createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  senderId     SenderId     @relation(fields: [senderIdId], references: [id], onDelete: Restrict)
+  messages     SmsMessage[]
+
+  @@index([organizationId, status])
+  @@map("sms_campaigns")
+}
+
+model SmsMessage {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId    String    @map("organization_id") @db.Uuid
+  campaignId        String?   @map("campaign_id") @db.Uuid
+  recipientPhone    String    @map("recipient_phone") @db.VarChar(50)
+  messageText       String    @map("message_text") @db.Text
+  status            SmsStatus @default(QUEUED)
+  costCredits       Int       @default(1) @map("cost_credits")
+  providerMessageId String?   @map("provider_message_id") @db.VarChar(100)
+  gatewayProvider   String?   @map("gateway_provider") @db.VarChar(50)
+  deliveredAt       DateTime? @map("delivered_at") @db.Timestamptz(6)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  campaign     SmsCampaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, status])
+  @@index([providerMessageId])
+  @@map("sms_messages")
+}
+
+// ------------------------------------------------------------------------------
+// Developer Platform & Audit Trails
+// ------------------------------------------------------------------------------
+
+model ApiKey {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  keyHash        String    @unique @map("key_hash") @db.VarChar(64)
+  keyPrefix      String    @map("key_prefix") @db.VarChar(16)
+  label          String    @db.VarChar(100)
+  permissions    Json      @db.JsonB
+  lastUsedAt     DateTime? @map("last_used_at") @db.Timestamptz(6)
+  revokedAt      DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, revokedAt])
+  @@map("api_keys")
+}
+
+model WebhookEndpoint {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId   String   @map("organization_id") @db.Uuid
+  url              String   @db.VarChar(500)
+  secret           String   @db.VarChar(64)
+  subscribedEvents Json     @map("subscribed_events") @db.JsonB
+  isActive         Boolean  @default(true) @map("is_active")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  deliveries   WebhookDelivery[]
+
+  @@index([organizationId, isActive])
+  @@map("webhook_endpoints")
+}
+
+model WebhookDelivery {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  endpointId     String   @map("endpoint_id") @db.Uuid
+  eventType      String   @map("event_type") @db.VarChar(100)
+  payload        Json     @db.JsonB
+  responseStatus Int?     @map("response_status")
+  responseBody   String?  @map("response_body") @db.Text
+  attemptNumber  Int      @default(1) @map("attempt_number")
+  deliveredAt    DateTime @default(now()) @map("delivered_at") @db.Timestamptz(6)
+
+  endpoint WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+
+  @@index([endpointId, deliveredAt(sort: Desc)])
+  @@map("webhook_deliveries")
+}
+
+model AuditLog {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  actorId        String   @map("actor_id") @db.Uuid
+  actorType      String   @map("actor_type") @db.VarChar(20) // USER, DEVICE, SYSTEM, API_KEY
+  action         String   @db.VarChar(100)
+  resourceType   String   @map("resource_type") @db.VarChar(50)
+  resourceId     String   @map("resource_id") @db.Uuid
+  previousState  Json?    @map("previous_state") @db.JsonB
+  newState       Json?    @map("new_state") @db.JsonB
+  metadata       Json?    @db.JsonB
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  // Explicitly IMMUTABLE: no updated_at
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, resourceType, resourceId])
+  @@index([organizationId, createdAt(sort: Desc)])
+  @@map("audit_logs")
+}

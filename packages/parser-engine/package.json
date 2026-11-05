@@ -1,0 +1,20 @@
+{
+  "name": "@brisksms/parser-engine",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Deterministic payment parser engine and provider adapters for Tanzanian mobile money and banks",
+  "author": "BriskSMS Team",
+  "license": "SEE LICENSE IN LICENSE",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "bun build --target node src/index.ts --outdir dist",
+    "test": "bun test test/"
+  },
+  "dependencies": {
+    "@brisksms/shared": "*"
+  },
+  "devDependencies": {
+    "@brisksms/config": "*"
+  }
+}

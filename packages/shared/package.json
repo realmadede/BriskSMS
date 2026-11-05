@@ -1,0 +1,17 @@
+{
+  "name": "@brisksms/shared",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Shared types, enums, DTOs, and domain utilities for BriskSMS",
+  "author": "BriskSMS Team",
+  "license": "SEE LICENSE IN LICENSE",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "@brisksms/config": "*"
+  }
+}
