@@ -22,34 +22,31 @@ Every phase has:
 ## 2. Phase-by-Phase Implementation Plan
 
 ```
-Phase 0: Foundation & Monorepo Scaffolding
+Phase 0: Engineering Foundation & Monorepo Scaffolding (COMPLETED)
    |
    v
-Phase 1: Multi-Tenancy, Identity & Cryptographic Device Management
+Phase 1: Multi-Tenancy, Identity & Cryptographic Device Management (COMPLETED - e2f4dd4)
    |
    v
-Phase 2: Android Ingestion Relay & Keystore Client
+Phase 2: Dynamic Subscription Catalog & Entitlements Engine (IMMEDIATE NEXT MILESTONE)
    |
    v
-Phase 3: Payment Parsing Engine, Deduplication & Normalization
+Phase 3: Native Android Ingestion Relay & Keystore Client
    |
    v
-Phase 4: Financial Ledger, Invoicing & Multi-Tier Reconciliation
+Phase 4: Payment Parsing Engine, Deduplication & Multi-Tier Reconciliation
    |
    v
-Phase 5: Business Automation Engine (MikroTik RouterOS, WHMCS, Webhooks)
+Phase 5: httpSMS Provider Adapter & Bulk Messaging Engine (CSV/XLSX Ingestion)
    |
    v
-Phase 6: Bulk Messaging Engine, Sender IDs & Prepaid Ledger (Product B)
+Phase 6: Developer Platform, Transactional Outbox & BriskSMS Zapier Application
    |
    v
-Phase 7: Enterprise Web Portal (Angular 19+)
+Phase 7: Enterprise Web Portal (Angular 19+) & Commercial Self-Service
    |
    v
-Phase 8: Commercial Billing, Quota Enforcement & Self-Serve Subscriptions
-   |
-   v
-Phase 9: Security Hardening, Penetration Testing & Production Launch
+Phase 8: Security Hardening, Penetration Testing & Production Launch
 ```
 
 ---
@@ -72,31 +69,53 @@ Phase 9: Security Hardening, Penetration Testing & Production Launch
 
 ---
 
-### Phase 1: Multi-Tenancy, Identity & Cryptographic Device Management
+### Phase 1: Multi-Tenancy, Identity & Cryptographic Device Management (COMPLETED — commit e2f4dd4)
+- **Status:** **Completed & Verified.**
 - **Objective:** Build the core tenant isolation layer, authentication, role-based access control (RBAC), and asymmetric Android device pairing.
 - **Dependencies:** Phase 0.
 - **Deliverables:**
-  - `apps/api/src/modules/auth/`: Registration, JWT issuance, HTTP-only refresh tokens, Argon2id password hashing, 2FA TOTP support.
-  - `apps/api/src/modules/organization/`: Organization creation, membership management, RBAC guards (`Owner`, `Admin`, `Finance`, `Support`, `Developer`).
-  - `apps/api/src/modules/device/`: QR code pairing endpoint, single-use enrollment token verification, device public key registration, heartbeat endpoint, device revocation.
-  - Prisma migrations for `users`, `organizations`, `memberships`, `devices`, and `audit_logs`.
+  - `apps/api/src/modules/auth/`: Registration, JWT issuance, HTTP-only refresh tokens, Scrypt password hashing, verification.
+  - `apps/api/src/modules/organization/`: Organization creation, membership management, RBAC guards (`OWNER`, `ADMIN`, `OPERATOR`, `CASHIER`, `AUDITOR`).
+  - `apps/api/src/modules/device/`: 5-minute cryptographic QR pairing flow, device public key registration, heartbeat telemetry, device revocation.
+  - Multi-tenant in-memory transactional store with ACID row locks and query-level tenant assertions.
 - **Tests:**
-  - Unit tests for JWT expiration, refresh token rotation, and RBAC permission evaluation.
-  - Integration tests verifying cross-tenant isolation (Tenant A cannot view or mutate Tenant B resources).
-  - Device revocation test: Token becomes invalid within 100ms of revocation.
-- **Security Gate:** Static analysis check against OWASP Top 10; verification that all tenant queries enforce `organizationId`.
-- **Acceptance Criteria:** Complete end-to-end user signup, organization provisioning, and secure device pairing flow via REST API.
+  - 14 automated integration tests across `auth.test.ts`, `organization.test.ts`, and `device.test.ts` (100% passing).
+- **Security Gate:** Verified cross-tenant isolation; all tenant queries enforce `organizationId`.
+- **Acceptance Criteria:** Met in full.
 
 ---
 
-### Phase 2: Android Ingestion Relay & Keystore Client
-- **Objective:** Develop the native Android relay application with hardware-backed security, local offline queuing, and resilient background synchronization.
-- **Dependencies:** Phase 1 (Device API endpoints).
+### Phase 2: Dynamic Subscription Catalog & Entitlements Engine (IMMEDIATE NEXT MILESTONE)
+- **Objective:** Implement a 100% backend-managed dynamic commercial catalog, versioned subscription plans, snapshot pricing, and dynamic entitlement guards across all client channels.
+- **Dependencies:** Phase 1 (Organizations & Auth).
+- **Deliverables:**
+  - Database models in `packages/db`: `CommercialProduct`, `SubscriptionPlan`, `PlanVersion`, `PlanPrice`, `FeatureDefinition`, `PlanEntitlement`, `OrganizationSubscription`, `SubscriptionBillingInvoice`, `SubscriptionHistory`.
+  - Zero hardcoded commercial variables: all plan names, prices, currencies, device limits, API caps, and feature flags resolved from database records.
+  - `apps/api/src/modules/subscription/`:
+    - `EntitlementService`: Evaluates boolean feature flags and numerical usage limits across tenant boundaries.
+    - `EntitlementGuard`: Route-level middleware intercepting requests when tenant exceeds dynamic plan quota.
+    - `CommercialCatalogService`: Manages immutable plan versions and localized integer pricing (TZS/USD minor units).
+    - Price snapshotting engine: Locks unit price and terms upon invoice/subscription generation.
+  - Secure Administrative Catalog APIs (`SUPERADMIN` role authorization only; no public admin route).
+- **Tests:**
+  - Dynamic plan retrieval and multi-currency pricing tests.
+  - Entitlement resolution tests (numeric limits, boolean feature flags).
+  - Plan version change test: Updating plan catalog does not mutate active subscription terms.
+  - Cross-tenant subscription isolation tests.
+  - Unauthorized commercial catalog access rejection tests.
+- **Security Gate:** Mathematical separation between Product A recurring SaaS ledger and Product B prepaid SMS credit ledger; no client-controlled price injection.
+- **Acceptance Criteria:** Dynamic catalog fully operational via backend APIs; entitlement checks prevent quota exceeding across all API routes.
+
+---
+
+### Phase 3: Android Ingestion Relay & Keystore Client
+- **Objective:** Develop the native Android companion application with hardware-backed Keystore security, local offline queuing, and resilient background synchronization for payment notifications.
+- **Dependencies:** Phase 1 (Device API endpoints) & Phase 2 (Device quota entitlements).
 - **Deliverables:**
   - Android application in `apps/android/` using Kotlin and Jetpack Compose.
   - Android Keystore integration for asymmetric keypair generation and request signing.
   - Room SQLite database for persistent offline message queuing (`raw_notifications`).
-  - Mode 1: `NotificationListenerService` with strict package filtering and user disclosure flow.
+  - Mode 1: `NotificationListenerService` with strict package filtering and user disclosure flow (Vodacom M-Pesa, Mixx by Yas, Airtel Money, HaloPesa, CRDB, NMB).
   - Mode 2: Optional `BroadcastReceiver` for direct carrier SMS reception on dedicated business devices.
   - Foreground Service with persistent status notification and battery optimization exemption onboarding.
   - WorkManager / Coroutine HTTP client with exponential backoff and network reconnection listeners.
@@ -104,129 +123,87 @@ Phase 9: Security Hardening, Penetration Testing & Production Launch
   - Instrumentation tests for Android Keystore signing and verification.
   - Offline resilience test: Inject 50 notifications while in Airplane Mode, reconnect, verify 100% synced without duplicates.
 - **Security Gate:** Verification that personal messages (non-financial) are discarded on-device before persistence or transmission.
-- **Acceptance Criteria:** Android device successfully pairs via QR code, captures simulated M-Pesa notifications, and delivers signed payloads to the backend API.
+- **Acceptance Criteria:** Android device successfully pairs via QR code, captures simulated M-Pesa notifications, and delivers signed payloads to backend API.
 
 ---
 
-### Phase 3: Payment Parsing Engine, Deduplication & Normalization
-- **Objective:** Implement the versioned parser engine for all Tanzanian mobile money providers and banks, along with deterministic cryptographic deduplication.
-- **Dependencies:** Phase 2 (Raw payload ingestion).
+### Phase 4: Payment Parsing Engine, Deduplication & Invoicing Reconciliation Matrix
+- **Objective:** Implement the versioned parser engine for all Tanzanian mobile money providers and banks, deterministic cryptographic deduplication, and the multi-tier reconciliation engine.
+- **Dependencies:** Phase 3 (Raw payload ingestion).
 - **Deliverables:**
-  - `packages/parser-engine/`:
-    - Vodacom M-Pesa parser adapter.
-    - Mixx by Yas (Tigo Pesa) parser adapter.
-    - Airtel Money parser adapter.
-    - HaloPesa parser adapter.
-    - TTCL Pesa parser adapter.
-    - CRDB Bank and NMB Bank SMS alert parsers.
-  - `apps/api/src/modules/payment/`: Fast ingestion endpoint (`POST /v1/ingest/notifications`), append-only `raw_payment_evidence` table.
-  - Deduplication engine computing deterministic SHA-256 hash.
-  - Worker parser consumer (`ingest.parse` queue in BullMQ).
+  - `packages/parser-engine/`: Adapters for Vodacom M-Pesa, Mixx by Yas, Airtel Money, HaloPesa, CRDB Bank, NMB Bank.
+  - Fast ingestion endpoint (`POST /v1/ingest/notifications`), append-only immutable `raw_payment_evidence`.
+  - Cryptographic SHA-256 deduplication key: `hash(org_id + provider + provider_ref + amount + timestamp)`.
+  - `apps/api/src/modules/reconciliation/`: Invoices CRUD, matching waterfall (Memo, Customer/Phone, Checkout window), partial/overpayment accounting, and Accountant Review Queue (`REVIEW_REQUIRED`).
 - **Tests:**
-  - Comprehensive unit test suite with 100+ anonymized real-world Tanzanian payment SMS samples across all providers.
-  - Malformed SMS test: Graceful transition to `REJECTED` without unhandled exceptions.
-  - Replay test: Submitting identical raw payload twice yields `DUPLICATE_REJECTED` on second attempt.
-- **Security Gate:** Invariant verification that `raw_payment_evidence` records are immutable (no UPDATE/DELETE permissions).
-- **Acceptance Criteria:** 100% pass rate on test corpus; parsing latency < 10ms per message.
+  - 100+ real-world anonymized Tanzanian provider SMS test corpus passing.
+  - Concurrency test: 50 concurrent payments targeting the same invoice without race conditions.
+  - Deduplication replay test: Duplicate notifications safely rejected without duplicate settlement.
+- **Security Gate:** Financial invariant verification: All balance calculations computed in integer minor units (cents); raw evidence table is append-only.
+- **Acceptance Criteria:** Deterministic settlement of matching invoices; ambiguous transactions safely routed to manual accountant review.
 
 ---
 
-### Phase 4: Financial Ledger, Invoicing & Multi-Tier Reconciliation
-- **Objective:** Construct the invoice management module and multi-tier reconciliation engine with support for exact matches, partial payments, and manual accountant review.
-- **Dependencies:** Phase 3.
+### Phase 5: httpSMS Provider Adapter & Bulk Messaging Engine (Product B)
+- **Objective:** Implement the commercial bulk messaging module with httpSMS carrier integration, Bring-Your-Own-Account (BYO-Key) credentials, CSV/XLSX recipient ingestion, and double-entry prepaid credit accounting.
+- **Dependencies:** Phase 1 (Organizations & RBAC) & Phase 2 (Entitlements).
 - **Deliverables:**
-  - `apps/api/src/modules/reconciliation/`: Invoices CRUD, invoice line items, tax calculation, customer accounts.
-  - Matching engine waterfall: Tier 1 (Memo), Tier 2 (Customer/Phone), Tier 3 (Checkout window), Tier 4 (Unmatched).
-  - Concurrency management using PostgreSQL row locks (`SELECT ... FOR UPDATE`).
-  - Accountant Review Queue API for manual match approval and dispute resolution.
-  - Immutable audit logging for every financial transition.
+  - Internal provider boundary: `MessagingProvider` interface.
+  - `HttpSmsProvider` adapter: `POST /v1/messages/send`, scheduled sending (`send_at`), and HMAC webhook signature verification.
+  - Multi-tenant BYO-Key management: AES-256-GCM encrypted API key storage in `messaging_accounts`.
+  - CSV/XLSX upload pipeline: Streaming parser, E.164 phone validation (Tanzanian carriers: 074/075/076, 071/065/067, 078/068/069, 062), duplicate elimination, column mapping, and template variable substitution.
+  - Configurable recipient batch limit (default 1,000 recipients per campaign).
+  - BullMQ carrier-pacing queue: Sliding-window rate limiter (1 SMS / 3 seconds per SIM) to prevent TCRA anti-spam carrier bans.
+  - Double-entry prepaid credit ledger (`messaging_credit_ledgers`) with atomic debits and delivery-failure refunds.
 - **Tests:**
-  - Concurrency test: 50 concurrent payments targeting the same invoice without race conditions or negative balances.
-  - Edge case tests: Underpayment creates `PARTIALLY_PAID` status; overpayment creates `OVERPAID` status.
-  - Audit log completeness test: Every reconciliation action logs actor ID, previous state, and new state.
-- **Security Gate:** Financial invariant verification: All balance calculations computed in integer minor units (cents) to avoid floating-point errors.
-- **Acceptance Criteria:** Deterministic settlement of matching invoices; ambiguous transactions safely held in `REVIEW_REQUIRED`.
+  - Mock httpSMS dispatch and failure retry tests.
+  - CSV/XLSX upload parser test with malformed phone numbers and deduplication.
+  - Prepaid credit ledger concurrency test: High-volume message dispatch cannot overdraw credit balance below zero.
+- **Security Gate:** Complete ledger isolation between Product B prepaid SMS units and Product A SaaS subscriptions.
+- **Acceptance Criteria:** Bulk campaign uploaded via spreadsheet, validated, queued, and dispatched via httpSMS with live delivery report tracking.
 
 ---
 
-### Phase 5: Business Automation Engine (MikroTik RouterOS, WHMCS, Webhooks)
-- **Objective:** Build the external integration adapters and idempotent execution worker to automate business fulfillment upon verified payment.
-- **Dependencies:** Phase 4.
+### Phase 6: Developer Platform, Transactional Outbox & BriskSMS Zapier Application
+- **Objective:** Construct the official BriskSMS Zapier application, RFC 6749 OAuth 2.0 authorization server with PKCE, instant REST Hooks, and a resilient Transactional Outbox pattern.
+- **Dependencies:** Phase 4 (Reconciliation events) & Phase 5 (Messaging events).
 - **Deliverables:**
-  - `apps/worker/src/processors/automation.processor.ts`: Event listener for `payment.verified` and `invoice.settled`.
-  - MikroTik RouterOS adapter (RouterOS v6 API and v7 REST/SSH) for PPPoE user reactivation and Hotspot voucher creation.
-  - WHMCS adapter for automated `addInvoicePayment` settlement.
-  - Webhook dispatcher with HMAC-SHA256 signatures (`X-BriskSMS-Signature`) and exponential backoff retry policy (5 attempts).
-  - Idempotency key tracking in Redis/PostgreSQL to prevent duplicate external actions.
+  - Official Zapier CLI application package (`@brisksms/zapier-app`).
+  - OAuth 2.0 authorization server: `/oauth/authorize`, `/oauth/token`, `/oauth/revoke`, PKCE verification, organization-level consent picker.
+  - Granular OAuth scopes: `payments:read`, `invoices:read`, `devices:read`, `sms:send`, `contacts:write`, `campaigns:read`.
+  - Transactional Outbox pattern: `outbox_events` table written atomically with business transactions; background poller delivers events with exponential backoff.
+  - REST Hook subscription endpoints: `/api/v1/zapier/hooks/subscribe` and `/unsubscribe`, automatic pruning on `410 Gone`.
+  - Developer Platform: Scoped API keys (`bsk_live_...` / `bsk_test_...`), HMAC-SHA256 signed webhooks, rate limiting headers, Make.com and n8n compatibility.
 - **Tests:**
-  - Mock MikroTik integration test verifying command generation and failure retry handling.
-  - Mock WHMCS API test verifying idempotent payment logging.
-  - Webhook delivery test with simulated merchant endpoint downtime and subsequent backoff recovery.
-- **Security Gate:** RouterOS credentials and WHMCS API keys encrypted at rest using AES-256-GCM.
-- **Acceptance Criteria:** Verified payment triggers MikroTik user profile update within 2 seconds; network timeouts enter `FULFILLMENT_FAILED` without altering payment verification status.
+  - Full OAuth 2.0 lifecycle test: Authorize $\rightarrow$ Exchange Token $\rightarrow$ Refresh Token $\rightarrow$ Revoke.
+  - Outbox resilience test: Simulated webhook server downtime does not block reconciliation; events retried and delivered upon recovery.
+  - Zapier trigger tests (Payment Evidence, Payment Matched, Review Required, Invoice Paid, Device Offline).
+- **Security Gate:** Zero exposure of device private keys, tenant credentials, or financial mutation actions via Zapier.
+- **Acceptance Criteria:** User can connect BriskSMS to Zapier via OAuth 2.0 and trigger automated downstream actions from payment and SMS events.
 
 ---
 
-### Phase 6: Bulk Messaging Engine, Sender IDs & Prepaid Ledger (Product B)
-- **Objective:** Deliver the independent commercial bulk messaging module with sender ID management, prepaid credit ledger, and multi-aggregator routing.
-- **Dependencies:** Phase 1 (Organizations & RBAC). Note: Independent of Phase 4/5.
-- **Deliverables:**
-  - `apps/api/src/modules/messaging/`: Sender ID verification workflow, contact management, contact groups, CSV campaign scheduler.
-  - Double-entry prepaid credit ledger (`messaging_credit_ledger`) with atomic credit deductions and delivery-failure refunds.
-  - Aggregator gateway adapter interface:
-    - Beem Africa adapter.
-    - DARSMS adapter.
-    - eHUB / FastHub adapter.
-  - Real-time Delivery Report (DLR) webhook ingestion endpoint.
-  - TCRA curfew enforcement: Promotional SMS restricted between 20:00 and 07:00 EAT.
-- **Tests:**
-  - Credit ledger concurrency test: High-volume message dispatch cannot overdraw credit balance below zero.
-  - DLR refund test: Simulated failed message delivery successfully refunds credit to organization ledger.
-  - Anti-spam curfew test: Campaign scheduled for 22:00 automatically queued until 07:01 next morning.
-- **Security Gate:** Verification that Product B credit ledger is completely isolated from Product A subscription billing.
-- **Acceptance Criteria:** Single and bulk SMS dispatch functioning with delivery receipts and automatic credit balance tracking.
-
----
-
-### Phase 7: Enterprise Web Portal (Angular 19+)
+### Phase 7: Enterprise Web Portal (Angular 19+) & Commercial Self-Service
 - **Objective:** Build the modern, responsive enterprise web dashboard for business owners, accountants, support staff, and developers.
 - **Dependencies:** Phases 1–6 (All backend REST APIs).
 - **Deliverables:**
   - Angular 19+ application in `apps/web/` using Standalone Components and Signals.
   - Feature Modules:
     - Real-time Dashboard: Today's revenue, device health, incoming feed, reconciliation rates.
+    - Dynamic Pricing & Subscription Portal: Catalog display, self-service upgrades, billing history.
+    - Integration Management UI: One-click "Connect to Zapier" flow, webhook endpoint management, API keys.
+    - Bulk Messaging Hub: Spreadsheet template download, campaign upload wizard, delivery analytics.
     - Device Management: QR code pairing modal, device battery/connectivity status, revocation.
-    - Payments & Reconciliation: Live payment feed, filter by provider/state, Accountant Review Queue.
-    - Invoices & Customers: Invoice creation, CSV import, customer balance overview.
-    - Business Automations: Rule builder for MikroTik, WHMCS, and custom Webhooks.
-    - Bulk Messaging (Product B): Sender ID application, campaign builder, contact groups, credit ledger.
-    - Developer Center: API key management, webhook registration, event log inspector.
+    - Reconciliation & Accountant Review Queue: Manual matching matrix.
 - **Tests:**
-  - Component unit tests with Karma/Jasmine or modern Jest/Vitest.
-  - End-to-end Cypress/Playwright suites covering login, device pairing, manual reconciliation, and SMS campaign launch.
+  - Component unit tests with Jasmine/Karma.
+  - End-to-end Cypress/Playwright suites covering login, device pairing, manual reconciliation, and Zapier connection.
 - **Security Gate:** Strict Content Security Policy (CSP), anti-clickjacking headers, and XSS sanitization across all data rendering.
 - **Acceptance Criteria:** Fast, responsive UI with sub-second page transitions, full mobile responsiveness, and clean accessibility.
 
 ---
 
-### Phase 8: Commercial Billing, Quota Enforcement & Self-Serve Subscriptions
-- **Objective:** Implement tenant subscription plans, self-serve upgrades, mobile money checkout for subscriptions, and quota enforcement.
-- **Dependencies:** Phase 7.
-- **Deliverables:**
-  - Product A subscription engine (Starter, Growth, Enterprise).
-  - Quota enforcement middleware (tracking active devices, monthly reconciled volume, automation rules).
-  - Checkout integration: Pay subscription fees using Lipa Kwa M-Pesa / Tigo Pesa push USSD.
-  - Product B credit purchase portal with instant wallet top-ups.
-  - Automated tax invoice generation for all B2B payments.
-- **Tests:**
-  - Quota limit test: Organization at quota ceiling receives upgrade notification; payment ingestion continues safely without data loss.
-  - Top-up test: Purchasing SMS credits immediately credits `messaging_credit_ledger`.
-- **Security Gate:** Tamper-proof webhook handling for subscription payment gateways.
-- **Acceptance Criteria:** End-to-end self-serve subscription renewal and instant messaging credit top-up operational.
-
----
-
-### Phase 9: Hardening, Penetration Testing & Production Launch
+### Phase 8: Security Hardening, Penetration Testing & Production Launch
 - **Objective:** Final production readiness, external security audit, disaster recovery validation, and commercial launch.
 - **Dependencies:** All previous phases.
 - **Deliverables:**

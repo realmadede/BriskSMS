@@ -204,28 +204,28 @@ To maintain long-term maintainability and prevent circular dependencies, the bac
 ```
 
 ### Module Responsibilities:
-1. **`AuthModule`**: User registration, login, JWT issuance, refresh token rotation, 2FA validation, password hashing (Argon2id).
-2. **`OrgModule`**: Multi-tenant organization CRUD, team member invitations, role assignments, subscription quota tracking.
-3. **`DeviceModule`**: QR pairing token generation, Android device handshake, hardware public key verification, device heartbeat telemetry, device revocation.
-4. **`PaymentModule`**: Raw payload ingestion endpoint (`POST /v1/ingest/notifications`), payload persistence, parser delegation, and deduplication.
-5. **`ReconciliationModule`**: Invoice CRUD, automated matching matrix, partial/overpayment accounting, manual match approval queue.
-6. **`AutomationModule`**: Event listener, rule engine, action dispatcher (MikroTik RouterOS API client, WHMCS REST client, webhook delivery).
-7. **`MessagingModule`**: Product B engine: Sender ID registration, prepaid credit ledger management, single/bulk SMS dispatch, aggregator failover routing, and DLR ingestion.
-8. **`BillingModule`**: Product A SaaS subscriptions, Product B SMS credit purchasing, invoice generation, integration with local checkout.
-9. **`DeveloperModule`**: API key generation (hashed in DB), webhook endpoint registration, event log inspector.
+1. **`AuthModule`**: User registration, login, JWT access/refresh token issuance, Scrypt/Argon2id password hashing, RFC 6749 OAuth 2.0 authorization server with PKCE for Zapier.
+2. **`OrgModule`**: Multi-tenant organization CRUD, team member invitations, role hierarchy matrix (`OWNER`, `ADMIN`, `OPERATOR`, `CASHIER`, `AUDITOR`).
+3. **`DeviceModule`**: 5-minute cryptographic QR pairing flow, Android device handshake, hardware public key verification, device heartbeat telemetry, device revocation.
+4. **`PaymentModule`**: Raw payload ingestion endpoint (`POST /v1/ingest/notifications`), append-only persistence, parser delegation, and SHA-256 deduplication.
+5. **`ReconciliationModule`**: Invoice CRUD, automated matching matrix (Memo, Customer/Phone, Checkout window), partial/overpayment accounting, manual Accountant Review Queue (`REVIEW_REQUIRED`).
+6. **`SubscriptionModule`**: Dynamic commercial catalog: Products, Plans, Versions, localized integer minor-unit pricing (PlanPrices), dynamic EntitlementGuard, price snapshotting at obligation generation, zero hardcoded commercial logic.
+7. **`MessagingModule`**: Product B engine: `MessagingProvider` boundary, httpSMS gateway adapter (Bring-Your-Own-Account / BYO-Key AES-256-GCM credentials), CSV/XLSX recipient streaming ingestion (configurable 1,000 recipient batch default), BullMQ rate-limited carrier pacing queue (1 SMS / 3s per SIM), and double-entry prepaid credit ledger.
+8. **`OutboxModule`**: Transactional outbox engine: writes domain events atomically with business transactions; background poller delivers instant Zapier REST Hooks (`payment.matched`, `invoice.paid`, etc.) and developer webhooks with exponential backoff and `410 Gone` pruning.
+9. **`DeveloperModule`**: Scoped API keys (`bsk_live_...` / `bsk_test_...`), HMAC-SHA256 signed webhook dispatch, rate limiting, Make.com and n8n compatibility.
 
 ---
 
 ## 4. Database Architecture (PostgreSQL & Prisma)
 
-The database schema is organized around multi-tenancy, immutable financial evidence, and strict ledger separation.
+The database schema is organized around multi-tenancy, immutable financial evidence, dynamic subscription versioning, and strict dual-ledger separation.
 
 ### Key Database Entities & Relationships:
 
 ```
 [organizations] 1 ----< N [users_organizations] >---- 1 [users]
        |
-       +-----< N [devices]
+       +-----< N [devices] ---> [device_telemetry]
        |
        +-----< N [raw_payment_evidence] (Immutable append-only)
        |              |
@@ -237,12 +237,24 @@ The database schema is organized around multi-tenancy, immutable financial evide
        |              |
        |              +-----< N [invoice_payments] (ACID settlement link)
        |
-       +-----< N [automation_rules] ---> N [automation_logs]
+       +-----< 1 [organization_subscriptions] (Product A: Dynamic SaaS Subscription)
+       |              |
+       |              +-----> 1 [plan_versions] ---> 1 [subscription_plans] ---> [commercial_products]
+       |              |             |
+       |              |             +-----< N [plan_prices] (Immutable minor-unit pricing)
+       |              |             +-----< N [plan_entitlements] ---> [feature_definitions]
+       |              |
+       |              +-----< N [subscription_billing_invoices] (Price snapshots)
+       |              +-----< N [subscription_history]
        |
-       +-----< 1 [messaging_accounts] (Product B)
-                      |
-                      +-----< N [messaging_credit_ledger] (Atomic credits/debits)
-                      +-----< N [sms_campaigns] ---> N [sms_messages]
+       +-----< 1 [messaging_accounts] (Product B: httpSMS BYO-Key Credentials)
+       |              |
+       |              +-----< N [messaging_credit_ledgers] (Atomic prepaid unit credits/debits)
+       |              +-----< N [sms_campaigns] ---> N [sms_messages]
+       |
+       +-----< N [outbox_events] (Transactional Outbox for Zapier REST Hooks & Webhooks)
+       +-----< N [zapier_hook_subscriptions] (Active REST Hook URLs)
+       +-----< N [api_keys] (Hashed SHA-256)
 ```
 
 ### Core Schema Invariants:
