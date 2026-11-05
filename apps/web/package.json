@@ -1,0 +1,14 @@
+{
+  "name": "@brisksms/web",
+  "version": "1.0.0",
+  "private": true,
+  "description": "BriskSMS Web Application - Liquid Glass & Stitch Experience",
+  "scripts": {
+    "start": "bun run server.ts",
+    "dev": "bun run server.ts"
+  },
+  "dependencies": {
+    "@brisksms/shared": "*",
+    "@brisksms/ui": "*"
+  }
+}

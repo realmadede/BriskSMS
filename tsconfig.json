@@ -4,6 +4,8 @@
     { "path": "./packages/shared" },
     { "path": "./packages/db" },
     { "path": "./packages/parser-engine" },
-    { "path": "./packages/ui" }
+    { "path": "./packages/ui" },
+    { "path": "./apps/web" }
   ]
 }
+
