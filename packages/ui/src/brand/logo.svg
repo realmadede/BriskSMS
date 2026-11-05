@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 36" fill="none">
+  <!-- Symbol -->
+  <g transform="translate(0, 2)">
+    <rect x="4" y="3" width="5.5" height="22" rx="2.75" fill="#0B0A09"/>
+    <path fill-rule="evenodd" clip-rule="evenodd" d="M8 3H17C20.3 3 23 5.5 23 8.7C23 11.9 20.3 14.5 17 14.5H8V3ZM12.5 6.2H16.5C18 6.2 19.2 7.3 19.2 8.7C19.2 10.1 18 11.2 16.5 11.2H12.5V6.2Z" fill="#0B0A09"/>
+    <path fill-rule="evenodd" clip-rule="evenodd" d="M8 12.5H18C21.6 12.5 24.5 15.2 24.5 18.7C24.5 22.2 21.6 25 18 25H8V12.5ZM12.5 16H17.5C19.2 16 20.5 17.2 20.5 18.7C20.5 20.2 19.2 21.4 17.5 21.4H12.5V16Z" fill="#0B0A09"/>
+    <circle cx="16.5" cy="18.7" r="1.9" fill="#C6B480"/>
+  </g>
+  <!-- Wordmark -->
+  <text x="34" y="24" font-family="'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif" font-size="20" font-weight="800" letter-spacing="-0.04em" fill="#0B0A09">Brisk<tspan font-weight="500" fill="#6E6B65">SMS</tspan></text>
+</svg>

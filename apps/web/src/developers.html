@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BriskSMS for Developers — Build Business Workflows with Payment Intelligence & Messaging</title>
+  <link rel="icon" type="image/svg+xml" href="/assets/brand/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-canvas: #F4F1EA;
+      --bg-bone: #EAE6DF;
+      --bg-sand: #DCD6CB;
+      --bg-card: linear-gradient(180deg, #EBE7DE 0%, #E9E4DA 45%, #E0D9CB 100%);
+      --accent-sand: #C6B480;
+      --accent-sand-hover: #b8a674;
+      --color-dark: #0B0A09;
+      --color-dark-surface: #141311;
+      --text-main: #0B0A09;
+      --text-sub: #54514C;
+      --text-muted: #827E77;
+      --border-dark: #0B0A09;
+      --border-subtle: rgba(11, 10, 9, 0.12);
+      --font-stack: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    body {
+      background-color: var(--bg-canvas);
+      font-family: var(--font-stack);
+      color: var(--text-main);
+      line-height: 1.55;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 0 1.5rem;
+    }
+
+    /* Top Nav */
+    .dev-nav-wrapper {
+      position: sticky;
+      top: 0;
+      left: 0;
+      width: 100%;
+      z-index: 100;
+      background: rgba(244, 241, 234, 0.92);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .dev-nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 72px;
+    }
+
+    .brand-link {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      text-decoration: none;
+      color: var(--text-main);
+    }
+
+    .brand-badge {
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      padding: 3px 8px;
+      border-radius: 6px;
+      background: var(--color-dark);
+      color: #FFFFFF;
+    }
+
+    .dev-nav-links {
+      display: flex;
+      align-items: center;
+      gap: 2rem;
+      list-style: none;
+    }
+
+    .dev-nav-links a {
+      color: var(--text-sub);
+      text-decoration: none;
+      font-size: 0.925rem;
+      font-weight: 500;
+      transition: color 0.2s ease;
+    }
+
+    .dev-nav-links a:hover {
+      color: var(--text-main);
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 500;
+      cursor: pointer;
+      text-decoration: none;
+      border-radius: 8px;
+      padding: 0.65rem 1.4rem;
+      font-size: 0.885rem;
+      transition: all 0.2s ease;
+      border: none;
+      white-space: nowrap;
+    }
+
+    .btn-sand {
+      background-color: var(--accent-sand);
+      color: var(--color-dark);
+      box-shadow: 0 4px 12px rgba(198, 180, 128, 0.25);
+    }
+
+    .btn-sand:hover {
+      background-color: var(--accent-sand-hover);
+      transform: translateY(-1px);
+    }
+
+    .btn-dark {
+      background-color: var(--color-dark);
+      color: #FFFFFF;
+    }
+
+    .btn-dark:hover {
+      background-color: #242220;
+      transform: translateY(-1px);
+    }
+
+    /* Hero Section */
+    .dev-hero {
+      padding: 5rem 0 4.5rem 0;
+      border-bottom: 1px solid var(--border-subtle);
+      background: radial-gradient(100% 100% at 50% 0%, #F5F2EC 0%, #EAE6DF 100%);
+    }
+
+    .eyebrow {
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin-bottom: 1rem;
+      display: inline-block;
+    }
+
+    .dev-hero-title {
+      font-size: clamp(2.4rem, 4.5vw, 4rem);
+      font-weight: 800;
+      letter-spacing: -0.04em;
+      line-height: 1.08;
+      max-width: 840px;
+      margin-bottom: 1.5rem;
+    }
+
+    .dev-hero-desc {
+      font-size: 1.15rem;
+      color: var(--text-sub);
+      max-width: 680px;
+      line-height: 1.65;
+      margin-bottom: 2.25rem;
+    }
+
+    .dev-hero-actions {
+      display: flex;
+      align-items: center;
+      gap: 1.25rem;
+    }
+
+    /* Sections */
+    .dev-section {
+      padding: 5.5rem 0;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .section-title {
+      font-size: 2rem;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      margin-bottom: 1rem;
+    }
+
+    .section-desc {
+      font-size: 1rem;
+      color: var(--text-sub);
+      max-width: 660px;
+      line-height: 1.65;
+      margin-bottom: 3rem;
+    }
+
+    /* Integration Capabilities Grid */
+    .capabilities-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 2rem;
+    }
+
+    .cap-card {
+      background: #FFFFFF;
+      border: 1.5px solid var(--border-dark);
+      border-radius: 24px;
+      padding: 3rem;
+    }
+
+    .cap-badge {
+      display: inline-block;
+      font-size: 0.725rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      padding: 3px 10px;
+      border-radius: 6px;
+      background: var(--bg-bone);
+      margin-bottom: 1.25rem;
+    }
+
+    .cap-title {
+      font-size: 1.45rem;
+      font-weight: 700;
+      margin-bottom: 1rem;
+      letter-spacing: -0.02em;
+    }
+
+    .cap-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 0.85rem;
+    }
+
+    .cap-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.75rem;
+      font-size: 0.925rem;
+      color: var(--text-main);
+    }
+
+    .cap-item svg {
+      width: 16px;
+      height: 16px;
+      stroke: var(--accent-sand-hover);
+      stroke-width: 2.5;
+      fill: none;
+      margin-top: 3px;
+      flex-shrink: 0;
+    }
+
+    .tag-status {
+      font-size: 0.65rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      padding: 2px 6px;
+      border-radius: 4px;
+      margin-left: 0.5rem;
+    }
+
+    .tag-confirmed {
+      background: #E8F5E9;
+      color: #2E7D32;
+    }
+
+    .tag-planned {
+      background: #FFF3E0;
+      color: #E65100;
+    }
+
+    /* Developer Journey Steps */
+    .journey-steps {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 1.25rem;
+    }
+
+    .journey-box {
+      background: #FFFFFF;
+      border: 1px solid var(--border-subtle);
+      border-radius: 18px;
+      padding: 1.75rem 1.25rem;
+    }
+
+    .journey-num {
+      font-size: 1.5rem;
+      font-weight: 800;
+      color: var(--accent-sand-hover);
+      margin-bottom: 0.75rem;
+    }
+
+    .journey-box h4 {
+      font-size: 0.95rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+      line-height: 1.3;
+    }
+
+    .journey-box p {
+      font-size: 0.8rem;
+      color: var(--text-sub);
+      line-height: 1.5;
+    }
+
+    /* Code & Security Details */
+    .code-sample-box {
+      background: var(--color-dark-surface);
+      border: 1.5px solid var(--border-dark);
+      border-radius: 20px;
+      overflow: hidden;
+      margin-top: 2rem;
+    }
+
+    .code-header {
+      background: #1C1B19;
+      padding: 0.75rem 1.25rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      color: #B5B0A8;
+    }
+
+    .code-body {
+      padding: 1.5rem;
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      line-height: 1.7;
+      color: #E5E1D8;
+      overflow-x: auto;
+    }
+
+    .code-comment {
+      color: #7D7870;
+    }
+
+    .code-keyword {
+      color: #D4C5A2;
+    }
+
+    .code-string {
+      color: #A5D6A7;
+    }
+
+    /* Security Principles */
+    .sec-points-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 1.5rem;
+      margin-top: 2rem;
+    }
+
+    .sec-point-card {
+      background: #FFFFFF;
+      border: 1px solid var(--border-subtle);
+      border-radius: 18px;
+      padding: 1.75rem;
+    }
+
+    .sec-point-card h4 {
+      font-size: 1.1rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+    }
+
+    .sec-point-card p {
+      font-size: 0.885rem;
+      color: var(--text-sub);
+      line-height: 1.6;
+    }
+
+    /* Responsive */
+    @media (max-width: 900px) {
+      .capabilities-grid {
+        grid-template-columns: 1fr;
+      }
+      .journey-steps {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+
+    @media (max-width: 600px) {
+      .journey-steps {
+        grid-template-columns: 1fr;
+      }
+      .dev-hero-actions {
+        flex-direction: column;
+        width: 100%;
+      }
+      .dev-hero-actions .btn {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Navigation -->
+  <header class="dev-nav-wrapper">
+    <div class="container">
+      <nav class="dev-nav" aria-label="Developer Navigation">
+        <a href="/" class="brand-link">
+          <svg width="24" height="24" viewBox="0 0 32 32" fill="none">
+            <rect x="5" y="4" width="6" height="24" rx="3" fill="#0B0A09"/>
+            <path fill-rule="evenodd" clip-rule="evenodd" d="M9 4H19C22.6 4 25.5 6.7 25.5 10.2C25.5 13.7 22.6 16.5 19 16.5H9V4ZM14 7.5H18.5C20.2 7.5 21.5 8.7 21.5 10.2C21.5 11.7 20.2 13 18.5 13H14V7.5Z" fill="#0B0A09"/>
+            <path fill-rule="evenodd" clip-rule="evenodd" d="M9 14.5H20C24 14.5 27.2 17.5 27.2 21.2C27.2 25 24 28 20 28H9V14.5ZM14 18.5H19.5C21.4 18.5 22.8 19.7 22.8 21.2C22.8 22.8 21.4 24 19.5 24H14V18.5Z" fill="#0B0A09"/>
+            <circle cx="18.5" cy="21.2" r="2.2" fill="#C6B480"/>
+          </svg>
+          <span style="font-weight: 800; font-size: 1.25rem; letter-spacing: -0.03em;">BriskSMS</span>
+          <span class="brand-badge">Developers</span>
+        </a>
+
+        <ul class="dev-nav-links">
+          <li><a href="/#platform">Main Website</a></li>
+          <li><a href="/#payment-intelligence">Payment Intelligence</a></li>
+          <li><a href="/#bulk-sms">Bulk SMS</a></li>
+          <li><a href="#integration">Capabilities</a></li>
+          <li><a href="#security">Security</a></li>
+        </ul>
+
+        <a href="/#get-started" class="btn btn-sand">Get Started</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <!-- Hero -->
+    <section class="dev-hero">
+      <div class="container">
+        <span class="eyebrow">BRISKSMS FOR DEVELOPERS</span>
+        <h1 class="dev-hero-title">Build business workflows with BriskSMS.</h1>
+        <p class="dev-hero-desc">
+          Connect your applications to BriskSMS and bring payment intelligence and business messaging into your own business workflows.
+        </p>
+
+        <div class="dev-hero-actions">
+          <a href="#api-specs" class="btn btn-dark" style="padding: 0.85rem 1.75rem; font-size: 0.95rem;">Explore Architecture & Webhooks</a>
+          <a href="/" class="btn btn-sand" style="padding: 0.85rem 1.75rem; font-size: 0.95rem;">Return to Main Site</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- Integration Capabilities -->
+    <section class="dev-section" id="integration">
+      <div class="container">
+        <span class="eyebrow">INTEGRATION INTERFACES</span>
+        <h2 class="section-title">What developers can integrate</h2>
+        <p class="section-desc">
+          BriskSMS separates payment reconciliation operations from bulk messaging. Integration endpoints strictly preserve tenant boundaries and deterministic idempotency.
+        </p>
+
+        <div class="capabilities-grid">
+          <!-- Payment Intelligence -->
+          <div class="cap-card">
+            <span class="cap-badge">Service 01</span>
+            <h3 class="cap-title">Payment Intelligence</h3>
+            <ul class="cap-list">
+              <li class="cap-item">
+                <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                <span>Access authorized business transaction information through supported interfaces <span class="tag-status tag-confirmed">Implemented</span></span>
+              </li>
+              <li class="cap-item">
+                <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                <span>Deterministic deduplication verification (SHA-256 cryptographically hashed) <span class="tag-status tag-confirmed">Implemented</span></span>
+              </li>
+              <li class="cap-item">
+                <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                <span>HMAC SHA-256 signed webhook delivery for verified settlement events <span class="tag-status tag-confirmed">Implemented</span></span>
+              </li>
+              <li class="cap-item">
+                <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                <span>Connect internal business systems (MikroTik hotspot, WHMCS billing, POS) <span class="tag-status tag-planned">Planned Phase 2</span></span>
+              </li>
+            </ul>
+          </div>
+
+          <!-- Bulk Messaging -->
+          <div class="cap-card">
+            <span class="cap-badge">Service 02</span>
+            <h3 class="cap-title">Bulk Messaging</h3>
+            <ul class="cap-list">
+              <li class="cap-item">
+                <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                <span>Send single SMS through authenticated developer endpoints <span class="tag-status tag-confirmed">Implemented</span></span>
+              </li>
+              <li class="cap-item">
+                <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                <span>Prepaid credit ledger isolation (distinct from SaaS subscriptions) <span class="tag-status tag-confirmed">Implemented</span></span>
+              </li>
+              <li class="cap-item">
+                <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                <span>Bulk messaging campaign queue dispatcher and rate limiter <span class="tag-status tag-planned">Planned Phase 3</span></span>
+              </li>
+              <li class="cap-item">
+                <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                <span>Delivery report webhooks (DLR callbacks from upstream SMS gateways) <span class="tag-status tag-planned">Planned Phase 3</span></span>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Integration Journey -->
+    <section class="dev-section">
+      <div class="container">
+        <span class="eyebrow">DEVELOPER WORKFLOW</span>
+        <h2 class="section-title">The integration journey</h2>
+        <p class="section-desc">
+          Follow a structured, secure path to connect your application to BriskSMS.
+        </p>
+
+        <div class="journey-steps">
+          <div class="journey-box">
+            <div class="journey-num">01</div>
+            <h4>Create Account</h4>
+            <p>Register an organization account on the BriskSMS platform.</p>
+          </div>
+          <div class="journey-box">
+            <div class="journey-num">02</div>
+            <h4>Register App</h4>
+            <p>Generate API credentials and set authorized permissions.</p>
+          </div>
+          <div class="journey-box">
+            <div class="journey-num">03</div>
+            <h4>Configure Access</h4>
+            <p>Pair authorized relay devices or configure webhook listener URLs.</p>
+          </div>
+          <div class="journey-box">
+            <div class="journey-num">04</div>
+            <h4>Connect Service</h4>
+            <p>Connect Payment Intelligence or Bulk SMS endpoints independently.</p>
+          </div>
+          <div class="journey-box">
+            <div class="journey-num">05</div>
+            <h4>Test Integration</h4>
+            <p>Run simulated test payloads against sandboxed webhook fixtures.</p>
+          </div>
+          <div class="journey-box">
+            <div class="journey-num">06</div>
+            <h4>Monitor</h4>
+            <p>Track audit trails, delivery statuses, and device relay health.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Verified Webhook Signature Specification -->
+    <section class="dev-section" id="api-specs">
+      <div class="container">
+        <span class="eyebrow">AUTHENTICATION & SECURITY SPECIFICATION</span>
+        <h2 class="section-title">Webhook signature verification</h2>
+        <p class="section-desc">
+          BriskSMS delivers event notifications with an <code>X-Brisk-Signature</code> header. Every incoming webhook payload must be validated using constant-time timing-safe comparison to prevent timing attacks.
+        </p>
+
+        <div class="code-sample-box">
+          <div class="code-header">
+            <span>TypeScript (Node.js / Bun Verification Example)</span>
+            <span>HMAC SHA-256</span>
+          </div>
+          <pre class="code-body"><code><span class="code-comment">// Verified signature verification contract from @brisksms/shared</span>
+<span class="code-keyword">import</span> { createHmac, timingSafeEqual } <span class="code-keyword">from</span> <span class="code-string">'node:crypto'</span>;
+
+<span class="code-keyword">export function</span> <span class="code-keyword">verifyWebhookSignature</span>(
+  rawPayload: <span class="code-keyword">string</span>,
+  expectedSignature: <span class="code-keyword">string</span>,
+  secret: <span class="code-keyword">string</span>
+): <span class="code-keyword">boolean</span> {
+  <span class="code-keyword">const</span> computed = createHmac(<span class="code-string">'sha256'</span>, secret)
+    .update(rawPayload, <span class="code-string">'utf8'</span>)
+    .digest(<span class="code-string">'hex'</span>);
+
+  <span class="code-keyword">const</span> computedBuf = Buffer.from(computed, <span class="code-string">'hex'</span>);
+  <span class="code-keyword">const</span> expectedBuf = Buffer.from(expectedSignature, <span class="code-string">'hex'</span>);
+
+  <span class="code-keyword">if</span> (computedBuf.length !== expectedBuf.length) {
+    <span class="code-keyword">return false</span>;
+  }
+
+  <span class="code-comment">// Timing-safe comparison prevents timing side-channel leaks</span>
+  <span class="code-keyword">return</span> timingSafeEqual(computedBuf, expectedBuf);
+}</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- Developer Security -->
+    <section class="dev-section" id="security">
+      <div class="container">
+        <span class="eyebrow">RESPONSIBLE PRACTICES</span>
+        <h2 class="section-title">Developer security standards</h2>
+        <p class="section-desc">
+          Payment reconciliation and communication infrastructure requires strict security invariants.
+        </p>
+
+        <div class="sec-points-grid">
+          <div class="sec-point-card">
+            <h4>Tenant Isolation</h4>
+            <p>Every transaction query and mutation is partitioned by Organization ID. Cross-tenant leakage is strictly prevented at the database and API gateway level.</p>
+          </div>
+          <div class="sec-point-card">
+            <h4>Deterministic Idempotency</h4>
+            <p>All webhook actions and service integrations must include idempotency keys to ensure duplicate network transmissions never result in double settlement.</p>
+          </div>
+          <div class="sec-point-card">
+            <h4>Purpose-Limited Scope</h4>
+            <p>Relay devices only ingest authorized financial notifications from verified providers (M-Pesa, Mixx, Airtel Money, HaloPesa, supported banks). Personal messages are rejected.</p>
+          </div>
+          <div class="sec-point-card">
+            <h4>Audit Logging</h4>
+            <p>Every administrative access, API request, and reconciliation decision is immutably appended to tenant audit records.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CTA -->
+    <section class="dev-section" style="border-bottom: none; text-align: center;">
+      <div class="container" style="max-width: 680px;">
+        <span class="eyebrow">START BUILDING</span>
+        <h2 class="section-title">Ready to integrate BriskSMS?</h2>
+        <p class="section-desc" style="margin-left: auto; margin-right: auto; margin-bottom: 2rem;">
+          Get in touch with our engineering team for technical onboarding, sandboxed webhook testing, or architectural integration support.
+        </p>
+        <div style="display: flex; gap: 1rem; justify-content: center;">
+          <a href="/#get-started" class="btn btn-sand" style="padding: 0.85rem 2rem; font-size: 0.95rem;">Get Started</a>
+          <a href="/" class="btn btn-dark" style="padding: 0.85rem 2rem; font-size: 0.95rem;">Back to Main Site</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Footer -->
+  <footer style="background: var(--bg-bone); border-top: 1px solid var(--border-subtle); padding: 3rem 0; font-size: 0.875rem; color: var(--text-muted);">
+    <div class="container" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: gap: 1rem;">
+      <div>&copy; BriskSMS. Built to help businesses operate with greater clarity.</div>
+      <div><a href="/" style="color: var(--text-main); text-decoration: none; font-weight: 600;">brisk-sms.com</a></div>
+    </div>
+  </footer>
+
+</body>
+</html>
