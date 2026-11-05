@@ -104,3 +104,46 @@ export class QuotaExceededError extends BriskError {
   }
 }
 
+/**
+ * Thrown when a requested feature is disabled under the organization's current plan
+ */
+export class FeatureDisabledError extends BriskError {
+  constructor(featureKey: string) {
+    super(
+      'FEATURE_DISABLED',
+      `Feature '${featureKey}' is not enabled on your organization's current subscription plan.`,
+      403,
+      { featureKey },
+    );
+  }
+}
+
+/**
+ * Thrown when a requested commercial plan or version cannot be found
+ */
+export class PlanNotFoundError extends BriskError {
+  constructor(planCode: string) {
+    super(
+      'PLAN_NOT_FOUND',
+      `Commercial plan or version '${planCode}' does not exist or is inactive.`,
+      404,
+      { planCode },
+    );
+  }
+}
+
+/**
+ * Thrown when a subscription is suspended or past its grace period
+ */
+export class SubscriptionPastDueError extends BriskError {
+  constructor(orgId: string, status: string) {
+    super(
+      'SUBSCRIPTION_SUSPENDED',
+      `Organization subscription is '${status}'. Please update payment details to restore service.`,
+      402,
+      { orgId, status },
+    );
+  }
+}
+
+

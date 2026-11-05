@@ -1,6 +1,109 @@
 import { randomUUID } from 'node:crypto';
-import { UserRole, DeviceStatus, DeviceIngestionMode } from '@brisksms/shared';
+import {
+  UserRole,
+  DeviceStatus,
+  DeviceIngestionMode,
+  ProductType,
+  BillingInterval,
+  SubscriptionStatus,
+  EntitlementType,
+  FeatureKey,
+} from '@brisksms/shared';
 import { assertTenantContext } from '@brisksms/db';
+
+export interface CommercialProductRecord {
+  id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  productType: ProductType;
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface SubscriptionPlanRecord {
+  id: string;
+  productId: string;
+  code: string;
+  name: string;
+  description: string | null;
+  isPublic: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface PlanVersionRecord {
+  id: string;
+  planId: string;
+  versionNumber: number;
+  effectiveFrom: Date;
+  effectiveTo: Date | null;
+  isActive: boolean;
+  trialPeriodDays: number;
+  gracePeriodDays: number;
+  createdAt: Date;
+}
+
+export interface PlanPriceRecord {
+  id: string;
+  planVersionId: string;
+  currency: string;
+  amountCents: bigint;
+  billingInterval: BillingInterval;
+  isActive: boolean;
+  createdAt: Date;
+}
+
+export interface FeatureDefinitionRecord {
+  id: string;
+  key: string;
+  name: string;
+  description: string | null;
+  type: EntitlementType;
+  defaultValue: string;
+  createdAt: Date;
+}
+
+export interface PlanEntitlementRecord {
+  id: string;
+  planVersionId: string;
+  featureKey: string;
+  value: string;
+  createdAt: Date;
+}
+
+export interface OrganizationSubscriptionRecord {
+  id: string;
+  organizationId: string;
+  planVersionId: string;
+  status: SubscriptionStatus;
+  currency: string;
+  unitPriceCents: bigint;
+  billingInterval: BillingInterval;
+  currentPeriodStart: Date;
+  currentPeriodEnd: Date;
+  trialEndsAt: Date | null;
+  canceledAt: Date | null;
+  cancelAtPeriodEnd: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface SubscriptionBillingInvoiceRecord {
+  id: string;
+  organizationId: string;
+  subscriptionId: string;
+  invoiceNumber: string;
+  amountCents: bigint;
+  currency: string;
+  periodStart: Date;
+  periodEnd: Date;
+  isPaid: boolean;
+  paidAt: Date | null;
+  paymentProviderRef: string | null;
+  createdAt: Date;
+}
 
 export interface UserRecord {
   id: string;
@@ -110,6 +213,25 @@ export class MemoryStore {
   refreshTokens = new Map<string, RefreshTokenRecord>(); // tokenHash -> record
   auditLogs: AuditLogRecord[] = [];
 
+  // Commercial Catalog & Subscription Maps
+  products = new Map<string, CommercialProductRecord>();
+  productsByCode = new Map<string, string>(); // code -> id
+
+  plans = new Map<string, SubscriptionPlanRecord>();
+  plansByCode = new Map<string, string>(); // code -> id
+
+  planVersions = new Map<string, PlanVersionRecord>(); // id -> record
+  planPrices = new Map<string, PlanPriceRecord>(); // id -> record
+  featureDefinitions = new Map<string, FeatureDefinitionRecord>(); // key -> record
+  planEntitlements = new Map<string, PlanEntitlementRecord>(); // `${planVersionId}:${featureKey}` -> record
+
+  subscriptions = new Map<string, OrganizationSubscriptionRecord>(); // organizationId -> record
+  subscriptionInvoices: SubscriptionBillingInvoiceRecord[] = [];
+
+  constructor() {
+    this.seedDefaultCatalog();
+  }
+
   // Reset store for testing
   reset(): void {
     this.users.clear();
@@ -124,6 +246,213 @@ export class MemoryStore {
     this.pairingTokens.clear();
     this.refreshTokens.clear();
     this.auditLogs = [];
+
+    this.subscriptions.clear();
+    this.subscriptionInvoices = [];
+    this.seedDefaultCatalog();
+  }
+
+  seedDefaultCatalog(): void {
+    this.products.clear();
+    this.productsByCode.clear();
+    this.plans.clear();
+    this.plansByCode.clear();
+    this.planVersions.clear();
+    this.planPrices.clear();
+    this.featureDefinitions.clear();
+    this.planEntitlements.clear();
+
+    const now = new Date();
+
+    // 1. Seed Products (Product A vs Product B)
+    const paymentIntelProd: CommercialProductRecord = {
+      id: randomUUID(),
+      code: 'PROD_PAYMENT_INTEL',
+      name: 'BriskSMS Payment Intelligence & Reconciliation',
+      description: 'Automated Tanzanian mobile money & bank reconciliation SaaS platform',
+      productType: ProductType.PAYMENT_INTELLIGENCE,
+      isActive: true,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.products.set(paymentIntelProd.id, paymentIntelProd);
+    this.productsByCode.set(paymentIntelProd.code, paymentIntelProd.id);
+
+    const bulkSmsProd: CommercialProductRecord = {
+      id: randomUUID(),
+      code: 'PROD_BULK_MESSAGING',
+      name: 'BriskSMS Bulk Messaging Engine',
+      description: 'Prepaid SMS messaging engine powered by httpSMS and carrier SIM relay',
+      productType: ProductType.BULK_MESSAGING,
+      isActive: true,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.products.set(bulkSmsProd.id, bulkSmsProd);
+    this.productsByCode.set(bulkSmsProd.code, bulkSmsProd.id);
+
+    // 2. Seed Canonical Feature Definitions
+    const features: Array<{ key: string; name: string; type: EntitlementType; defaultValue: string }> = [
+      { key: FeatureKey.MAX_CONNECTED_DEVICES, name: 'Maximum Connected Relay Devices', type: EntitlementType.NUMERIC_LIMIT, defaultValue: '1' },
+      { key: FeatureKey.MAX_ORGANIZATION_MEMBERS, name: 'Maximum Organization Members', type: EntitlementType.NUMERIC_LIMIT, defaultValue: '5' },
+      { key: FeatureKey.MAX_PAYMENT_ACCOUNTS, name: 'Maximum Connected Payment Accounts', type: EntitlementType.NUMERIC_LIMIT, defaultValue: '1' },
+      { key: FeatureKey.API_ACCESS, name: 'Developer REST API Access', type: EntitlementType.BOOLEAN_FLAG, defaultValue: 'false' },
+      { key: FeatureKey.WEBHOOK_ACCESS, name: 'Outbound HMAC Webhooks', type: EntitlementType.BOOLEAN_FLAG, defaultValue: 'false' },
+      { key: FeatureKey.ZAPIER_INTEGRATION, name: 'BriskSMS Zapier Application', type: EntitlementType.BOOLEAN_FLAG, defaultValue: 'false' },
+      { key: FeatureKey.MIKROTIK_INTEGRATION, name: 'MikroTik Hotspot Auto-Provisioning', type: EntitlementType.BOOLEAN_FLAG, defaultValue: 'false' },
+      { key: FeatureKey.RECONCILIATION_AUTOMATION, name: 'Deterministic Invoice Reconciliation', type: EntitlementType.BOOLEAN_FLAG, defaultValue: 'true' },
+      { key: FeatureKey.BULK_MESSAGING_ENABLED, name: 'Bulk Messaging Service Access', type: EntitlementType.BOOLEAN_FLAG, defaultValue: 'false' },
+      { key: FeatureKey.HISTORICAL_DATA_MONTHS, name: 'Historical Data Retention (Months)', type: EntitlementType.NUMERIC_LIMIT, defaultValue: '3' },
+    ];
+
+    for (const f of features) {
+      const featRecord: FeatureDefinitionRecord = {
+        id: randomUUID(),
+        key: f.key,
+        name: f.name,
+        description: null,
+        type: f.type,
+        defaultValue: f.defaultValue,
+        createdAt: now,
+      };
+      this.featureDefinitions.set(featRecord.key, featRecord);
+    }
+
+    // 3. Helper to register a complete plan with version, prices, and entitlements
+    const registerPlanWithVersion = (
+      planCode: string,
+      planName: string,
+      description: string,
+      prices: Array<{ currency: string; amountCents: bigint; billingInterval: BillingInterval }>,
+      entitlementValues: Record<string, string>,
+    ) => {
+      const planId = randomUUID();
+      const plan: SubscriptionPlanRecord = {
+        id: planId,
+        productId: paymentIntelProd.id,
+        code: planCode,
+        name: planName,
+        description,
+        isPublic: true,
+        createdAt: now,
+        updatedAt: now,
+      };
+      this.plans.set(plan.id, plan);
+      this.plansByCode.set(plan.code, plan.id);
+
+      const versionId = randomUUID();
+      const version: PlanVersionRecord = {
+        id: versionId,
+        planId: plan.id,
+        versionNumber: 1,
+        effectiveFrom: now,
+        effectiveTo: null,
+        isActive: true,
+        trialPeriodDays: 14,
+        gracePeriodDays: 3,
+        createdAt: now,
+      };
+      this.planVersions.set(version.id, version);
+
+      for (const p of prices) {
+        const priceRecord: PlanPriceRecord = {
+          id: randomUUID(),
+          planVersionId: version.id,
+          currency: p.currency,
+          amountCents: p.amountCents,
+          billingInterval: p.billingInterval,
+          isActive: true,
+          createdAt: now,
+        };
+        this.planPrices.set(priceRecord.id, priceRecord);
+      }
+
+      for (const [key, val] of Object.entries(entitlementValues)) {
+        const entRecord: PlanEntitlementRecord = {
+          id: randomUUID(),
+          planVersionId: version.id,
+          featureKey: key,
+          value: val,
+          createdAt: now,
+        };
+        this.planEntitlements.set(`${version.id}:${key}`, entRecord);
+      }
+    };
+
+    // Starter Plan
+    registerPlanWithVersion(
+      'PLAN_STARTER',
+      'Starter Business',
+      'Ideal for single-store retail or individual service business',
+      [
+        { currency: 'TZS', amountCents: 2500000n, billingInterval: BillingInterval.MONTHLY },
+        { currency: 'USD', amountCents: 1000n, billingInterval: BillingInterval.MONTHLY },
+        { currency: 'TZS', amountCents: 25000000n, billingInterval: BillingInterval.ANNUALLY },
+        { currency: 'USD', amountCents: 10000n, billingInterval: BillingInterval.ANNUALLY },
+      ],
+      {
+        [FeatureKey.MAX_CONNECTED_DEVICES]: '1',
+        [FeatureKey.MAX_ORGANIZATION_MEMBERS]: '2',
+        [FeatureKey.MAX_PAYMENT_ACCOUNTS]: '1',
+        [FeatureKey.API_ACCESS]: 'false',
+        [FeatureKey.WEBHOOK_ACCESS]: 'false',
+        [FeatureKey.ZAPIER_INTEGRATION]: 'false',
+        [FeatureKey.MIKROTIK_INTEGRATION]: 'false',
+        [FeatureKey.RECONCILIATION_AUTOMATION]: 'true',
+        [FeatureKey.BULK_MESSAGING_ENABLED]: 'false',
+        [FeatureKey.HISTORICAL_DATA_MONTHS]: '3',
+      },
+    );
+
+    // Growth Plan
+    registerPlanWithVersion(
+      'PLAN_GROWTH',
+      'Growth & Multi-Device',
+      'For growing multi-till businesses, ISPs, and automated billing operations',
+      [
+        { currency: 'TZS', amountCents: 6500000n, billingInterval: BillingInterval.MONTHLY },
+        { currency: 'USD', amountCents: 2500n, billingInterval: BillingInterval.MONTHLY },
+        { currency: 'TZS', amountCents: 65000000n, billingInterval: BillingInterval.ANNUALLY },
+        { currency: 'USD', amountCents: 25000n, billingInterval: BillingInterval.ANNUALLY },
+      ],
+      {
+        [FeatureKey.MAX_CONNECTED_DEVICES]: '3',
+        [FeatureKey.MAX_ORGANIZATION_MEMBERS]: '5',
+        [FeatureKey.MAX_PAYMENT_ACCOUNTS]: '3',
+        [FeatureKey.API_ACCESS]: 'true',
+        [FeatureKey.WEBHOOK_ACCESS]: 'true',
+        [FeatureKey.ZAPIER_INTEGRATION]: 'true',
+        [FeatureKey.MIKROTIK_INTEGRATION]: 'true',
+        [FeatureKey.RECONCILIATION_AUTOMATION]: 'true',
+        [FeatureKey.BULK_MESSAGING_ENABLED]: 'false',
+        [FeatureKey.HISTORICAL_DATA_MONTHS]: '12',
+      },
+    );
+
+    // Enterprise Plan
+    registerPlanWithVersion(
+      'PLAN_ENTERPRISE',
+      'Enterprise Operations',
+      'Unlimited high-throughput reconciliation, dedicated webhooks, and prioritized processing',
+      [
+        { currency: 'TZS', amountCents: 18000000n, billingInterval: BillingInterval.MONTHLY },
+        { currency: 'USD', amountCents: 7500n, billingInterval: BillingInterval.MONTHLY },
+        { currency: 'TZS', amountCents: 180000000n, billingInterval: BillingInterval.ANNUALLY },
+        { currency: 'USD', amountCents: 75000n, billingInterval: BillingInterval.ANNUALLY },
+      ],
+      {
+        [FeatureKey.MAX_CONNECTED_DEVICES]: '10',
+        [FeatureKey.MAX_ORGANIZATION_MEMBERS]: '25',
+        [FeatureKey.MAX_PAYMENT_ACCOUNTS]: '10',
+        [FeatureKey.API_ACCESS]: 'true',
+        [FeatureKey.WEBHOOK_ACCESS]: 'true',
+        [FeatureKey.ZAPIER_INTEGRATION]: 'true',
+        [FeatureKey.MIKROTIK_INTEGRATION]: 'true',
+        [FeatureKey.RECONCILIATION_AUTOMATION]: 'true',
+        [FeatureKey.BULK_MESSAGING_ENABLED]: 'true',
+        [FeatureKey.HISTORICAL_DATA_MONTHS]: '36',
+      },
+    );
   }
 
   // --- Users ---
@@ -483,6 +812,266 @@ export class MemoryStore {
     });
 
     return dev;
+  }
+
+  // --- Dynamic Subscription & Commercial Catalog Methods ---
+
+  getPublicCatalog(): Array<{
+    product: CommercialProductRecord;
+    plans: Array<{
+      plan: SubscriptionPlanRecord;
+      currentVersion: PlanVersionRecord;
+      prices: PlanPriceRecord[];
+      entitlements: PlanEntitlementRecord[];
+    }>;
+  }> {
+    const catalog: Array<{
+      product: CommercialProductRecord;
+      plans: Array<{
+        plan: SubscriptionPlanRecord;
+        currentVersion: PlanVersionRecord;
+        prices: PlanPriceRecord[];
+        entitlements: PlanEntitlementRecord[];
+      }>;
+    }> = [];
+
+    for (const prod of this.products.values()) {
+      if (!prod.isActive) continue;
+      const prodPlans: Array<{
+        plan: SubscriptionPlanRecord;
+        currentVersion: PlanVersionRecord;
+        prices: PlanPriceRecord[];
+        entitlements: PlanEntitlementRecord[];
+      }> = [];
+
+      for (const plan of this.plans.values()) {
+        if (plan.productId !== prod.id || !plan.isPublic) continue;
+        const currentVersion = this.getActivePlanVersion(plan.id);
+        if (!currentVersion) continue;
+
+        const prices = this.getPlanPrices(currentVersion.id);
+        const entitlements = this.getPlanEntitlements(currentVersion.id);
+
+        prodPlans.push({
+          plan,
+          currentVersion,
+          prices,
+          entitlements,
+        });
+      }
+
+      catalog.push({
+        product: prod,
+        plans: prodPlans,
+      });
+    }
+
+    return catalog;
+  }
+
+  getPlanByCode(code: string): SubscriptionPlanRecord | null {
+    const id = this.plansByCode.get(code);
+    return id ? (this.plans.get(id) ?? null) : null;
+  }
+
+  getPlanById(id: string): SubscriptionPlanRecord | null {
+    return this.plans.get(id) ?? null;
+  }
+
+  getActivePlanVersion(planId: string): PlanVersionRecord | null {
+    for (const v of this.planVersions.values()) {
+      if (v.planId === planId && v.isActive && v.effectiveTo === null) {
+        return v;
+      }
+    }
+    return null;
+  }
+
+  getPlanVersionById(versionId: string): PlanVersionRecord | null {
+    return this.planVersions.get(versionId) ?? null;
+  }
+
+  getPlanPrices(versionId: string): PlanPriceRecord[] {
+    const prices: PlanPriceRecord[] = [];
+    for (const p of this.planPrices.values()) {
+      if (p.planVersionId === versionId && p.isActive) {
+        prices.push(p);
+      }
+    }
+    return prices;
+  }
+
+  getPlanEntitlements(versionId: string): PlanEntitlementRecord[] {
+    const ents: PlanEntitlementRecord[] = [];
+    for (const e of this.planEntitlements.values()) {
+      if (e.planVersionId === versionId) {
+        ents.push(e);
+      }
+    }
+    return ents;
+  }
+
+  getOrganizationSubscription(organizationId: string): OrganizationSubscriptionRecord | null {
+    assertTenantContext({ organizationId });
+    return this.subscriptions.get(organizationId) ?? null;
+  }
+
+  saveSubscription(sub: OrganizationSubscriptionRecord): OrganizationSubscriptionRecord {
+    assertTenantContext({ organizationId: sub.organizationId });
+    this.subscriptions.set(sub.organizationId, sub);
+    return sub;
+  }
+
+  createSubscriptionInvoice(invoice: SubscriptionBillingInvoiceRecord): SubscriptionBillingInvoiceRecord {
+    assertTenantContext({ organizationId: invoice.organizationId });
+    this.subscriptionInvoices.push(invoice);
+    return invoice;
+  }
+
+  getSubscriptionInvoices(organizationId: string): SubscriptionBillingInvoiceRecord[] {
+    assertTenantContext({ organizationId });
+    return this.subscriptionInvoices
+      .filter((inv) => inv.organizationId === organizationId)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  }
+
+  // --- Administrative Catalog Management (Privileged) ---
+  adminCreatePlan(data: {
+    productCode: string;
+    code: string;
+    name: string;
+    description?: string;
+    isPublic?: boolean;
+    trialPeriodDays?: number;
+    gracePeriodDays?: number;
+    prices: Array<{ currency: string; amountCents: bigint; billingInterval: BillingInterval }>;
+    entitlements: Record<string, string>;
+  }): { plan: SubscriptionPlanRecord; version: PlanVersionRecord } {
+    const prodId = this.productsByCode.get(data.productCode);
+    if (!prodId) {
+      throw new Error(`Product '${data.productCode}' not found`);
+    }
+
+    if (this.plansByCode.has(data.code)) {
+      throw new Error(`Plan code '${data.code}' already exists`);
+    }
+
+    const now = new Date();
+    const planId = randomUUID();
+    const plan: SubscriptionPlanRecord = {
+      id: planId,
+      productId: prodId,
+      code: data.code,
+      name: data.name,
+      description: data.description ?? null,
+      isPublic: data.isPublic ?? true,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.plans.set(plan.id, plan);
+    this.plansByCode.set(plan.code, plan.id);
+
+    const versionId = randomUUID();
+    const version: PlanVersionRecord = {
+      id: versionId,
+      planId: plan.id,
+      versionNumber: 1,
+      effectiveFrom: now,
+      effectiveTo: null,
+      isActive: true,
+      trialPeriodDays: data.trialPeriodDays ?? 0,
+      gracePeriodDays: data.gracePeriodDays ?? 3,
+      createdAt: now,
+    };
+    this.planVersions.set(version.id, version);
+
+    for (const p of data.prices) {
+      const priceRecord: PlanPriceRecord = {
+        id: randomUUID(),
+        planVersionId: version.id,
+        currency: p.currency,
+        amountCents: p.amountCents,
+        billingInterval: p.billingInterval,
+        isActive: true,
+        createdAt: now,
+      };
+      this.planPrices.set(priceRecord.id, priceRecord);
+    }
+
+    for (const [key, val] of Object.entries(data.entitlements)) {
+      const entRecord: PlanEntitlementRecord = {
+        id: randomUUID(),
+        planVersionId: version.id,
+        featureKey: key,
+        value: val,
+        createdAt: now,
+      };
+      this.planEntitlements.set(`${version.id}:${key}`, entRecord);
+    }
+
+    return { plan, version };
+  }
+
+  adminCreateNewPlanVersion(data: {
+    planCode: string;
+    prices: Array<{ currency: string; amountCents: bigint; billingInterval: BillingInterval }>;
+    entitlements: Record<string, string>;
+    trialPeriodDays?: number;
+    gracePeriodDays?: number;
+  }): PlanVersionRecord {
+    const plan = this.getPlanByCode(data.planCode);
+    if (!plan) {
+      throw new Error(`Plan '${data.planCode}' not found`);
+    }
+
+    const now = new Date();
+    // Mark prior active version as superseded
+    const oldVersion = this.getActivePlanVersion(plan.id);
+    let nextVersionNumber = 1;
+    if (oldVersion) {
+      oldVersion.effectiveTo = now;
+      nextVersionNumber = oldVersion.versionNumber + 1;
+    }
+
+    const newVersionId = randomUUID();
+    const newVersion: PlanVersionRecord = {
+      id: newVersionId,
+      planId: plan.id,
+      versionNumber: nextVersionNumber,
+      effectiveFrom: now,
+      effectiveTo: null,
+      isActive: true,
+      trialPeriodDays: data.trialPeriodDays ?? (oldVersion?.trialPeriodDays ?? 0),
+      gracePeriodDays: data.gracePeriodDays ?? (oldVersion?.gracePeriodDays ?? 3),
+      createdAt: now,
+    };
+    this.planVersions.set(newVersion.id, newVersion);
+
+    for (const p of data.prices) {
+      const priceRecord: PlanPriceRecord = {
+        id: randomUUID(),
+        planVersionId: newVersion.id,
+        currency: p.currency,
+        amountCents: p.amountCents,
+        billingInterval: p.billingInterval,
+        isActive: true,
+        createdAt: now,
+      };
+      this.planPrices.set(priceRecord.id, priceRecord);
+    }
+
+    for (const [key, val] of Object.entries(data.entitlements)) {
+      const entRecord: PlanEntitlementRecord = {
+        id: randomUUID(),
+        planVersionId: newVersion.id,
+        featureKey: key,
+        value: val,
+        createdAt: now,
+      };
+      this.planEntitlements.set(`${newVersion.id}:${key}`, entRecord);
+    }
+
+    return newVersion;
   }
 
   // --- Audit Logs (Immutable) ---

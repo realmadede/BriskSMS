@@ -1,6 +1,7 @@
 import { dbStore, OrganizationRecord, UserOrganizationRecord } from '../../core/store.js';
 import { UserRole } from '@brisksms/shared';
 import { HttpException } from '../../core/http.js';
+import { entitlementService } from '../subscription/entitlement.service.js';
 import { randomUUID } from 'node:crypto';
 
 export interface CreateOrgDto {
@@ -85,6 +86,9 @@ export class OrganizationService {
     if (!actorMem || ![UserRole.OWNER, UserRole.ADMIN].includes(actorMem.role)) {
       throw new HttpException(403, 'INSUFFICIENT_PERMISSIONS', 'Only Owners and Admins can invite team members');
     }
+
+    // Dynamic Entitlement: Prevent inviting members beyond configured plan quota
+    entitlementService.enforceMemberQuota(orgId);
 
     // Check if user already exists
     let user = dbStore.findUserByEmail(dto.email);

@@ -136,6 +136,8 @@ model Organization {
   apiKeys               ApiKey[]
   webhookEndpoints      WebhookEndpoint[]
   auditLogs             AuditLog[]
+  subscription          OrganizationSubscription?
+  subscriptionInvoices  SubscriptionBillingInvoice[]
 
   @@map("organizations")
 }
@@ -565,4 +567,176 @@ model AuditLog {
   @@index([organizationId, createdAt(sort: Desc)])
   @@map("audit_logs")
 }
+
+// ------------------------------------------------------------------------------
+// Dynamic Subscription & Commercial Catalog
+// ------------------------------------------------------------------------------
+
+enum ProductType {
+  PAYMENT_INTELLIGENCE
+  BULK_MESSAGING
+}
+
+enum BillingInterval {
+  MONTHLY
+  QUARTERLY
+  SEMI_ANNUALLY
+  ANNUALLY
+  CUSTOM
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  SUSPENDED
+  CANCELED
+  EXPIRED
+}
+
+enum EntitlementType {
+  NUMERIC_LIMIT
+  BOOLEAN_FLAG
+  TIERED_TIER
+}
+
+model CommercialProduct {
+  id          String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code        String             @unique @db.VarChar(50)
+  name        String             @db.VarChar(100)
+  description String?            @db.Text
+  productType ProductType        @map("product_type")
+  isActive    Boolean            @default(true) @map("is_active")
+  createdAt   DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  plans       SubscriptionPlan[]
+
+  @@map("commercial_products")
+}
+
+model SubscriptionPlan {
+  id          String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  productId   String             @map("product_id") @db.Uuid
+  code        String             @unique @db.VarChar(50)
+  name        String             @db.VarChar(100)
+  description String?            @db.Text
+  isPublic    Boolean            @default(true) @map("is_public")
+  createdAt   DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  product     CommercialProduct  @relation(fields: [productId], references: [id], onDelete: Restrict)
+  versions    PlanVersion[]
+
+  @@map("subscription_plans")
+}
+
+model PlanVersion {
+  id              String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  planId          String             @map("plan_id") @db.Uuid
+  versionNumber   Int                @map("version_number")
+  effectiveFrom   DateTime           @default(now()) @map("effective_from") @db.Timestamptz(6)
+  effectiveTo     DateTime?          @map("effective_to") @db.Timestamptz(6)
+  isActive        Boolean            @default(true) @map("is_active")
+  trialPeriodDays Int                @default(0) @map("trial_period_days")
+  gracePeriodDays Int                @default(3) @map("grace_period_days")
+  createdAt       DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  plan            SubscriptionPlan   @relation(fields: [planId], references: [id], onDelete: Restrict)
+  prices          PlanPrice[]
+  entitlements    PlanEntitlement[]
+  subscriptions   OrganizationSubscription[]
+
+  @@unique([planId, versionNumber])
+  @@map("plan_versions")
+}
+
+model PlanPrice {
+  id              String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  planVersionId   String          @map("plan_version_id") @db.Uuid
+  currency        String          @default("TZS") @db.VarChar(3)
+  amountCents     BigInt          @map("amount_cents")
+  billingInterval BillingInterval @map("billing_interval")
+  isActive        Boolean         @default(true) @map("is_active")
+  createdAt       DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  planVersion     PlanVersion     @relation(fields: [planVersionId], references: [id], onDelete: Cascade)
+
+  @@unique([planVersionId, currency, billingInterval])
+  @@map("plan_prices")
+}
+
+model FeatureDefinition {
+  id           String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  key          String            @unique @db.VarChar(50)
+  name         String            @db.VarChar(100)
+  description  String?           @db.Text
+  type         EntitlementType
+  defaultValue String            @map("default_value") @db.VarChar(100)
+  createdAt    DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  entitlements PlanEntitlement[]
+
+  @@map("feature_definitions")
+}
+
+model PlanEntitlement {
+  id            String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  planVersionId String            @map("plan_version_id") @db.Uuid
+  featureKey    String            @map("feature_key") @db.VarChar(50)
+  value         String            @db.VarChar(100)
+  createdAt     DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  planVersion   PlanVersion       @relation(fields: [planVersionId], references: [id], onDelete: Cascade)
+  feature       FeatureDefinition @relation(fields: [featureKey], references: [key], onDelete: Restrict)
+
+  @@unique([planVersionId, featureKey])
+  @@map("plan_entitlements")
+}
+
+model OrganizationSubscription {
+  id                 String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId     String             @unique @map("organization_id") @db.Uuid
+  planVersionId      String             @map("plan_version_id") @db.Uuid
+  status             SubscriptionStatus @default(TRIALING)
+  currency           String             @db.VarChar(3)
+  unitPriceCents     BigInt             @map("unit_price_cents")
+  billingInterval    BillingInterval    @map("billing_interval")
+  currentPeriodStart DateTime           @map("current_period_start") @db.Timestamptz(6)
+  currentPeriodEnd   DateTime           @map("current_period_end") @db.Timestamptz(6)
+  trialEndsAt        DateTime?          @map("trial_ends_at") @db.Timestamptz(6)
+  canceledAt         DateTime?          @map("canceled_at") @db.Timestamptz(6)
+  cancelAtPeriodEnd  Boolean            @default(false) @map("cancel_at_period_end")
+  createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization       Organization       @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  planVersion        PlanVersion        @relation(fields: [planVersionId], references: [id], onDelete: Restrict)
+  invoices           SubscriptionBillingInvoice[]
+
+  @@index([organizationId, status])
+  @@map("organization_subscriptions")
+}
+
+model SubscriptionBillingInvoice {
+  id                 String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId     String             @map("organization_id") @db.Uuid
+  subscriptionId     String             @map("subscription_id") @db.Uuid
+  invoiceNumber      String             @unique @map("invoice_number") @db.VarChar(50)
+  amountCents        BigInt             @map("amount_cents")
+  currency           String             @db.VarChar(3)
+  periodStart        DateTime           @map("period_start") @db.Timestamptz(6)
+  periodEnd          DateTime           @map("period_end") @db.Timestamptz(6)
+  isPaid             Boolean            @default(false) @map("is_paid")
+  paidAt             DateTime?          @map("paid_at") @db.Timestamptz(6)
+  paymentProviderRef String?            @map("payment_provider_ref") @db.VarChar(100)
+  createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  organization       Organization             @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  subscription       OrganizationSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, isPaid])
+  @@map("subscription_billing_invoices")
+}
+
 

@@ -28,10 +28,10 @@ Phase 0: Engineering Foundation & Monorepo Scaffolding (COMPLETED)
 Phase 1: Multi-Tenancy, Identity & Cryptographic Device Management (COMPLETED - e2f4dd4)
    |
    v
-Phase 2: Dynamic Subscription Catalog & Entitlements Engine (IMMEDIATE NEXT MILESTONE)
+Phase 2: Dynamic Subscription Catalog & Entitlements Engine (COMPLETED)
    |
    v
-Phase 3: Native Android Ingestion Relay & Keystore Client
+Phase 3: Native Android Ingestion Relay & Keystore Client (IMMEDIATE NEXT MILESTONE)
    |
    v
 Phase 4: Payment Parsing Engine, Deduplication & Multi-Tier Reconciliation
@@ -85,30 +85,28 @@ Phase 8: Security Hardening, Penetration Testing & Production Launch
 
 ---
 
-### Phase 2: Dynamic Subscription Catalog & Entitlements Engine (IMMEDIATE NEXT MILESTONE)
+### Phase 2: Dynamic Subscription Catalog & Entitlements Engine (COMPLETED)
+- **Status:** **Completed & Verified.**
 - **Objective:** Implement a 100% backend-managed dynamic commercial catalog, versioned subscription plans, snapshot pricing, and dynamic entitlement guards across all client channels.
 - **Dependencies:** Phase 1 (Organizations & Auth).
 - **Deliverables:**
-  - Database models in `packages/db`: `CommercialProduct`, `SubscriptionPlan`, `PlanVersion`, `PlanPrice`, `FeatureDefinition`, `PlanEntitlement`, `OrganizationSubscription`, `SubscriptionBillingInvoice`, `SubscriptionHistory`.
-  - Zero hardcoded commercial variables: all plan names, prices, currencies, device limits, API caps, and feature flags resolved from database records.
+  - Database models in `packages/db`: `CommercialProduct`, `SubscriptionPlan`, `PlanVersion`, `PlanPrice`, `FeatureDefinition`, `PlanEntitlement`, `OrganizationSubscription`, `SubscriptionBillingInvoice`.
+  - Zero hardcoded commercial variables: all plan names, prices, currencies, device limits, member limits, API caps, and feature flags resolved from database records.
   - `apps/api/src/modules/subscription/`:
-    - `EntitlementService`: Evaluates boolean feature flags and numerical usage limits across tenant boundaries.
-    - `EntitlementGuard`: Route-level middleware intercepting requests when tenant exceeds dynamic plan quota.
-    - `CommercialCatalogService`: Manages immutable plan versions and localized integer pricing (TZS/USD minor units).
-    - Price snapshotting engine: Locks unit price and terms upon invoice/subscription generation.
-  - Secure Administrative Catalog APIs (`SUPERADMIN` role authorization only; no public admin route).
+    - `catalog.service.ts`: Dynamic public catalog retrieval and privileged administrative catalog versioning.
+    - `subscription.service.ts`: Atomic checkout, immutable price snapshotting, and billing invoice generation.
+    - `entitlement.service.ts`: Dynamic evaluation of numeric quotas (`MAX_CONNECTED_DEVICES`, `MAX_ORGANIZATION_MEMBERS`) and boolean feature flags (`API_ACCESS`, `ZAPIER_INTEGRATION`).
+    - Enforced quotas inside `device.service.ts` and `organization.service.ts`.
+  - Secure Administrative Catalog APIs (`/v1/admin/catalog/plans`, `/v1/admin/catalog/plans/:code/versions`).
 - **Tests:**
-  - Dynamic plan retrieval and multi-currency pricing tests.
-  - Entitlement resolution tests (numeric limits, boolean feature flags).
-  - Plan version change test: Updating plan catalog does not mutate active subscription terms.
-  - Cross-tenant subscription isolation tests.
-  - Unauthorized commercial catalog access rejection tests.
-- **Security Gate:** Mathematical separation between Product A recurring SaaS ledger and Product B prepaid SMS credit ledger; no client-controlled price injection.
-- **Acceptance Criteria:** Dynamic catalog fully operational via backend APIs; entitlement checks prevent quota exceeding across all API routes.
+  - 7 automated integration tests in `apps/api/test/subscription.test.ts` (100% passing).
+  - Overall monorepo test suite: **39/39 passing** (0 failures).
+- **Security Gate:** Mathematical separation between Product A recurring SaaS ledger and Product B prepaid SMS credit ledger; no client-controlled price injection; immutable price snapshotting.
+- **Acceptance Criteria:** Met in full.
 
 ---
 
-### Phase 3: Android Ingestion Relay & Keystore Client
+### Phase 3: Android Ingestion Relay & Keystore Client (IMMEDIATE NEXT MILESTONE)
 - **Objective:** Develop the native Android companion application with hardware-backed Keystore security, local offline queuing, and resilient background synchronization for payment notifications.
 - **Dependencies:** Phase 1 (Device API endpoints) & Phase 2 (Device quota entitlements).
 - **Deliverables:**

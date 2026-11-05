@@ -2,6 +2,7 @@ import { dbStore, DeviceRecord, DeviceTelemetryRecord } from '../../core/store.j
 import { DeviceStatus, DeviceIngestionMode, UserRole } from '@brisksms/shared';
 import { HttpException } from '../../core/http.js';
 import { generateSecureToken, hashToken } from '../../core/crypto.js';
+import { entitlementService } from '../subscription/entitlement.service.js';
 
 export interface PairingTokenResponse {
   pairingToken: string;
@@ -42,6 +43,9 @@ export class DeviceService {
     if (!mem || ![UserRole.OWNER, UserRole.ADMIN].includes(mem.role)) {
       throw new HttpException(403, 'INSUFFICIENT_PERMISSIONS', 'Only Owners and Admins can pair new Android devices');
     }
+
+    // Dynamic Entitlement: Prevent issuing pairing token if tenant exceeds configured device quota
+    entitlementService.enforceDeviceQuota(organizationId);
 
     const rawToken = generateSecureToken('bsk_pair', 24);
     const pairingRecord = dbStore.createPairingToken({

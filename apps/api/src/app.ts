@@ -2,6 +2,7 @@ import { Router } from './core/http.js';
 import { registerAuthRoutes } from './modules/auth/auth.controller.js';
 import { registerOrganizationRoutes } from './modules/organization/organization.controller.js';
 import { registerDeviceRoutes } from './modules/device/device.controller.js';
+import { registerSubscriptionRoutes } from './modules/subscription/subscription.controller.js';
 
 export function createApp(): Router {
   const router = new Router();
@@ -22,6 +23,7 @@ export function createApp(): Router {
   registerAuthRoutes(router);
   registerOrganizationRoutes(router);
   registerDeviceRoutes(router);
+  registerSubscriptionRoutes(router);
 
   return router;
 }
