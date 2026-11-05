@@ -1,0 +1,20 @@
+{
+  "name": "@brisksms/api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "BriskSMS Backend Modular API - Auth, Multi-Tenancy, and Device Pairing",
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/main.ts",
+    "dev": "bun run src/main.ts",
+    "test": "bun test test/"
+  },
+  "dependencies": {
+    "@brisksms/shared": "*",
+    "@brisksms/db": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "undici-types": "^6.20.0"
+  }
+}

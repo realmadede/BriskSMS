@@ -5,7 +5,8 @@
     { "path": "./packages/db" },
     { "path": "./packages/parser-engine" },
     { "path": "./packages/ui" },
-    { "path": "./apps/web" }
+    { "path": "./apps/web" },
+    { "path": "./apps/api" }
   ]
 }
 
