@@ -349,21 +349,71 @@
       flex-shrink: 0;
     }
 
-    @media (max-width: 1180px) {
+    .btn-console {
+      background: rgba(255, 255, 255, 0.78);
+      -webkit-backdrop-filter: blur(14px) saturate(1.4);
+      backdrop-filter: blur(14px) saturate(1.4);
+      border: 1px solid rgba(11, 10, 9, 0.12);
+      color: var(--text-main);
+      border-radius: 9999px;
+      padding: 0.55rem 1.25rem;
+      font-size: 0.875rem;
+      font-weight: 600;
+      white-space: nowrap;
+      transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      text-decoration: none;
+      box-shadow: 0 2px 8px rgba(35, 30, 24, 0.04);
+      flex-shrink: 0;
+    }
+
+    .btn-console:hover {
+      background: #FFFFFF;
+      border-color: rgba(11, 10, 9, 0.25);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 16px rgba(35, 30, 24, 0.08);
+      color: var(--text-main);
+    }
+
+    .btn-zapier {
+      background: #FF4F00;
+      color: #FFFFFF;
+      font-weight: 700;
+      border-radius: 9999px;
+      padding: 0.55rem 1.35rem;
+      font-size: 0.85rem;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      box-shadow: 0 4px 14px rgba(255, 79, 0, 0.28);
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .btn-zapier:hover {
+      background: #E04500;
+      transform: translateY(-1.5px);
+      box-shadow: 0 6px 20px rgba(255, 79, 0, 0.38);
+      color: #FFFFFF;
+    }
+
+    @media (max-width: 1280px) {
       .nav-links .nav-secondary {
-        display: none;
+        display: none !important;
       }
     }
 
-    @media (max-width: 992px) {
+    @media (max-width: 1040px) {
       .top-nav .nav-links {
-        display: none;
+        display: none !important;
       }
     }
 
     @media (max-width: 640px) {
       .nav-actions .btn-console {
-        display: none;
+        display: none !important;
       }
     }
 
@@ -1032,6 +1082,151 @@
       font-size: 0.9rem;
     }
 
+    /* 6B. MERCHANT CONSOLE SHOWCASE */
+    .console-showcase-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 1.5rem;
+      margin-top: 3.5rem;
+    }
+
+    .console-showcase-card {
+      background: #FFFFFF;
+      border: 1px solid var(--border-subtle);
+      border-radius: 20px;
+      padding: 2.25rem 2rem;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      box-shadow: 0 10px 30px -10px rgba(25, 20, 15, 0.04);
+      transition: transform 0.22s ease, box-shadow 0.22s ease;
+    }
+
+    .console-showcase-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 16px 36px -10px rgba(25, 20, 15, 0.08);
+    }
+
+    .console-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1rem;
+    }
+
+    .console-badge-active {
+      font-size: 0.725rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: #2E7D32;
+      background: #E8F5E9;
+      padding: 4px 10px;
+      border-radius: 9999px;
+    }
+
+    .console-badge-review {
+      font-size: 0.725rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: #ED6C02;
+      background: #FFF3E0;
+      padding: 4px 10px;
+      border-radius: 9999px;
+    }
+
+    .console-badge-zapier {
+      font-size: 0.725rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: #FF4F00;
+      background: rgba(255, 79, 0, 0.08);
+      padding: 4px 10px;
+      border-radius: 9999px;
+    }
+
+    .console-card-title {
+      font-size: 1.35rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: var(--text-main);
+      margin-bottom: 0.75rem;
+    }
+
+    .console-card-desc {
+      font-size: 0.925rem;
+      color: var(--text-sub);
+      line-height: 1.65;
+      margin-bottom: 1.5rem;
+    }
+
+    .console-metric-box {
+      background: var(--bg-canvas);
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      padding: 1rem 1.25rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.65rem;
+    }
+
+    .metric-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.825rem;
+      font-family: var(--font-mono);
+    }
+
+    .metric-label {
+      color: var(--text-sub);
+      font-weight: 500;
+    }
+
+    .metric-status {
+      font-size: 0.7rem;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 4px;
+      letter-spacing: 0.05em;
+    }
+
+    .status-matched {
+      background: #E8F5E9;
+      color: #2E7D32;
+    }
+
+    .status-review {
+      background: #FFF3E0;
+      color: #ED6C02;
+    }
+
+    .console-cta-banner {
+      background: #FFFFFF;
+      border: 1px solid var(--border-subtle);
+      border-radius: 20px;
+      padding: 2rem 2.5rem;
+      margin-top: 2rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 2rem;
+      flex-wrap: wrap;
+      box-shadow: 0 8px 24px -6px rgba(25, 20, 15, 0.04);
+    }
+
+    @media (max-width: 900px) {
+      .console-showcase-grid {
+        grid-template-columns: 1fr;
+      }
+      .console-cta-banner {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+    }
+
     /* 8. SECURITY AND ACCOUNTABILITY */
     .security-grid {
       display: grid;
@@ -1500,9 +1695,9 @@
         </a>
 
         <ul class="nav-links">
-          <li><a href="#platform">Platform</a></li>
           <li><a href="#payment-intelligence">Payments</a></li>
           <li><a href="#bulk-sms">Messaging</a></li>
+          <li><a href="#merchant-console">Console</a></li>
           <li><a href="#integrations">Integrations</a></li>
           <li><a href="/developers">Developers</a></li>
           <li class="nav-secondary"><a href="#how-it-works">How It Works</a></li>
@@ -1510,7 +1705,10 @@
         </ul>
 
         <div class="nav-actions">
-          <a href="/console" class="btn btn-console" style="background: transparent; border: 1px solid var(--border-subtle); color: var(--text-main);">Merchant Console</a>
+          <a href="/console" class="btn btn-console">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+            Merchant Console
+          </a>
           <a href="#get-started" class="btn btn-sand">Get Started</a>
         </div>
       </nav>
@@ -1925,8 +2123,12 @@
                 <span class="diagram-pill">BriskSMS Carrier Relay</span>
               </div>
             </div>
-            <div style="margin-top: 1rem;">
-              <a href="/developers#zapier-sms" style="font-size: 0.825rem; font-weight: 700; color: var(--text-main); text-decoration: none; display: inline-flex; align-items: center; gap: 0.35rem;">
+            <div style="margin-top: 1.25rem; display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center;">
+              <a href="https://zapier.com/apps/brisksms/integrations" target="_blank" rel="noopener noreferrer" class="btn btn-zapier">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm1.2 17.4h-2.4v-4.2H6.6v-2.4h4.2V6.6h2.4v4.2h4.2v2.4h-4.2v4.2z" fill="#FFF"/></svg>
+                Connect on Zapier.com ↗
+              </a>
+              <a href="/developers#zapier-sms" style="font-size: 0.825rem; font-weight: 700; color: var(--text-main); text-decoration: none; display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.5rem 0.25rem;">
                 Explore Spreadsheet Dispatch <span>→</span>
               </a>
             </div>
@@ -1976,6 +2178,138 @@
                 Browse API Documentation <span>→</span>
               </a>
             </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 6B. DEDICATED ENTERPRISE MERCHANT CONSOLE SHOWCASE -->
+    <section class="section-padding" id="merchant-console" style="position: relative; overflow: visible;">
+      <div class="container">
+        <div class="eyebrow">ENTERPRISE MERCHANT CONSOLE</div>
+        <h2 class="section-title kinetic-text">
+          <span class="kinetic-word">Mission</span> <span class="kinetic-word">control</span> <span class="kinetic-word">for</span> <span class="kinetic-word">financial</span> <span class="kinetic-word">intelligence</span> <span class="kinetic-word">&amp;</span> <span class="kinetic-word">cellular</span> <span class="kinetic-word">relay.</span>
+        </h2>
+        <p class="section-desc">
+          Live stream of incoming M-Pesa, Airtel Money, Mixx by Yas, and bank settlements, instant accountant review workflow for underpayments, paired Android phone hardware telemetry, and automated Zapier synchronization.
+        </p>
+
+        <!-- Merchant Console Pillars Grid -->
+        <div class="console-showcase-grid">
+          <!-- Pillar 1: Live Push Financial Ledger -->
+          <div class="console-showcase-card scroll-build">
+            <div>
+              <div class="console-card-header">
+                <span class="console-badge-active">99.8% Deterministic Matching</span>
+                <span style="font-size: 1.25rem;">⚡</span>
+              </div>
+              <h3 class="console-card-title">Live Push Financial Ledger</h3>
+              <p class="console-card-desc">
+                Every incoming customer settlement is ingested with SHA-256 deduplication hashing and verified against open invoices. Zero automated guesswork or double-settlement.
+              </p>
+            </div>
+            <div class="console-metric-box">
+              <div class="metric-row">
+                <span class="metric-label">TZS 85,000 (M-Pesa · 9K37XZ10Q)</span>
+                <span class="metric-status status-matched">SETTLED</span>
+              </div>
+              <div class="metric-row">
+                <span class="metric-label">TZS 240,000 (Mixx · YAS-8812)</span>
+                <span class="metric-status status-matched">SETTLED</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Pillar 2: Accountant Review Queue -->
+          <div class="console-showcase-card scroll-build">
+            <div>
+              <div class="console-card-header">
+                <span class="console-badge-review">Zero Guesswork</span>
+                <span style="font-size: 1.25rem;">⚖️</span>
+              </div>
+              <h3 class="console-card-title">Accountant Review Queue</h3>
+              <p class="console-card-desc">
+                Ambiguous reference numbers, underpayments, and overpayments are quarantined into <code>REVIEW_REQUIRED</code> for manual auditor review, splitting, or approval with audit logs.
+              </p>
+            </div>
+            <div class="console-metric-box">
+              <div class="metric-row">
+                <span class="metric-label">TZS 15,000 (Expected TZS 20,000)</span>
+                <span class="metric-status status-review">UNDERPAYMENT</span>
+              </div>
+              <div class="metric-row">
+                <span class="metric-label">TZS 50,000 (Unmatched Ref)</span>
+                <span class="metric-status status-review">NEEDS REVIEW</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Pillar 3: Android Cellular Relay Fleet Telemetry -->
+          <div class="console-showcase-card scroll-build">
+            <div>
+              <div class="console-card-header">
+                <span class="console-badge-active">Hardware Heartbeat</span>
+                <span style="font-size: 1.25rem;">📱</span>
+              </div>
+              <h3 class="console-card-title">Android Relay Fleet Telemetry</h3>
+              <p class="console-card-desc">
+                Monitor paired Android phones in real time: battery charge percentage, notification listener access, offline event queue buffer, and cellular network signal.
+              </p>
+            </div>
+            <div class="console-metric-box">
+              <div class="metric-row">
+                <span class="metric-label">Samsung A14 (Relay #01) · 94% ⚡</span>
+                <span class="metric-status status-matched">ONLINE</span>
+              </div>
+              <div class="metric-row">
+                <span class="metric-label">Queue: 0 pending · Sync: &lt; 250ms</span>
+                <span class="metric-status status-matched">HEALTHY</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Pillar 4: Official Zapier.com App & No-Code Hub -->
+          <div class="console-showcase-card scroll-build">
+            <div>
+              <div class="console-card-header">
+                <span class="console-badge-zapier">Official Zapier Partner App</span>
+                <span>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm1.2 17.4h-2.4v-4.2H6.6v-2.4h4.2V6.6h2.4v4.2h4.2v2.4h-4.2v4.2z" fill="#FF4F00"/></svg>
+                </span>
+              </div>
+              <h3 class="console-card-title">Zapier &amp; Spreadsheet Automation</h3>
+              <p class="console-card-desc">
+                Connect Google Sheets, Microsoft Excel, QuickBooks, or Slack. Automatically trigger SMS notifications or push reconciled payment rows straight into your spreadsheets.
+              </p>
+            </div>
+            <div class="console-metric-box" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem;">
+              <span style="font-size: 0.8rem; font-weight: 600; color: var(--text-sub);">Direct 1-Click Connect</span>
+              <a href="https://zapier.com/apps/brisksms/integrations" target="_blank" rel="noopener noreferrer" class="btn btn-zapier" style="padding: 0.45rem 1rem; font-size: 0.785rem;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm1.2 17.4h-2.4v-4.2H6.6v-2.4h4.2V6.6h2.4v4.2h4.2v2.4h-4.2v4.2z" fill="#FFF"/></svg>
+                Connect on Zapier.com ↗
+              </a>
+            </div>
+          </div>
+        </div>
+
+        <!-- Call to Action Banner -->
+        <div class="console-cta-banner scroll-build">
+          <div>
+            <h4 style="font-size: 1.15rem; font-weight: 700; color: var(--text-main); margin-bottom: 0.35rem;">
+              Explore the BriskSMS Merchant Console
+            </h4>
+            <p style="font-size: 0.885rem; color: var(--text-sub);">
+              Explore the live settlement stream, review queue, API key generation, and Zapier Catch Hook configuration.
+            </p>
+          </div>
+          <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center;">
+            <a href="/console" class="btn btn-hero-black" style="height: 44px; min-width: 170px; font-size: 0.885rem;">
+              Launch Merchant Console ↗
+            </a>
+            <a href="https://zapier.com/apps/brisksms/integrations" target="_blank" rel="noopener noreferrer" class="btn btn-zapier" style="height: 44px; padding: 0 1.35rem;">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm1.2 17.4h-2.4v-4.2H6.6v-2.4h4.2V6.6h2.4v4.2h4.2v2.4h-4.2v4.2z" fill="#FFF"/></svg>
+              Zapier.com App ↗
+            </a>
           </div>
         </div>
       </div>
@@ -2186,8 +2520,10 @@
         <div>
           <div class="footer-col-title">Platform</div>
           <ul class="footer-links">
+            <li><a href="/console">Merchant Console</a></li>
             <li><a href="#payment-intelligence">Payment Intelligence</a></li>
             <li><a href="#bulk-sms">Bulk Messaging</a></li>
+            <li><a href="https://zapier.com/apps/brisksms/integrations" target="_blank" rel="noopener noreferrer">Zapier.com App ↗</a></li>
             <li><a href="/developers">Developer API</a></li>
             <li><a href="#how-it-works">How It Works</a></li>
           </ul>

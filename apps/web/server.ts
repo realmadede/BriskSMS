@@ -28,7 +28,10 @@ const MIME_TYPES: Record<string, string> = {
 
 const server = createServer((req: IncomingMessage, res: ServerResponse) => {
   const url = new URL(req.url || '/', `http://localhost:${PORT}`);
-  const path = url.pathname;
+  let path = url.pathname;
+  if (path.length > 1 && path.endsWith('/')) {
+    path = path.slice(0, -1);
+  }
 
   // Root / Main landing page
   if (path === '/' || path === '/index.html') {
@@ -64,8 +67,15 @@ const server = createServer((req: IncomingMessage, res: ServerResponse) => {
     return;
   }
 
-  // Dedicated /console, /app, and /dashboard merchant routes
-  if (path === '/console' || path === '/console.html' || path === '/app' || path === '/dashboard') {
+  // Dedicated /console, /merchant-console, /app, and /dashboard merchant routes
+  if (
+    path === '/console' ||
+    path === '/console.html' ||
+    path === '/merchant-console' ||
+    path === '/merchant-console.html' ||
+    path === '/app' ||
+    path === '/dashboard'
+  ) {
     if (existsSync(CONSOLE_PATH)) {
       res.writeHead(200, {
         'Content-Type': 'text/html; charset=utf-8',

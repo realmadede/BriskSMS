@@ -261,21 +261,71 @@
       flex-shrink: 0;
     }
 
-    @media (max-width: 1180px) {
+    .btn-console {
+      background: rgba(255, 255, 255, 0.78);
+      -webkit-backdrop-filter: blur(14px) saturate(1.4);
+      backdrop-filter: blur(14px) saturate(1.4);
+      border: 1px solid rgba(11, 10, 9, 0.12);
+      color: var(--text-main);
+      border-radius: 9999px;
+      padding: 0.55rem 1.25rem;
+      font-size: 0.875rem;
+      font-weight: 600;
+      white-space: nowrap;
+      transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      text-decoration: none;
+      box-shadow: 0 2px 8px rgba(35, 30, 24, 0.04);
+      flex-shrink: 0;
+    }
+
+    .btn-console:hover {
+      background: #FFFFFF;
+      border-color: rgba(11, 10, 9, 0.25);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 16px rgba(35, 30, 24, 0.08);
+      color: var(--text-main);
+    }
+
+    .btn-zapier {
+      background: #FF4F00;
+      color: #FFFFFF;
+      font-weight: 700;
+      border-radius: 9999px;
+      padding: 0.55rem 1.35rem;
+      font-size: 0.85rem;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      box-shadow: 0 4px 14px rgba(255, 79, 0, 0.28);
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .btn-zapier:hover {
+      background: #E04500;
+      transform: translateY(-1.5px);
+      box-shadow: 0 6px 20px rgba(255, 79, 0, 0.38);
+      color: #FFFFFF;
+    }
+
+    @media (max-width: 1280px) {
       .nav-links .nav-secondary {
-        display: none;
+        display: none !important;
       }
     }
 
-    @media (max-width: 992px) {
+    @media (max-width: 1040px) {
       .top-nav .nav-links {
-        display: none;
+        display: none !important;
       }
     }
 
     @media (max-width: 640px) {
       .nav-actions .btn-console {
-        display: none;
+        display: none !important;
       }
     }
 
@@ -999,7 +1049,10 @@
         </ul>
 
         <div class="nav-actions">
-          <a href="/console" class="btn btn-console" style="background: transparent; border: 1px solid var(--border-subtle); color: var(--text-main);">Merchant Console</a>
+          <a href="/console" class="btn btn-console">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+            Merchant Console
+          </a>
           <a href="#api-reference" class="btn btn-sand">Get API Keys</a>
         </div>
       </nav>
@@ -1207,6 +1260,16 @@
         <h2 class="section-title">Spreadsheet &amp; Zapier Cellular SMS Automation.</h2>
         <p class="section-desc">Connect Google Sheets, Microsoft Excel 365, or Airtable directly to your dedicated cellular SIM relay. Send personalized transactional alerts and marketing campaigns with zero per-message markup.</p>
 
+        <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; margin-top: 1.5rem; margin-bottom: 2rem;">
+          <a href="https://zapier.com/apps/brisksms/integrations" target="_blank" rel="noopener noreferrer" class="btn btn-zapier">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm1.2 17.4h-2.4v-4.2H6.6v-2.4h4.2V6.6h2.4v4.2h4.2v2.4h-4.2v4.2z" fill="#FFF"/></svg>
+            Connect on Zapier.com ↗
+          </a>
+          <a href="/console#integrations" class="btn btn-sand" style="background: var(--bg-bone); color: var(--text-main); border: 1px solid var(--border-subtle); padding: 0.55rem 1.25rem;">
+            Configure in Merchant Console →
+          </a>
+        </div>
+
         <!-- 4 Workflow Cards -->
         <div class="zapier-grid">
           <div class="zapier-step-card">
@@ -1281,8 +1344,12 @@
             <div style="font-size: 0.8rem; color: #827E77;">
               Target Endpoint: <span style="color: #C6B480; font-family: var(--font-mono);">POST https://api.brisksms.com/v1/messages/send</span>
             </div>
-            <div style="display: flex; gap: 0.75rem;">
-              <a href="/console#integrations" class="btn btn-sand" style="font-size: 0.8rem; padding: 0.45rem 1rem;">Open Zapier Integration in Console →</a>
+            <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+              <a href="https://zapier.com/apps/brisksms/integrations" target="_blank" rel="noopener noreferrer" class="btn btn-zapier" style="font-size: 0.8rem; padding: 0.45rem 1rem;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm1.2 17.4h-2.4v-4.2H6.6v-2.4h4.2V6.6h2.4v4.2h4.2v2.4h-4.2v4.2z" fill="#FFF"/></svg>
+                Connect on Zapier.com ↗
+              </a>
+              <a href="/console#integrations" class="btn btn-sand" style="font-size: 0.8rem; padding: 0.45rem 1rem;">Open Zapier in Console →</a>
             </div>
           </div>
         </div>
