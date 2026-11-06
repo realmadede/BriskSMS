@@ -31,6 +31,17 @@ services:
       timeout: 5s
       retries: 5
 
+  # Product B: Private Dedicated Gateway Service (Mode B)
+  smsgate-server:
+    image: capcom6/android-sms-gateway-server:latest
+    container_name: brisksms-smsgate
+    restart: unless-stopped
+    environment:
+      - HTTP_PORT=8080
+    ports:
+      - "8080:8080"
+    profiles: ["gateway", "full"]
+
 volumes:
   postgres_data:
   redis_data:

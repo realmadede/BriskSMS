@@ -37,7 +37,7 @@ Phase 3: Native Android Ingestion Relay & Keystore Client (IMMEDIATE NEXT MILEST
 Phase 4: Payment Parsing Engine, Deduplication & Multi-Tier Reconciliation
    |
    v
-Phase 5: httpSMS Provider Adapter & Bulk Messaging Engine (CSV/XLSX Ingestion)
+Phase 5: BriskSMS Cellular Gateway & Bulk Messaging Engine (Dual-Mode SIM Relay)
    |
    v
 Phase 6: Developer Platform, Transactional Outbox & BriskSMS Zapier Application
@@ -142,23 +142,24 @@ Phase 8: Security Hardening, Penetration Testing & Production Launch
 
 ---
 
-### Phase 5: httpSMS Provider Adapter & Bulk Messaging Engine (Product B)
-- **Objective:** Implement the commercial bulk messaging module with httpSMS carrier integration, Bring-Your-Own-Account (BYO-Key) credentials, CSV/XLSX recipient ingestion, and double-entry prepaid credit accounting.
+### Phase 5: BriskSMS Cellular Gateway & Bulk Messaging Engine (Product B)
+- **Objective:** Implement the commercial bulk messaging module with dual-mode cellular SIM gateway integration (Mode A: External Relay, Mode B: Managed BriskSMS Private Gateway on 24/7 VPS behind Cloudflare), multi-SIM slot routing, CSV/XLSX recipient ingestion, and double-entry prepaid credit accounting.
 - **Dependencies:** Phase 1 (Organizations & RBAC) & Phase 2 (Entitlements).
 - **Deliverables:**
   - Internal provider boundary: `MessagingProvider` interface.
-  - `HttpSmsProvider` adapter: `POST /v1/messages/send`, scheduled sending (`send_at`), and HMAC webhook signature verification.
-  - Multi-tenant BYO-Key management: AES-256-GCM encrypted API key storage in `messaging_accounts`.
-  - CSV/XLSX upload pipeline: Streaming parser, E.164 phone validation (Tanzanian carriers: 074/075/076, 071/065/067, 078/068/069, 062), duplicate elimination, column mapping, and template variable substitution.
+  - `SmsGateProvider` adapter: `POST /api/v1/message`, dual-mode base URL resolution (`gateway.brisksms.com`), multi-SIM slot selection (`simNumber: 1` vs `2`), and HMAC webhook signature verification.
+  - Multi-tenant gateway credentials management: AES-256-GCM encrypted token storage in `messaging_accounts`.
+  - CSV/XLSX upload pipeline: Streaming parser, E.164 phone validation (Tanzanian carriers: 074/075/076, 071/065/067, 078/068/069, 062, 073), duplicate elimination, column mapping, and template variable substitution.
   - Configurable recipient batch limit (default 1,000 recipients per campaign).
-  - BullMQ carrier-pacing queue: Sliding-window rate limiter (1 SMS / 3 seconds per SIM) to prevent TCRA anti-spam carrier bans.
+  - TCRA anti-spam curfew compliance: Automatic marketing broadcast lock between 20:00 and 07:00 EAT.
+  - BullMQ carrier-pacing queue: Sliding-window rate limiter (1 SMS / 3 seconds per SIM) to prevent carrier anti-spam SIM blocks.
   - Double-entry prepaid credit ledger (`messaging_credit_ledgers`) with atomic debits and delivery-failure refunds.
 - **Tests:**
-  - Mock httpSMS dispatch and failure retry tests.
+  - Mock gateway dispatch and failure retry tests.
   - CSV/XLSX upload parser test with malformed phone numbers and deduplication.
   - Prepaid credit ledger concurrency test: High-volume message dispatch cannot overdraw credit balance below zero.
 - **Security Gate:** Complete ledger isolation between Product B prepaid SMS units and Product A SaaS subscriptions.
-- **Acceptance Criteria:** Bulk campaign uploaded via spreadsheet, validated, queued, and dispatched via httpSMS with live delivery report tracking.
+- **Acceptance Criteria:** Bulk campaign uploaded via spreadsheet, validated, queued, and dispatched via cellular gateway with live delivery report tracking.
 
 ---
 

@@ -97,6 +97,12 @@ enum CampaignStatus {
   CANCELLED
 }
 
+enum GatewayMode {
+  MANAGED_GATEWAY  // Private BriskSMS dedicated gateway on 24/7 VPS behind Cloudflare
+  EXTERNAL_RELAY   // External gateway relay
+  TELCO_AGGREGATOR // Direct aggregator connection (e.g. Beem, DARSMS)
+}
+
 enum SenderIdStatus {
   PENDING_DOCUMENTS
   SUBMITTED_TO_TCRA
@@ -407,12 +413,16 @@ model AutomationLog {
 // ------------------------------------------------------------------------------
 
 model MessagingAccount {
-  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  organizationId String   @unique @map("organization_id") @db.Uuid
-  creditBalance  Int      @default(0) @map("credit_balance")
-  isActive       Boolean  @default(true) @map("is_active")
-  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id                 String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId     String      @unique @map("organization_id") @db.Uuid
+  creditBalance      Int         @default(0) @map("credit_balance")
+  gatewayMode        GatewayMode @default(MANAGED_GATEWAY) @map("gateway_mode")
+  gatewayBaseUrl     String?     @map("gateway_base_url") @db.VarChar(255)
+  encryptedApiToken  String?     @map("encrypted_api_token") @db.Text
+  defaultSimSlot     Int         @default(1) @map("default_sim_slot")
+  isActive           Boolean     @default(true) @map("is_active")
+  createdAt          DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
 
@@ -479,6 +489,7 @@ model SmsMessage {
   messageText       String    @map("message_text") @db.Text
   status            SmsStatus @default(QUEUED)
   costCredits       Int       @default(1) @map("cost_credits")
+  simSlot           Int       @default(1) @map("sim_slot")
   providerMessageId String?   @map("provider_message_id") @db.VarChar(100)
   gatewayProvider   String?   @map("gateway_provider") @db.VarChar(50)
   deliveredAt       DateTime? @map("delivered_at") @db.Timestamptz(6)

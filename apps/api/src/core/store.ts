@@ -8,6 +8,10 @@ import {
   SubscriptionStatus,
   EntitlementType,
   FeatureKey,
+  GatewayMode,
+  CreditLedgerEntryType,
+  SmsStatus,
+  CampaignStatus,
 } from '@brisksms/shared';
 import { assertTenantContext } from '@brisksms/db';
 
@@ -195,6 +199,58 @@ export interface AuditLogRecord {
   createdAt: Date;
 }
 
+export interface MessagingAccountRecord {
+  id: string;
+  organizationId: string;
+  creditBalance: number;
+  gatewayMode: GatewayMode;
+  gatewayBaseUrl: string | null;
+  encryptedApiToken: string | null;
+  defaultSimSlot: number;
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface MessagingCreditLedgerRecord {
+  id: string;
+  organizationId: string;
+  entryType: CreditLedgerEntryType;
+  amountCredits: number;
+  balanceAfter: number;
+  referenceId: string | null;
+  createdAt: Date;
+}
+
+export interface SmsMessageRecord {
+  id: string;
+  organizationId: string;
+  campaignId: string | null;
+  recipientPhone: string;
+  messageText: string;
+  status: SmsStatus;
+  costCredits: number;
+  simSlot: number;
+  providerMessageId: string | null;
+  gatewayProvider: string | null;
+  deliveredAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface SmsCampaignRecord {
+  id: string;
+  organizationId: string;
+  senderIdId: string;
+  name: string;
+  messageTemplate: string;
+  status: CampaignStatus;
+  recipientCount: number;
+  scheduledAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export class MemoryStore {
   users = new Map<string, UserRecord>();
   usersByEmail = new Map<string, string>(); // email -> userId
@@ -228,6 +284,12 @@ export class MemoryStore {
   subscriptions = new Map<string, OrganizationSubscriptionRecord>(); // organizationId -> record
   subscriptionInvoices: SubscriptionBillingInvoiceRecord[] = [];
 
+  // Product B: Messaging Maps
+  messagingAccounts = new Map<string, MessagingAccountRecord>(); // organizationId -> record
+  messagingLedgers: MessagingCreditLedgerRecord[] = [];
+  smsMessages = new Map<string, SmsMessageRecord>();
+  smsCampaigns = new Map<string, SmsCampaignRecord>();
+
   constructor() {
     this.seedDefaultCatalog();
   }
@@ -249,6 +311,10 @@ export class MemoryStore {
 
     this.subscriptions.clear();
     this.subscriptionInvoices = [];
+    this.messagingAccounts.clear();
+    this.messagingLedgers = [];
+    this.smsMessages.clear();
+    this.smsCampaigns.clear();
     this.seedDefaultCatalog();
   }
 
@@ -282,7 +348,7 @@ export class MemoryStore {
       id: randomUUID(),
       code: 'PROD_BULK_MESSAGING',
       name: 'BriskSMS Bulk Messaging Engine',
-      description: 'Prepaid SMS messaging engine powered by httpSMS and carrier SIM relay',
+      description: 'Prepaid SMS messaging engine powered by BriskSMS cellular gateway and carrier SIM relay',
       productType: ProductType.BULK_MESSAGING,
       isActive: true,
       createdAt: now,

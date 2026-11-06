@@ -210,7 +210,7 @@ To maintain long-term maintainability and prevent circular dependencies, the bac
 4. **`PaymentModule`**: Raw payload ingestion endpoint (`POST /v1/ingest/notifications`), append-only persistence, parser delegation, and SHA-256 deduplication.
 5. **`ReconciliationModule`**: Invoice CRUD, automated matching matrix (Memo, Customer/Phone, Checkout window), partial/overpayment accounting, manual Accountant Review Queue (`REVIEW_REQUIRED`).
 6. **`SubscriptionModule`**: Dynamic commercial catalog: Products, Plans, Versions, localized integer minor-unit pricing (PlanPrices), dynamic EntitlementGuard, price snapshotting at obligation generation, zero hardcoded commercial logic.
-7. **`MessagingModule`**: Product B engine: `MessagingProvider` boundary, httpSMS gateway adapter (Bring-Your-Own-Account / BYO-Key AES-256-GCM credentials), CSV/XLSX recipient streaming ingestion (configurable 1,000 recipient batch default), BullMQ rate-limited carrier pacing queue (1 SMS / 3s per SIM), and double-entry prepaid credit ledger.
+7. **`MessagingModule`**: Product B engine: `MessagingProvider` boundary, BriskSMS cellular gateway adapter (Mode A: External Relay, Mode B: Managed BriskSMS Private Gateway on 24/7 VPS behind Cloudflare `gateway.brisksms.com`), multi-SIM slot routing, CSV/XLSX recipient streaming ingestion (configurable 1,000 recipient batch default), BullMQ rate-limited carrier pacing queue (1 SMS / 3s per SIM), TCRA curfew enforcement, and double-entry prepaid credit ledger.
 8. **`OutboxModule`**: Transactional outbox engine: writes domain events atomically with business transactions; background poller delivers instant Zapier REST Hooks (`payment.matched`, `invoice.paid`, etc.) and developer webhooks with exponential backoff and `410 Gone` pruning.
 9. **`DeveloperModule`**: Scoped API keys (`bsk_live_...` / `bsk_test_...`), HMAC-SHA256 signed webhook dispatch, rate limiting, Make.com and n8n compatibility.
 
@@ -247,7 +247,7 @@ The database schema is organized around multi-tenancy, immutable financial evide
        |              +-----< N [subscription_billing_invoices] (Price snapshots)
        |              +-----< N [subscription_history]
        |
-       +-----< 1 [messaging_accounts] (Product B: httpSMS BYO-Key Credentials)
+       +-----< 1 [messaging_accounts] (Product B: Gateway Credentials & Multi-SIM Settings)
        |              |
        |              +-----< N [messaging_credit_ledgers] (Atomic prepaid unit credits/debits)
        |              +-----< N [sms_campaigns] ---> N [sms_messages]
