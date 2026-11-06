@@ -1438,7 +1438,7 @@
               <p class="zapier-step-desc">Configure a "Catch Hook" or action in Zapier targeting <code>POST /v1/messages/send</code> with your secret API key.</p>
             </div>
             <div style="margin-top: 1rem; font-family: var(--font-mono); font-size: 0.75rem; background: rgba(11,10,9,0.05); padding: 8px 12px; border-radius: 8px;">
-              x-api-key: bsk_live_...
+              x-api-key: YOUR_API_KEY
             </div>
           </div>
 
@@ -1908,7 +1908,7 @@ matchInvoice();`,
       },
       send: {
         curl: `curl -X POST https://api.brisksms.com/v1/messages/send \\
-  -H "x-api-key: bsk_live_9488291048291..." \\
+  -H "x-api-key: YOUR_BRISKSMS_API_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{
     "recipientPhone": "+255754000111",
@@ -2372,7 +2372,7 @@ URL: https://api.brisksms.com/v1/messages/send
 Method: POST
 Headers:
   Content-Type: application/json
-  x-api-key: bsk_live_9f8c12a4b3d7e6f859a1c...
+  x-api-key: YOUR_BRISKSMS_API_KEY
 
 Data (JSON Payload):
 {
@@ -2392,7 +2392,7 @@ Data (JSON Payload):
 }`,
       curl_cli: `curl -X POST https://api.brisksms.com/v1/messages/send \\
   -H "Content-Type: application/json" \\
-  -H "x-api-key: bsk_live_9f8c12a4b3d7e6f859a1c..." \\
+  -H "x-api-key: YOUR_BRISKSMS_API_KEY" \\
   -d '{
     "recipient": "+255712345678",
     "message": "Habari Juma, ankara #INV-492 ya TZS 150,000 imekamilika kikamilifu.",
