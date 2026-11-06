@@ -403,6 +403,26 @@
       color: #FFFFFF;
     }
 
+    .mobile-menu-btn {
+      display: none;
+      align-items: center;
+      justify-content: center;
+      width: 38px;
+      height: 38px;
+      background: rgba(255, 255, 255, 0.7);
+      border: 1px solid rgba(11, 10, 9, 0.12);
+      border-radius: 9999px;
+      color: var(--text-main);
+      cursor: pointer;
+      transition: all 0.2s ease;
+      flex-shrink: 0;
+    }
+
+    .mobile-menu-btn:hover {
+      background: #FFFFFF;
+      border-color: rgba(11, 10, 9, 0.25);
+    }
+
     @media (max-width: 1280px) {
       .nav-links .nav-secondary {
         display: none !important;
@@ -413,12 +433,95 @@
       .top-nav .nav-links {
         display: none !important;
       }
+      .mobile-menu-btn {
+        display: inline-flex;
+      }
     }
 
     @media (max-width: 640px) {
       .nav-actions .btn-console {
         display: none !important;
       }
+    }
+
+    /* Mobile Nav Drawer */
+    .mobile-nav-drawer {
+      position: fixed;
+      inset: 0;
+      z-index: 999999;
+      display: none;
+    }
+    .mobile-nav-drawer.open {
+      display: block;
+    }
+    .mobile-nav-backdrop {
+      position: absolute;
+      inset: 0;
+      background: rgba(11, 10, 9, 0.45);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+    }
+    .mobile-nav-panel {
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: 310px;
+      max-width: 85vw;
+      height: 100%;
+      background: #F4F1EA;
+      padding: 1.5rem;
+      display: flex;
+      flex-direction: column;
+      box-shadow: -10px 0 30px rgba(0, 0, 0, 0.15);
+      transform: translateX(100%);
+      transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .mobile-nav-drawer.open .mobile-nav-panel {
+      transform: translateX(0);
+    }
+    .mobile-nav-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 1.25rem;
+      border-bottom: 1px solid rgba(11, 10, 9, 0.08);
+      margin-bottom: 1.5rem;
+    }
+    .mobile-nav-close {
+      background: none;
+      border: none;
+      font-size: 1.75rem;
+      line-height: 1;
+      color: var(--text-main);
+      cursor: pointer;
+      padding: 0.25rem 0.5rem;
+    }
+    .mobile-nav-links {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 1.15rem;
+    }
+    .mobile-nav-links a {
+      color: var(--text-main);
+      text-decoration: none;
+      font-size: 1.05rem;
+      font-weight: 600;
+      display: block;
+      transition: color 0.2s ease;
+    }
+    .mobile-nav-links a:hover {
+      color: var(--accent-sand);
+    }
+    .mobile-nav-actions {
+      margin-top: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid rgba(11, 10, 9, 0.08);
     }
 
     /* 2. DYNAMIC HERO SECTION (Stitch Bezel Frame with 3D Chrome Motion) */
@@ -1688,7 +1791,7 @@
   <header class="top-nav-wrapper liquid-glass-nav" id="mainHeader">
     <div class="container">
       <nav class="top-nav" aria-label="Main Navigation">
-        <a href="#" class="nav-brand-group">
+        <a href="/" class="nav-brand-group">
           <!-- BriskSMS Canonical Symbol -->
           <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
             <rect width="32" height="32" rx="8" fill="#0B0A09"/>
@@ -1713,10 +1816,50 @@
             Merchant Console
           </a>
           <a href="#get-started" class="btn btn-sand">Get Started</a>
+          <button class="mobile-menu-btn" id="mobileMenuBtn" aria-label="Toggle Navigation Menu">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="3" y1="12" x2="21" y2="12"></line>
+              <line x1="3" y1="6" x2="21" y2="6"></line>
+              <line x1="3" y1="18" x2="21" y2="18"></line>
+            </svg>
+          </button>
         </div>
       </nav>
     </div>
   </header>
+
+  <!-- Mobile Navigation Drawer -->
+  <div class="mobile-nav-drawer" id="mobileNavDrawer" aria-hidden="true">
+    <div class="mobile-nav-backdrop" id="mobileNavBackdrop"></div>
+    <div class="mobile-nav-panel">
+      <div class="mobile-nav-header">
+        <a href="/" class="nav-brand-group" style="margin: 0;">
+          <svg width="24" height="24" viewBox="0 0 32 32" fill="none">
+            <rect width="32" height="32" rx="8" fill="#0B0A09"/>
+            <path d="M7 8C7 6.34 8.34 5 10 5H22C23.66 5 25 6.34 25 8V17C25 18.66 23.66 20 22 20H13.5L9 24.5V20H10C8.34 20 7 18.66 7 17V8Z" fill="#F4F1EA"/>
+            <path d="M17.5 7.5L11.5 14H16L14 19.5L20.5 13H15.5L17.5 7.5Z" fill="#C6B480"/>
+          </svg>
+          <span class="nav-wordmark" style="font-size: 1.15rem;">BriskSMS</span>
+        </a>
+        <button class="mobile-nav-close" id="mobileNavClose" aria-label="Close Navigation Menu">&times;</button>
+      </div>
+      <ul class="mobile-nav-links">
+        <li><a href="#payment-intelligence" class="mobile-nav-item">Payments</a></li>
+        <li><a href="#bulk-sms" class="mobile-nav-item">Messaging</a></li>
+        <li><a href="#integrations" class="mobile-nav-item">Integrations</a></li>
+        <li><a href="/developers" class="mobile-nav-item">Developers</a></li>
+        <li><a href="#how-it-works" class="mobile-nav-item">How It Works</a></li>
+        <li><a href="#about" class="mobile-nav-item">About</a></li>
+      </ul>
+      <div class="mobile-nav-actions">
+        <a href="/console" class="btn btn-console" style="width: 100%; justify-content: center;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+          Merchant Console
+        </a>
+        <a href="#get-started" class="btn btn-sand mobile-nav-item" style="width: 100%; justify-content: center;">Get Started</a>
+      </div>
+    </div>
+  </div>
 
   <main>
     <!-- 2. DYNAMIC HERO SECTION WITH RESPONSIVE 3D CHROME SPHERES -->
@@ -2753,6 +2896,37 @@
           item.classList.add('active');
         }
       });
+    });
+
+    // 5. Mobile Navigation Drawer Controls
+    const mobileMenuBtn = document.getElementById('mobileMenuBtn');
+    const mobileNavDrawer = document.getElementById('mobileNavDrawer');
+    const mobileNavClose = document.getElementById('mobileNavClose');
+    const mobileNavBackdrop = document.getElementById('mobileNavBackdrop');
+    const mobileNavItems = document.querySelectorAll('.mobile-nav-item');
+
+    function openMobileNav() {
+      if (!mobileNavDrawer) return;
+      mobileNavDrawer.classList.add('open');
+      mobileNavDrawer.setAttribute('aria-hidden', 'false');
+      document.body.style.overflow = 'hidden';
+    }
+
+    function closeMobileNav() {
+      if (!mobileNavDrawer) return;
+      mobileNavDrawer.classList.remove('open');
+      mobileNavDrawer.setAttribute('aria-hidden', 'true');
+      document.body.style.overflow = '';
+    }
+
+    if (mobileMenuBtn) mobileMenuBtn.addEventListener('click', openMobileNav);
+    if (mobileNavClose) mobileNavClose.addEventListener('click', closeMobileNav);
+    if (mobileNavBackdrop) mobileNavBackdrop.addEventListener('click', closeMobileNav);
+    mobileNavItems.forEach(item => item.addEventListener('click', closeMobileNav));
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && mobileNavDrawer && mobileNavDrawer.classList.contains('open')) {
+        closeMobileNav();
+      }
     });
   </script>
 </body>
