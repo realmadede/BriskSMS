@@ -73,6 +73,17 @@ describe('Product B: BriskSMS Cellular Gateway & Messaging Engine', () => {
       const merged = recipientParserService.interpolateTemplate(template, variables);
       assert.equal(merged, 'Habari Juma, ankara yako ya TZS 150,000 imethibitishwa.');
     });
+
+    it('should interpolate user-friendly human tags like [Jina la Mteja], [Kiasi], [Namba ya Ankara]', () => {
+      const templateSwahili = 'Habari [Jina la Mteja], tumepokea malipo yako ya TZS [Kiasi] kwa ankara [Namba ya Ankara].';
+      const variables = { name: 'Amani Mwamba', amount: '45,000', invoice: 'INV-2026-001' };
+      const mergedSwahili = recipientParserService.interpolateTemplate(templateSwahili, variables);
+      assert.equal(mergedSwahili, 'Habari Amani Mwamba, tumepokea malipo yako ya TZS 45,000 kwa ankara INV-2026-001.');
+
+      const templateEnglish = 'Dear [Customer Name], received TZS [Amount] for invoice [Invoice Number].';
+      const mergedEnglish = recipientParserService.interpolateTemplate(templateEnglish, variables);
+      assert.equal(mergedEnglish, 'Dear Amani Mwamba, received TZS 45,000 for invoice INV-2026-001.');
+    });
   });
 
   describe('2. Dual-Mode Gateway Configuration (Mode A Cloud & Mode B Private VPS)', () => {

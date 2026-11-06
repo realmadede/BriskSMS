@@ -420,33 +420,141 @@
       border-color: var(--color-dark);
     }
 
-    /* Infinite Scroll Sentinel */
+    /* BriskSMS Liquid Glass Skeleton Loading System */
     .infinite-scroll-sentinel {
       width: 100%;
-      padding: 1.5rem 0;
+      padding: 0.5rem 0 1.5rem 0;
       text-align: center;
     }
 
-    .sentinel-loader {
+    .skeleton-wave {
+      background: linear-gradient(90deg, rgba(11, 10, 9, 0.04) 25%, rgba(11, 10, 9, 0.10) 50%, rgba(11, 10, 9, 0.04) 75%);
+      background-size: 200% 100%;
+      animation: skeleton-shimmer 1.5s ease-in-out infinite;
+      border-radius: 6px;
+    }
+
+    @keyframes skeleton-shimmer {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+
+    .skeleton-row {
+      display: flex;
+      align-items: center;
+      padding: 0.85rem 1.25rem;
+      border-bottom: 1px solid var(--border-subtle);
+      gap: 1.25rem;
+      background: #FFFFFF;
+    }
+
+    .skeleton-bar {
+      height: 14px;
+      border-radius: 4px;
+      background: linear-gradient(90deg, rgba(11, 10, 9, 0.05) 25%, rgba(11, 10, 9, 0.12) 50%, rgba(11, 10, 9, 0.05) 75%);
+      background-size: 200% 100%;
+      animation: skeleton-shimmer 1.5s ease-in-out infinite;
+    }
+
+    .skeleton-card {
+      background: #FFFFFF;
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      padding: 1.25rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      margin-top: 0.75rem;
+      text-align: left;
+    }
+
+    .skeleton-pill {
+      height: 20px;
+      border-radius: 9999px;
+      background: linear-gradient(90deg, rgba(11, 10, 9, 0.05) 25%, rgba(11, 10, 9, 0.12) 50%, rgba(11, 10, 9, 0.05) 75%);
+      background-size: 200% 100%;
+      animation: skeleton-shimmer 1.5s ease-in-out infinite;
+    }
+
+    .skeleton-circle {
+      width: 42px;
+      height: 42px;
+      border-radius: 10px;
+      background: linear-gradient(90deg, rgba(11, 10, 9, 0.05) 25%, rgba(11, 10, 9, 0.12) 50%, rgba(11, 10, 9, 0.05) 75%);
+      background-size: 200% 100%;
+      animation: skeleton-shimmer 1.5s ease-in-out infinite;
+      flex-shrink: 0;
+    }
+
+    .scan-beam-wrapper {
+      position: relative;
+      overflow: hidden;
+      border-radius: 12px;
+    }
+
+    .scan-beam-line {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, transparent 0%, var(--accent-sand) 50%, transparent 100%);
+      box-shadow: 0 0 12px var(--accent-sand);
+      animation: scan-vertical 2.2s ease-in-out infinite alternate;
+      z-index: 5;
+    }
+
+    @keyframes scan-vertical {
+      0% { top: 6px; }
+      100% { top: calc(100% - 9px); }
+    }
+
+    .skeleton-pulse-badge {
       display: inline-flex;
       align-items: center;
-      gap: 0.65rem;
-      font-size: 0.825rem;
-      color: var(--text-muted);
-      font-weight: 500;
+      gap: 0.5rem;
+      padding: 0.35rem 0.85rem;
+      border-radius: 9999px;
+      background: var(--bg-bone);
+      border: 1px solid var(--border-subtle);
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--text-sub);
     }
 
-    .loading-spinner {
-      width: 18px;
-      height: 18px;
-      border: 2px solid var(--border-subtle);
-      border-top-color: var(--accent-sand);
+    .skeleton-pulse-dot {
+      width: 8px;
+      height: 8px;
       border-radius: 50%;
-      animation: spin 0.8s linear infinite;
+      background: var(--accent-sand);
+      animation: pulse-dot 1.5s ease-in-out infinite;
     }
 
-    @keyframes spin {
-      to { transform: rotate(360deg); }
+    @keyframes pulse-dot {
+      0%, 100% { transform: scale(0.85); opacity: 0.5; }
+      50% { transform: scale(1.25); opacity: 1; }
+    }
+
+    /* Tag Insert Buttons for SMS */
+    .tag-insert-btn {
+      font-size: 0.75rem;
+      font-weight: 600;
+      padding: 0.3rem 0.65rem;
+      border-radius: 6px;
+      border: 1px solid var(--border-subtle);
+      background: #FFFFFF;
+      color: var(--color-dark);
+      cursor: pointer;
+      transition: all 0.15s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+    }
+
+    .tag-insert-btn:hover {
+      background: var(--bg-bone);
+      border-color: var(--color-dark);
+      transform: translateY(-1px);
     }
 
     /* Toast Notifications */
@@ -684,9 +792,25 @@
           </table>
 
           <div class="infinite-scroll-sentinel" id="reconcileSentinel" data-feed="reconciliation">
-            <div class="sentinel-loader" style="display: none;">
-              <div class="loading-spinner"></div>
-              <span>Loading ledger transactions...</span>
+            <div class="sentinel-skeleton-loader" style="display: none; width: 100%; margin-top: 0.5rem;">
+              <div class="skeleton-row">
+                <div class="skeleton-bar" style="width: 14%;"></div>
+                <div class="skeleton-bar" style="width: 12%;"></div>
+                <div class="skeleton-bar" style="width: 24%;"></div>
+                <div class="skeleton-bar" style="width: 14%;"></div>
+                <div class="skeleton-bar" style="width: 14%;"></div>
+                <div class="skeleton-bar" style="width: 12%;"></div>
+                <div class="skeleton-pill" style="width: 10%;"></div>
+              </div>
+              <div class="skeleton-row">
+                <div class="skeleton-bar" style="width: 16%;"></div>
+                <div class="skeleton-bar" style="width: 10%;"></div>
+                <div class="skeleton-bar" style="width: 22%;"></div>
+                <div class="skeleton-bar" style="width: 16%;"></div>
+                <div class="skeleton-bar" style="width: 13%;"></div>
+                <div class="skeleton-bar" style="width: 13%;"></div>
+                <div class="skeleton-pill" style="width: 10%;"></div>
+              </div>
             </div>
             <div class="sentinel-end" style="display: none; font-size: 0.8rem; color: var(--text-muted); padding: 1rem; text-align: center;">All historical transactions loaded</div>
           </div>
@@ -711,9 +835,14 @@
           </div>
 
           <div class="infinite-scroll-sentinel" id="reviewSentinel" data-feed="review">
-            <div class="sentinel-loader" style="display: none;">
-              <div class="loading-spinner"></div>
-              <span>Checking review queue...</span>
+            <div class="sentinel-skeleton-loader" style="display: none; width: 100%; margin-top: 0.75rem;">
+              <div class="skeleton-card">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <div class="skeleton-bar" style="width: 35%; height: 16px;"></div>
+                  <div class="skeleton-pill" style="width: 80px;"></div>
+                </div>
+                <div class="skeleton-bar" style="width: 60%; height: 12px;"></div>
+              </div>
             </div>
             <div class="sentinel-end" style="display: none; font-size: 0.8rem; color: var(--text-muted); padding: 1rem; text-align: center;">All review records loaded</div>
           </div>
@@ -747,7 +876,7 @@
                   </div>
                 </div>
                 <input type="file" class="form-input" accept=".csv,.xlsx" onchange="previewCsvUpload(this)">
-                <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.35rem;">Header format: Phone Number, Customer Name, Amount, Invoice ID</div>
+                <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.35rem;">Safu za faili (Spreadsheet columns): Namba ya Simu, Jina la Mteja, Kiasi, Namba ya Ankara</div>
               </div>
 
               <div class="form-group">
@@ -764,12 +893,23 @@
                   <div class="template-pill-group">
                     <button type="button" class="template-pill" onclick="applyTemplate('swahili_malipo')">Swahili Malipo</button>
                     <button type="button" class="template-pill" onclick="applyTemplate('english_receipt')">English Receipt</button>
-                    <button type="button" class="template-pill" onclick="applyTemplate('swahili_reminder')">Kumbusho la Ankara</button>
+                    <button type="button" class="template-pill" onclick="applyTemplate('swahili_reminder')">Kumbusho la Malipo</button>
                   </div>
                 </div>
-                <textarea class="form-textarea" rows="4" id="smsTemplate" oninput="updateCharCount(this)">Habari {{name}}, tumepokea malipo yako ya TZS {{amount}} kwa ankara #{{invoice}}. Asante kwa kufanya biashara nasi.</textarea>
+
+                <!-- 1-Click Human Customer Field Insertion -->
+                <div style="display: flex; align-items: center; justify-content: space-between; background: var(--bg-bone); padding: 0.45rem 0.65rem; border-radius: 8px; margin-bottom: 0.5rem; border: 1px solid var(--border-subtle); flex-wrap: wrap; gap: 0.35rem;">
+                  <span style="font-size: 0.725rem; color: var(--text-muted); font-weight: 600;">Weka taarifa za mteja (Bofya kuweka):</span>
+                  <div style="display: flex; gap: 0.35rem; flex-wrap: wrap;">
+                    <button type="button" class="tag-insert-btn" onclick="insertCustomerTag('[Jina la Mteja]')" title="Bofya kuweka Jina la Mteja">+ Jina la Mteja</button>
+                    <button type="button" class="tag-insert-btn" onclick="insertCustomerTag('[Kiasi]')" title="Bofya kuweka Kiasi cha Fedha">+ Kiasi</button>
+                    <button type="button" class="tag-insert-btn" onclick="insertCustomerTag('[Namba ya Ankara]')" title="Bofya kuweka Namba ya Ankara">+ Namba ya Ankara</button>
+                  </div>
+                </div>
+
+                <textarea class="form-textarea" rows="4" id="smsTemplate" oninput="handleSmsTemplateInput(this)">Habari [Jina la Mteja], tumepokea malipo yako ya TZS [Kiasi] kwa ankara namba [Namba ya Ankara]. Asante kwa kufanya biashara nasi.</textarea>
                 <div style="display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--text-muted); margin-top: 0.35rem;">
-                  <span id="charCount">109 characters (1 SMS credit / recipient)</span>
+                  <span id="charCount">119 characters (1 SMS credit / recipient)</span>
                   <span style="color: var(--status-matched);">Outside TCRA Curfew (Active)</span>
                 </div>
               </div>
@@ -778,10 +918,20 @@
             </div>
 
             <div style="background: var(--bg-canvas); border: 1px solid var(--border-subtle); border-radius: 12px; padding: 1.25rem;">
-              <div style="font-weight: 700; font-size: 0.9rem; margin-bottom: 0.75rem;">Parsed Recipients Preview</div>
-              <div id="previewList" style="display: flex; flex-direction: column; gap: 0.5rem; font-size: 0.85rem; color: var(--text-muted); text-align: center; padding: 2.5rem 1rem;">
+              <div style="font-weight: 700; font-size: 0.9rem; margin-bottom: 0.75rem;">Parsed Recipients &amp; Live Message Preview</div>
+              <div id="previewList" style="display: flex; flex-direction: column; gap: 0.5rem; font-size: 0.85rem; color: var(--text-muted); text-align: center; padding: 2rem 1rem;">
                 <div style="font-weight: 600; color: var(--text-sub);">No Contacts Uploaded</div>
                 <div style="font-size: 0.775rem;">Upload a .csv or .xlsx spreadsheet above or download our ready-to-fill templates.</div>
+              </div>
+
+              <div id="livePreviewCard" style="background: #FFFFFF; border: 1px solid var(--border-subtle); border-radius: 10px; padding: 0.85rem; margin-top: 0.75rem; text-align: left;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+                  <span style="font-size: 0.725rem; font-weight: 700; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.04em;">Ujumbe Utakaotumwa (Live Preview):</span>
+                  <span style="font-size: 0.7rem; color: var(--status-matched); font-weight: 600;">Mfano: Amani Mwamba</span>
+                </div>
+                <div id="liveCustomerPreviewText" style="font-size: 0.825rem; color: var(--text-main); line-height: 1.5; background: var(--bg-bone); padding: 0.75rem; border-radius: 8px; border: 1px solid rgba(11,10,9,0.06);">
+                  Habari Amani Mwamba, tumepokea malipo yako ya TZS 45,000 kwa ankara namba INV-2026-001. Asante kwa kufanya biashara nasi.
+                </div>
               </div>
             </div>
           </div>
@@ -812,9 +962,17 @@
           </div>
 
           <div class="infinite-scroll-sentinel" id="deviceSentinel" data-feed="devices">
-            <div class="sentinel-loader" style="display: none;">
-              <div class="loading-spinner"></div>
-              <span>Checking device fleet...</span>
+            <div class="sentinel-skeleton-loader" style="display: none; width: 100%; margin-top: 0.75rem;">
+              <div class="skeleton-card">
+                <div style="display: flex; align-items: center; gap: 1rem;">
+                  <div class="skeleton-circle"></div>
+                  <div style="flex: 1; display: flex; flex-direction: column; gap: 0.5rem;">
+                    <div class="skeleton-bar" style="width: 35%; height: 16px;"></div>
+                    <div class="skeleton-bar" style="width: 65%; height: 12px;"></div>
+                  </div>
+                  <div class="skeleton-pill" style="width: 80px;"></div>
+                </div>
+              </div>
             </div>
             <div class="sentinel-end" style="display: none; font-size: 0.8rem; color: var(--text-muted); padding: 1rem; text-align: center;">All devices loaded</div>
           </div>
@@ -874,7 +1032,8 @@
         <div class="modal-desc">Scan this QR code with the BriskSMS Android relay app on your business device to initiate ECDSA key exchange.</div>
 
         <div class="qr-container">
-          <div class="qr-svg-wrap">
+          <div class="qr-svg-wrap scan-beam-wrapper">
+            <div class="scan-beam-line"></div>
             <svg width="160" height="160" viewBox="0 0 29 29" shape-rendering="crispEdges">
               <rect width="29" height="29" fill="#FFFFFF"/>
               <!-- Top-Left Finder Pattern -->
@@ -942,9 +1101,11 @@
               <rect x="15" y="25" width="2" height="1" fill="#0B0A09"/>
             </svg>
           </div>
-          <div style="display: flex; align-items: center; justify-content: center; gap: 0.5rem; margin-top: 0.75rem; font-size: 0.8rem; font-weight: 600; color: var(--accent-sand);">
-            <div class="loading-spinner" style="width: 14px; height: 14px;"></div>
-            <span>Waiting for Android app scan...</span>
+          <div style="display: flex; align-items: center; justify-content: center; margin-top: 0.85rem;">
+            <div class="skeleton-pulse-badge">
+              <span class="skeleton-pulse-dot"></span>
+              <span>Scanning live &bull; Waiting for phone...</span>
+            </div>
           </div>
           <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.35rem;">Cryptographic ECDSA pairing handshake</div>
         </div>
@@ -1190,11 +1351,11 @@
       }, 4000);
     }
 
-    // Template Switchers
+    // Template Switchers & Human-Friendly Tags
     const smsTemplates = {
-      swahili_malipo: "Habari {{name}}, tumepokea malipo yako ya TZS {{amount}} kwa ankara #{{invoice}}. Asante kwa kufanya biashara nasi.",
-      english_receipt: "Dear {{name}}, we have received your payment of TZS {{amount}} for invoice #{{invoice}}. Thank you for your business.",
-      swahili_reminder: "Ndugu {{name}}, kumbukumbu ya ankara #{{invoice}} ya TZS {{amount}} inasubiri malipo. Tafadhali kamilisha malipo kupitia Lipa Namba yetu."
+      swahili_malipo: "Habari [Jina la Mteja], tumepokea malipo yako ya TZS [Kiasi] kwa ankara namba [Namba ya Ankara]. Asante kwa kufanya biashara nasi.",
+      english_receipt: "Dear [Jina la Mteja], we have received your payment of TZS [Kiasi] for invoice number [Namba ya Ankara]. Thank you for your business.",
+      swahili_reminder: "Ndugu [Jina la Mteja], kumbukumbu ya ankara namba [Namba ya Ankara] ya TZS [Kiasi] inasubiri malipo. Tafadhali kamilisha malipo kupitia Lipa Namba yetu."
     };
 
     function applyTemplate(key) {
@@ -1203,8 +1364,49 @@
         const area = document.getElementById('smsTemplate');
         area.value = t;
         updateCharCount(area);
+        renderLivePreview();
         showToast('Message template applied.', 'info');
       }
+    }
+
+    function insertCustomerTag(tag) {
+      const textarea = document.getElementById('smsTemplate');
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const text = textarea.value;
+      textarea.value = text.substring(0, start) + tag + text.substring(end);
+      textarea.selectionStart = textarea.selectionEnd = start + tag.length;
+      textarea.focus();
+      updateCharCount(textarea);
+      renderLivePreview();
+      showToast(`Field ${tag} inserted into template.`, 'info');
+    }
+
+    function handleSmsTemplateInput(el) {
+      updateCharCount(el);
+      renderLivePreview();
+    }
+
+    function renderLivePreview() {
+      const templateEl = document.getElementById('smsTemplate');
+      const previewTextEl = document.getElementById('liveCustomerPreviewText');
+      if (!templateEl || !previewTextEl) return;
+
+      const sampleCustomer = {
+        name: 'Amani Mwamba',
+        amount: '45,000',
+        invoice: 'INV-2026-001'
+      };
+
+      let rendered = templateEl.value
+        .replace(/\[\s*(Jina la Mteja|Customer Name|Jina|Name)\s*\]/gi, sampleCustomer.name)
+        .replace(/\[\s*(Kiasi|Amount|Balance)\s*\]/gi, sampleCustomer.amount)
+        .replace(/\[\s*(Namba ya Ankara|Invoice Number|Ankara|Invoice ID|Invoice)\s*\]/gi, sampleCustomer.invoice)
+        .replace(/\{\{\s*name\s*\}\}/gi, sampleCustomer.name)
+        .replace(/\{\{\s*amount\s*\}\}/gi, sampleCustomer.amount)
+        .replace(/\{\{\s*invoice\s*\}\}/gi, sampleCustomer.invoice);
+
+      previewTextEl.textContent = rendered;
     }
 
     function updateCharCount(el) {
@@ -1289,7 +1491,7 @@
       showToast('Downloaded .XLSX template: BriskSMS_Bulk_Contacts_Template.xlsx', 'success');
     }
 
-    // CSV / Spreadsheet Upload Preview
+    // CSV / Spreadsheet Upload Preview with Skeleton Loading
     let parsedContactsCount = 0;
 
     function previewCsvUpload(input) {
@@ -1297,9 +1499,15 @@
       const file = input.files[0];
       const previewList = document.getElementById('previewList');
       previewList.innerHTML = `
-        <div style="display: flex; align-items: center; justify-content: center; gap: 0.5rem; padding: 1rem;">
-          <div class="loading-spinner"></div>
-          <span>Parsing ${file.name}...</span>
+        <div style="display: flex; flex-direction: column; gap: 0.65rem; padding: 0.5rem; text-align: left;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div class="skeleton-bar" style="width: 45%; height: 14px;"></div>
+            <div class="skeleton-pill" style="width: 75px;"></div>
+          </div>
+          <div class="skeleton-bar" style="width: 85%; height: 12px;"></div>
+          <div class="skeleton-bar" style="width: 70%; height: 12px;"></div>
+          <div class="skeleton-bar" style="width: 80%; height: 12px;"></div>
+          <div style="font-size: 0.75rem; color: var(--text-muted); text-align: center; margin-top: 0.25rem;">Kusoma na kuhakiki anwani kutoka ${file.name}...</div>
         </div>
       `;
 
@@ -1307,8 +1515,8 @@
         parsedContactsCount = 3;
         previewList.innerHTML = `
           <div style="display: flex; justify-content: space-between; font-weight: 700; font-size: 0.85rem; border-bottom: 1px solid var(--border-subtle); padding-bottom: 0.5rem; margin-bottom: 0.5rem;">
-            <span>File: ${file.name}</span>
-            <span style="color: var(--status-matched);">3 Recipients Parsed</span>
+            <span>Faili: ${file.name}</span>
+            <span style="color: var(--status-matched);">Wateja 3 Wamethibitishwa</span>
           </div>
           <div style="display: flex; justify-content: space-between; font-size: 0.8rem; padding: 0.25rem 0;">
             <span>Amani Mwamba (+255712345678)</span>
@@ -1323,8 +1531,9 @@
             <span style="font-family: var(--font-mono); color: var(--text-sub);">TZS 15,000 &bull; INV-2026-003</span>
           </div>
         `;
+        renderLivePreview();
         showToast('Spreadsheet parsed: 3 valid recipients ready for dispatch.', 'success');
-      }, 400);
+      }, 500);
     }
 
     // Dispatch Campaign (Using BriskSMS Dialog, not browser alert)
@@ -1475,28 +1684,29 @@
     }
 
     function loadMoreRecords(feed, sentinelEl) {
-      const loader = sentinelEl.querySelector('.sentinel-loader');
+      const skeleton = sentinelEl.querySelector('.sentinel-skeleton-loader');
       const end = sentinelEl.querySelector('.sentinel-end');
       if (scrollPages[feed] >= 4) {
-        if (loader) loader.style.display = 'none';
+        if (skeleton) skeleton.style.display = 'none';
         if (end) end.style.display = 'block';
         return;
       }
-      if (loader) loader.style.display = 'inline-flex';
+      if (skeleton) skeleton.style.display = 'block';
 
       setTimeout(() => {
         scrollPages[feed]++;
-        if (loader) loader.style.display = 'none';
+        if (skeleton) skeleton.style.display = 'none';
         if (scrollPages[feed] >= 4) {
           if (end) end.style.display = 'block';
         }
-      }, 600);
+      }, 750);
     }
 
     // Initialize On Load
     document.addEventListener('DOMContentLoaded', () => {
       updateOrgDisplay();
       setupInfiniteScroll();
+      renderLivePreview();
     });
   </script>
 </body>

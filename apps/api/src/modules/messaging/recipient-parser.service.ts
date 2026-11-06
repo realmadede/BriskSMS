@@ -99,15 +99,49 @@ export class RecipientParserService {
   }
 
   /**
-   * Interpolates dynamic template merge tags into personalized message text
+   * Interpolates dynamic template merge tags into personalized message text.
+   * Supports user-friendly tags e.g. [Jina la Mteja], [Kiasi], [Namba ya Ankara], [Customer Name], [Amount], [Invoice Number]
+   * as well as developer syntax {{name}}, {{amount}}, {{invoice}}.
    */
   interpolateTemplate(
     template: string,
     variables: Record<string, string>,
   ): string {
-    return template.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (match, tag) => {
-      return variables[tag] !== undefined ? variables[tag] : match;
+    const resolveVar = (key: string): string | undefined => {
+      if (variables[key] !== undefined) return variables[key];
+      const norm = key.toLowerCase().replace(/[\s_-]+/g, '');
+
+      // Check case-insensitive and punctuation-free matches
+      for (const [k, v] of Object.entries(variables)) {
+        if (k.toLowerCase().replace(/[\s_-]+/g, '') === norm) return v;
+      }
+
+      // Friendly Swahili / English semantic aliases
+      if (norm === 'jinalamteja' || norm === 'customername' || norm === 'jina' || norm === 'name' || norm === 'customer') {
+        return variables['name'] ?? variables['customer_name'] ?? variables['jina'] ?? variables['Customer Name'];
+      }
+      if (norm === 'kiasi' || norm === 'amount' || norm === 'kiasichafedha' || norm === 'balance') {
+        return variables['amount'] ?? variables['kiasi'] ?? variables['Amount'];
+      }
+      if (norm === 'nambayaankara' || norm === 'invoicenumber' || norm === 'ankara' || norm === 'invoice' || norm === 'orderid' || norm === 'invoiceid') {
+        return variables['invoice'] ?? variables['invoice_id'] ?? variables['ankara'] ?? variables['Invoice ID'];
+      }
+      return undefined;
+    };
+
+    // 1. User-friendly bracket tags e.g. [Jina la Mteja], [Kiasi], [Namba ya Ankara], [Customer Name]
+    let result = template.replace(/\[\s*([^\]]+)\s*\]/g, (match, tag) => {
+      const val = resolveVar(tag);
+      return val !== undefined ? val : match;
     });
+
+    // 2. Developer curly tags e.g. {{name}}, {{amount}}, {{invoice}}
+    result = result.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (match, tag) => {
+      const val = resolveVar(tag);
+      return val !== undefined ? val : match;
+    });
+
+    return result;
   }
 }
 
