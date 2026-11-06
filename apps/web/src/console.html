@@ -1,0 +1,897 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BriskSMS Merchant Console — Financial Intelligence & Carrier Messaging</title>
+  <link rel="icon" type="image/svg+xml" href="/assets/brand/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-canvas: #F4F1EA;
+      --bg-bone: #EAE6DF;
+      --bg-sand: #DCD6CB;
+      --bg-card: #FFFFFF;
+      --accent-sand: #C6B480;
+      --accent-sand-hover: #b8a674;
+      --color-dark: #0B0A09;
+      --color-dark-surface: #141311;
+      --text-main: #0B0A09;
+      --text-sub: #54514C;
+      --text-muted: #827E77;
+      --border-subtle: rgba(11, 10, 9, 0.08);
+      --font-stack: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --font-mono: "JetBrains Mono", monospace;
+
+      /* Status Colors */
+      --status-matched: #2E7D32;
+      --status-matched-bg: #E8F5E9;
+      --status-partial: #F57F17;
+      --status-partial-bg: #FFF8E1;
+      --status-review: #ED6C02;
+      --status-review-bg: #FFF3E0;
+      --status-rejected: #C62828;
+      --status-rejected-bg: #FFEBEE;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    body {
+      background-color: var(--bg-canvas);
+      font-family: var(--font-stack);
+      color: var(--text-main);
+      display: flex;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* Sidebar Navigation */
+    .sidebar {
+      width: 260px;
+      background: #FFFFFF;
+      border-right: 1px solid var(--border-subtle);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      z-index: 10;
+    }
+
+    .sidebar-header {
+      padding: 1.5rem;
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .brand-wordmark {
+      font-size: 1.15rem;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+    }
+
+    .org-badge {
+      font-size: 0.7rem;
+      font-weight: 700;
+      background: var(--bg-bone);
+      padding: 2px 6px;
+      border-radius: 4px;
+      color: var(--text-sub);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .sidebar-nav {
+      padding: 1rem 0.75rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+      flex: 1;
+      overflow-y: auto;
+    }
+
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.7rem 0.85rem;
+      border-radius: 10px;
+      color: var(--text-sub);
+      text-decoration: none;
+      font-size: 0.875rem;
+      font-weight: 600;
+      transition: all 0.15s ease;
+      cursor: pointer;
+      border: 1px solid transparent;
+    }
+
+    .nav-item:hover {
+      background: var(--bg-canvas);
+      color: var(--text-main);
+    }
+
+    .nav-item.active {
+      background: var(--bg-bone);
+      color: var(--text-main);
+      border-color: var(--border-subtle);
+      font-weight: 700;
+    }
+
+    .nav-item svg {
+      width: 18px;
+      height: 18px;
+      stroke: currentColor;
+    }
+
+    .sidebar-footer {
+      padding: 1rem 1.25rem;
+      border-top: 1px solid var(--border-subtle);
+      background: var(--bg-canvas);
+    }
+
+    .plan-pill {
+      font-size: 0.75rem;
+      font-weight: 700;
+      display: flex;
+      justify-content: space-between;
+      color: var(--text-sub);
+    }
+
+    /* Main Viewport Container */
+    .main-content {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      overflow-y: auto;
+    }
+
+    .top-bar {
+      height: 64px;
+      background: #FFFFFF;
+      border-bottom: 1px solid var(--border-subtle);
+      padding: 0 2rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 9;
+    }
+
+    .top-title {
+      font-size: 1.1rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+
+    .top-actions {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.825rem;
+      font-weight: 600;
+      padding: 0.5rem 1rem;
+      border-radius: 9999px;
+      cursor: pointer;
+      transition: all 0.18s ease;
+      text-decoration: none;
+      border: 1px solid transparent;
+    }
+
+    .btn-primary {
+      background: var(--color-dark);
+      color: #FFFFFF;
+    }
+
+    .btn-primary:hover {
+      background: #242220;
+    }
+
+    .btn-outline {
+      background: #FFFFFF;
+      border-color: var(--border-subtle);
+      color: var(--text-main);
+    }
+
+    .btn-outline:hover {
+      background: var(--bg-canvas);
+    }
+
+    .content-body {
+      padding: 2rem;
+      max-width: 1300px;
+      width: 100%;
+      margin: 0 auto;
+    }
+
+    /* KPI Grid */
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1.25rem;
+      margin-bottom: 2rem;
+    }
+
+    .kpi-card {
+      background: #FFFFFF;
+      border: 1px solid var(--border-subtle);
+      border-radius: 16px;
+      padding: 1.25rem 1.5rem;
+      box-shadow: 0 4px 16px -6px rgba(11, 10, 9, 0.03);
+    }
+
+    .kpi-label {
+      font-size: 0.725rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin-bottom: 0.35rem;
+    }
+
+    .kpi-value {
+      font-size: 1.65rem;
+      font-weight: 800;
+      color: var(--text-main);
+      letter-spacing: -0.03em;
+    }
+
+    .kpi-sub {
+      font-size: 0.75rem;
+      color: var(--text-sub);
+      margin-top: 0.35rem;
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+
+    /* Cards & Containers */
+    .section-card {
+      background: #FFFFFF;
+      border: 1px solid var(--border-subtle);
+      border-radius: 18px;
+      padding: 1.5rem;
+      margin-bottom: 2rem;
+      box-shadow: 0 4px 20px -8px rgba(11, 10, 9, 0.04);
+    }
+
+    .card-header-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1.25rem;
+      padding-bottom: 0.75rem;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .card-title {
+      font-size: 1.05rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+
+    /* Tables */
+    .data-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+      text-align: left;
+    }
+
+    .data-table th {
+      font-size: 0.725rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .data-table td {
+      padding: 0.85rem 1rem;
+      border-bottom: 1px solid var(--border-subtle);
+      color: var(--text-main);
+    }
+
+    .data-table tr:hover td {
+      background: var(--bg-canvas);
+    }
+
+    /* Status Badges */
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.25rem 0.65rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+
+    .status-matched { background: var(--status-matched-bg); color: var(--status-matched); }
+    .status-partial { background: var(--status-partial-bg); color: var(--status-partial); }
+    .status-review { background: var(--status-review-bg); color: var(--status-review); }
+    .status-unmatched { background: var(--status-rejected-bg); color: var(--status-rejected); }
+
+    /* Modals */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(11, 10, 9, 0.45);
+      backdrop-filter: blur(4px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+
+    .modal-overlay.active {
+      display: flex;
+    }
+
+    .modal-card {
+      background: #FFFFFF;
+      border: 1px solid var(--border-subtle);
+      border-radius: 20px;
+      width: 100%;
+      max-width: 480px;
+      padding: 2rem;
+      box-shadow: 0 20px 48px -12px rgba(11, 10, 9, 0.25);
+    }
+
+    .modal-title {
+      font-size: 1.25rem;
+      font-weight: 800;
+      margin-bottom: 0.5rem;
+    }
+
+    .modal-desc {
+      font-size: 0.875rem;
+      color: var(--text-sub);
+      line-height: 1.5;
+      margin-bottom: 1.5rem;
+    }
+
+    .qr-container {
+      background: var(--bg-bone);
+      border: 2px dashed var(--accent-sand);
+      border-radius: 14px;
+      padding: 1.5rem;
+      text-align: center;
+      margin-bottom: 1.5rem;
+    }
+
+    .qr-code-box {
+      width: 160px;
+      height: 160px;
+      background: #FFFFFF;
+      border-radius: 10px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--font-mono);
+      font-weight: 800;
+      font-size: 1.5rem;
+      letter-spacing: 0.1em;
+      border: 1px solid var(--border-subtle);
+    }
+
+    /* Forms */
+    .form-group {
+      margin-bottom: 1.25rem;
+    }
+
+    .form-label {
+      display: block;
+      font-size: 0.8rem;
+      font-weight: 700;
+      margin-bottom: 0.4rem;
+      color: var(--text-main);
+    }
+
+    .form-input, .form-textarea, .form-select {
+      width: 100%;
+      padding: 0.65rem 0.85rem;
+      border-radius: 8px;
+      border: 1px solid var(--border-subtle);
+      font-family: var(--font-stack);
+      font-size: 0.875rem;
+      outline: none;
+      background: #FFFFFF;
+    }
+
+    .form-input:focus, .form-textarea:focus, .form-select:focus {
+      border-color: var(--color-dark);
+    }
+
+    /* Responsive Design */
+    @media (max-width: 960px) {
+      .kpi-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+      .sidebar {
+        width: 72px;
+      }
+      .sidebar .brand-wordmark, .sidebar .org-badge, .nav-item span, .sidebar-footer {
+        display: none;
+      }
+      .sidebar-header {
+        justify-content: center;
+        padding: 1rem;
+      }
+      .nav-item {
+        justify-content: center;
+        padding: 0.75rem;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .kpi-grid {
+        grid-template-columns: 1fr;
+      }
+      .content-body {
+        padding: 1rem;
+      }
+      .top-bar {
+        padding: 0 1rem;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <svg width="26" height="26" viewBox="0 0 32 32" fill="none">
+        <rect width="32" height="32" rx="8" fill="#0B0A09"/>
+        <path d="M7 8C7 6.34 8.34 5 10 5H22C23.66 5 25 6.34 25 8V17C25 18.66 23.66 20 22 20H13.5L9 24.5V20H10C8.34 20 7 18.66 7 17V8Z" fill="#F4F1EA"/>
+        <path d="M17.5 7.5L11.5 14H16L14 19.5L20.5 13H15.5L17.5 7.5Z" fill="#C6B480"/>
+      </svg>
+      <div>
+        <div class="brand-wordmark">BriskSMS</div>
+        <div class="org-badge">Alpha Traders Ltd</div>
+      </div>
+    </div>
+
+    <nav class="sidebar-nav">
+      <a class="nav-item active" onclick="switchTab('reconciliation', this)">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        <span>Reconciliation Feed</span>
+      </a>
+      <a class="nav-item" onclick="switchTab('review-queue', this)">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <span>Review Queue <strong style="color: var(--status-review); font-size: 0.75rem;">(2)</strong></span>
+      </a>
+      <a class="nav-item" onclick="switchTab('messaging', this)">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        <span>Cellular Bulk SMS</span>
+      </a>
+      <a class="nav-item" onclick="switchTab('devices', this)">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+        <span>Device Fleet</span>
+      </a>
+      <a class="nav-item" onclick="switchTab('integrations', this)">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+        <span>Zapier & Webhooks</span>
+      </a>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="plan-pill">
+        <span>Plan: ENTERPRISE</span>
+        <span style="color: var(--status-matched);">Active</span>
+      </div>
+      <div style="font-size: 0.725rem; color: var(--text-muted); margin-top: 0.25rem;">2 / 5 Devices Connected</div>
+    </div>
+  </aside>
+
+  <!-- Main Viewport -->
+  <main class="main-content">
+    <div class="top-bar">
+      <div class="top-title" id="tabHeaderTitle">Payment Reconciliation & Financial Feed</div>
+      <div class="top-actions">
+        <button class="btn btn-outline" onclick="openPairingModal()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          Pair Android Device
+        </button>
+        <a href="/" class="btn btn-outline">Public Website</a>
+      </div>
+    </div>
+
+    <div class="content-body">
+      <!-- KPI Overview Cards -->
+      <div class="kpi-grid">
+        <div class="kpi-card">
+          <div class="kpi-label">Today's Reconciled</div>
+          <div class="kpi-value">TZS 1,450,000</div>
+          <div class="kpi-sub" style="color: var(--status-matched);">✓ 94.2% Auto-Match Rate</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Pending Review</div>
+          <div class="kpi-value" style="color: var(--status-review);">TZS 75,000</div>
+          <div class="kpi-sub">2 Transactions Ambiguous</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">SMS Credit Balance</div>
+          <div class="kpi-value">4,820</div>
+          <div class="kpi-sub">Prepaid Carrier Units</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Active Relay SIMs</div>
+          <div class="kpi-value">2 / 2 Active</div>
+          <div class="kpi-sub" style="color: var(--status-matched);">Vodacom + Mixx Live</div>
+        </div>
+      </div>
+
+      <!-- TAB 1: RECONCILIATION FEED -->
+      <div class="tab-pane active" id="pane-reconciliation">
+        <div class="section-card">
+          <div class="card-header-row">
+            <div>
+              <div class="card-title">Real-Time Payment Evidence Feed</div>
+              <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.2rem;">Deterministic multi-tier matching against issued invoices</div>
+            </div>
+            <div>
+              <button class="btn btn-outline" onclick="simulateNewPayment()">+ Simulate Ingest M-Pesa</button>
+            </div>
+          </div>
+
+          <table class="data-table" id="paymentsTable">
+            <thead>
+              <tr>
+                <th>Reference</th>
+                <th>Provider</th>
+                <th>Customer / Sender</th>
+                <th>Amount</th>
+                <th>Invoice Matched</th>
+                <th>Confidence Tier</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code style="font-family: var(--font-mono); font-weight: 700;">QA8921KL90</code></td>
+                <td><strong>M-PESA</strong></td>
+                <td>Juma Baraka (+255754000111)</td>
+                <td><strong>TZS 150,000</strong></td>
+                <td><a href="#" style="color: var(--text-main); font-weight: 600;">INV-2026-44</a></td>
+                <td><span style="font-size: 0.75rem; color: var(--status-matched);">TIER 1 (EXACT REF)</span></td>
+                <td><span class="status-pill status-matched">● Matched</span></td>
+              </tr>
+              <tr>
+                <td><code style="font-family: var(--font-mono); font-weight: 700;">TX99012345</code></td>
+                <td><strong>MIXX (YAS)</strong></td>
+                <td>Amina Salum (+255713888999)</td>
+                <td><strong>TZS 50,000</strong></td>
+                <td><a href="#" style="color: var(--text-main); font-weight: 600;">INV-2026-52</a></td>
+                <td><span style="font-size: 0.75rem; color: var(--status-matched);">TIER 2 (PHONE/BAL)</span></td>
+                <td><span class="status-pill status-matched">● Matched</span></td>
+              </tr>
+              <tr>
+                <td><code style="font-family: var(--font-mono); font-weight: 700;">AM44991100</code></td>
+                <td><strong>AIRTEL MONEY</strong></td>
+                <td>Baraka John (+255784111222)</td>
+                <td><strong>TZS 40,000</strong></td>
+                <td><a href="#" style="color: var(--text-main); font-weight: 600;">INV-2026-55</a></td>
+                <td><span style="font-size: 0.75rem; color: var(--status-partial);">TIER 1 (PARTIAL)</span></td>
+                <td><span class="status-pill status-partial">● Partial Paid</span></td>
+              </tr>
+              <tr>
+                <td><code style="font-family: var(--font-mono); font-weight: 700;">QA66FF77GG</code></td>
+                <td><strong>M-PESA</strong></td>
+                <td>Kassim Bakari (+255754999111)</td>
+                <td><strong>TZS 50,000</strong></td>
+                <td><a href="#" style="color: var(--text-main); font-weight: 600;">INV-2026-60</a></td>
+                <td><span style="font-size: 0.75rem; color: var(--status-review);">OVERPAID (EXCESS TZS 20,000)</span></td>
+                <td><span class="status-pill status-review">● Needs Review</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- TAB 2: REVIEW QUEUE -->
+      <div class="tab-pane" id="pane-review-queue" style="display: none;">
+        <div class="section-card">
+          <div class="card-header-row">
+            <div>
+              <div class="card-title">Accountant Discrepancy & Review Queue</div>
+              <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.2rem;">Strict non-guesswork policy: manual accountant allocation required</div>
+            </div>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 1rem;">
+            <div style="background: var(--bg-canvas); border: 1px solid var(--border-subtle); border-radius: 12px; padding: 1.25rem; display: flex; justify-content: space-between; align-items: center;">
+              <div>
+                <span class="status-pill status-review" style="margin-bottom: 0.5rem;">Overpayment Exception</span>
+                <div style="font-weight: 700; font-size: 1rem;">M-Pesa QA66FF77GG — TZS 50,000 received for INV-2026-60 (Due: TZS 30,000)</div>
+                <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem;">Sender: Kassim Bakari (+255754999111) • Excess Credit: TZS 20,000</div>
+              </div>
+              <div>
+                <button class="btn btn-primary" onclick="alert('Allocated TZS 20,000 excess credit to Customer Account #CUST-9921')">Allocate Credit to Ledger</button>
+              </div>
+            </div>
+
+            <div style="background: var(--bg-canvas); border: 1px solid var(--border-subtle); border-radius: 12px; padding: 1.25rem; display: flex; justify-content: space-between; align-items: center;">
+              <div>
+                <span class="status-pill status-review" style="margin-bottom: 0.5rem;">Ambiguous Multiple Open Invoices</span>
+                <div style="font-weight: 700; font-size: 1rem;">M-Pesa QA88HH99II — TZS 25,000 from Hamisi Ally (+255754999000)</div>
+                <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem;">Candidate open invoices: #INV-A-101 (TZS 25,000) or #INV-B-202 (TZS 25,000)</div>
+              </div>
+              <div style="display: flex; gap: 0.5rem;">
+                <button class="btn btn-outline" onclick="alert('Assigned to #INV-A-101')">Match #INV-A-101</button>
+                <button class="btn btn-outline" onclick="alert('Assigned to #INV-B-202')">Match #INV-B-202</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 3: CELLULAR BULK SMS -->
+      <div class="tab-pane" id="pane-messaging" style="display: none;">
+        <div class="section-card">
+          <div class="card-header-row">
+            <div>
+              <div class="card-title">Cellular Gateway & Spreadsheet Bulk Campaign</div>
+              <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.2rem;">Dispatch via connected carrier relay with TCRA curfew lock (20:00 - 07:00 EAT)</div>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;">
+            <div>
+              <div class="form-group">
+                <label class="form-label">Upload Contacts Spreadsheet (.csv / .xlsx)</label>
+                <input type="file" class="form-input" accept=".csv,.xlsx" onchange="previewCsvUpload(this)">
+                <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.35rem;">Template format: Phone, Name, Balance, OrderId</div>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Active Outbound Carrier SIM</label>
+                <select class="form-select" id="simSelector">
+                  <option value="1">SIM 1 — Vodacom Tanzania (Default)</option>
+                  <option value="2">SIM 2 — Mixx by Yas (Tigo)</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Message Template</label>
+                <textarea class="form-textarea" rows="4" id="smsTemplate" oninput="updateCharCount(this)">Habari {{name}}, invoice yako #{{invoice}} ya TZS {{amount}} imekamilika. Asante kwa kuchagua Alpha Traders!</textarea>
+                <div style="display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--text-muted); margin-top: 0.35rem;">
+                  <span id="charCount">94 characters (1 SMS credit / recipient)</span>
+                  <span style="color: var(--status-matched);">✓ Outside TCRA Curfew</span>
+                </div>
+              </div>
+
+              <button class="btn btn-primary" style="width: 100%;" onclick="dispatchCampaign()">Dispatch Campaign via Cellular Relay</button>
+            </div>
+
+            <div style="background: var(--bg-canvas); border: 1px solid var(--border-subtle); border-radius: 12px; padding: 1.25rem;">
+              <div style="font-weight: 700; font-size: 0.9rem; margin-bottom: 0.75rem;">Parsed Recipients Preview</div>
+              <div id="previewList" style="display: flex; flex-direction: column; gap: 0.5rem; font-size: 0.8rem;">
+                <div style="background: #FFFFFF; padding: 0.65rem; border-radius: 6px; border: 1px solid var(--border-subtle);">
+                  <strong>+255 754 000 111</strong> (Juma Baraka) • TZS 150,000 • Slot 1
+                </div>
+                <div style="background: #FFFFFF; padding: 0.65rem; border-radius: 6px; border: 1px solid var(--border-subtle);">
+                  <strong>+255 713 888 999</strong> (Amina Salum) • TZS 50,000 • Slot 1
+                </div>
+                <div style="background: #FFFFFF; padding: 0.65rem; border-radius: 6px; border: 1px solid var(--border-subtle);">
+                  <strong>+255 784 111 222</strong> (Baraka John) • TZS 40,000 • Slot 1
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 4: DEVICE FLEET -->
+      <div class="tab-pane" id="pane-devices" style="display: none;">
+        <div class="section-card">
+          <div class="card-header-row">
+            <div>
+              <div class="card-title">Authorized Android Relay Fleet</div>
+              <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.2rem;">Hardware-backed Android Keystore ECDSA P-256 pairing</div>
+            </div>
+            <div>
+              <button class="btn btn-primary" onclick="openPairingModal()">+ Pair New Device</button>
+            </div>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 1rem;">
+            <div style="background: var(--bg-canvas); border: 1px solid var(--border-subtle); border-radius: 14px; padding: 1.25rem; display: flex; justify-content: space-between; align-items: center;">
+              <div style="display: flex; gap: 1rem; align-items: center;">
+                <div style="width: 44px; height: 44px; background: #FFFFFF; border-radius: 10px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--border-subtle);">
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+                </div>
+                <div>
+                  <div style="font-weight: 700; font-size: 0.95rem;">Samsung Galaxy A54 (Counter Relay)</div>
+                  <div style="font-size: 0.75rem; color: var(--text-muted); font-family: var(--font-mono);">FP: fp-sha256-a54-relay • Keystore: Hardware TEE Secured</div>
+                </div>
+              </div>
+              <div style="display: flex; align-items: center; gap: 1rem;">
+                <span class="status-pill status-matched">● Active Relay</span>
+                <button class="btn btn-outline" style="color: var(--status-rejected);" onclick="alert('Device Revoked')">Revoke</button>
+              </div>
+            </div>
+
+            <div style="background: var(--bg-canvas); border: 1px solid var(--border-subtle); border-radius: 14px; padding: 1.25rem; display: flex; justify-content: space-between; align-items: center;">
+              <div style="display: flex; gap: 1rem; align-items: center;">
+                <div style="width: 44px; height: 44px; background: #FFFFFF; border-radius: 10px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--border-subtle);">
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+                </div>
+                <div>
+                  <div style="font-weight: 700; font-size: 0.95rem;">Google Pixel 7 (Warehouse Relay)</div>
+                  <div style="font-size: 0.75rem; color: var(--text-muted); font-family: var(--font-mono);">FP: fp-sha256-px7-relay • Keystore: Titan M2 StrongBox</div>
+                </div>
+              </div>
+              <div style="display: flex; align-items: center; gap: 1rem;">
+                <span class="status-pill status-matched">● Active Relay</span>
+                <button class="btn btn-outline" style="color: var(--status-rejected);" onclick="alert('Device Revoked')">Revoke</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 5: ZAPIER & DEVELOPER HUB -->
+      <div class="tab-pane" id="pane-integrations" style="display: none;">
+        <div class="section-card">
+          <div class="card-header-row">
+            <div>
+              <div class="card-title">Official Zapier App & OAuth 2.0 Integration</div>
+              <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.2rem;">Connect Google Sheets, QuickBooks, Slack, or MikroTik routers</div>
+            </div>
+            <div>
+              <a href="https://zapier.com/apps/brisksms/integrations" target="_blank" class="btn btn-primary" style="background: #FF4F00;">
+                Connect to Zapier
+              </a>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;">
+            <div>
+              <h4 style="font-size: 0.9rem; font-weight: 700; margin-bottom: 0.5rem;">Scoped Developer API Keys</h4>
+              <p style="font-size: 0.8rem; color: var(--text-sub); margin-bottom: 1rem;">Keys are prefixed with <code>bsk_live_</code> and hashed using SHA-256.</p>
+
+              <div style="background: var(--bg-canvas); border: 1px solid var(--border-subtle); border-radius: 10px; padding: 1rem; margin-bottom: 0.75rem;">
+                <div style="display: flex; justify-content: space-between; font-weight: 700; font-size: 0.85rem;">
+                  <span>Zapier Cellular Automation Key</span>
+                  <span style="font-size: 0.75rem; color: var(--status-matched);">Active</span>
+                </div>
+                <div style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">
+                  bsk_live_948829... • Scopes: [sms:send, payments:read]
+                </div>
+              </div>
+
+              <button class="btn btn-outline" onclick="generateApiKeyModal()">+ Generate New Scoped Key</button>
+            </div>
+
+            <div>
+              <h4 style="font-size: 0.9rem; font-weight: 700; margin-bottom: 0.5rem;">Registered Webhook Endpoints (Catch Hooks)</h4>
+              <p style="font-size: 0.8rem; color: var(--text-sub); margin-bottom: 1rem;">All deliveries include cryptographic <code>X-BriskSMS-Signature</code> HMAC headers.</p>
+
+              <div style="background: var(--bg-canvas); border: 1px solid var(--border-subtle); border-radius: 10px; padding: 1rem; margin-bottom: 0.75rem;">
+                <div style="display: flex; justify-content: space-between; font-weight: 700; font-size: 0.85rem;">
+                  <span>Zapier Catch Hook</span>
+                  <span style="font-size: 0.75rem; color: var(--status-matched);">Delivering</span>
+                </div>
+                <div style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">
+                  https://hooks.zapier.com/hooks/catch/9921/ab...
+                </div>
+                <div style="font-size: 0.75rem; color: var(--text-sub); margin-top: 0.35rem;">
+                  Events: <code>payment.matched</code>, <code>payment.needs_review</code>
+                </div>
+              </div>
+
+              <button class="btn btn-outline" onclick="registerWebhookModal()">+ Add Webhook Endpoint</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Device Pairing Modal -->
+  <div class="modal-overlay" id="pairingModal">
+    <div class="modal-card">
+      <div class="modal-title">Pair Android Relay Phone</div>
+      <div class="modal-desc">Open the BriskSMS Android application on your business device and scan this QR code or enter the single-use pairing token.</div>
+
+      <div class="qr-container">
+        <div class="qr-code-box" id="modalTokenDisplay">BRK-8821</div>
+        <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.5rem;">Single-use token valid for 5 minutes</div>
+      </div>
+
+      <div style="display: flex; gap: 0.75rem;">
+        <button class="btn btn-primary" style="flex: 1;" onclick="closePairingModal()">Done / Paired</button>
+        <button class="btn btn-outline" onclick="closePairingModal()">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function switchTab(tabId, el) {
+      document.querySelectorAll('.tab-pane').forEach(p => p.style.display = 'none');
+      document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+
+      const pane = document.getElementById(`pane-${tabId}`);
+      if (pane) pane.style.display = 'block';
+      if (el) el.classList.add('active');
+
+      const titles = {
+        'reconciliation': 'Payment Reconciliation & Financial Feed',
+        'review-queue': 'Accountant Discrepancy & Review Queue',
+        'messaging': 'Cellular Gateway & Spreadsheet Bulk Campaign',
+        'devices': 'Authorized Android Relay Fleet',
+        'integrations': 'Official Zapier App & OAuth 2.0 Integration'
+      };
+      document.getElementById('tabHeaderTitle').textContent = titles[tabId] || 'Merchant Console';
+    }
+
+    function openPairingModal() {
+      document.getElementById('pairingModal').classList.add('active');
+    }
+
+    function closePairingModal() {
+      document.getElementById('pairingModal').classList.remove('active');
+    }
+
+    function updateCharCount(el) {
+      const len = el.value.length;
+      const count = Math.ceil(len / 160) || 1;
+      document.getElementById('charCount').textContent = `${len} characters (${count} SMS credit / recipient)`;
+    }
+
+    function simulateNewPayment() {
+      const tbody = document.querySelector('#paymentsTable tbody');
+      const randomCode = 'QA' + Math.floor(10000000 + Math.random() * 90000000);
+      const newRow = document.createElement('tr');
+      newRow.innerHTML = `
+        <td><code style="font-family: var(--font-mono); font-weight: 700;">${randomCode}</code></td>
+        <td><strong>M-PESA</strong></td>
+        <td>Neema Michael (+255754988776)</td>
+        <td><strong>TZS 75,000</strong></td>
+        <td><a href="#" style="color: var(--text-main); font-weight: 600;">INV-2026-68</a></td>
+        <td><span style="font-size: 0.75rem; color: var(--status-matched);">TIER 1 (EXACT REF)</span></td>
+        <td><span class="status-pill status-matched">● Matched</span></td>
+      `;
+      tbody.prepend(newRow);
+    }
+
+    function dispatchCampaign() {
+      alert('Campaign successfully submitted to queue! Messages are being dispatched across SIM 1 pacing (1 SMS / 3 seconds).');
+    }
+
+    function generateApiKeyModal() {
+      const key = 'bsk_live_' + Array.from(crypto.getRandomValues(new Uint8Array(24))).map(b => b.toString(16).padStart(2, '0')).join('');
+      prompt('Copy your new scoped API key now. It will not be shown again:', key);
+    }
+
+    function registerWebhookModal() {
+      const url = prompt('Enter your Zapier Catch Hook or destination URL:');
+      if (url) alert('Webhook endpoint registered with secret key whsec_' + Math.random().toString(36).substring(2));
+    }
+  </script>
+</body>
+</html>

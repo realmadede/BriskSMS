@@ -343,6 +343,43 @@ export interface OutboxEventRecord {
   createdAt: Date;
 }
 
+export interface OAuthClientRecord {
+  id: string; // client_id
+  organizationId: string;
+  name: string;
+  clientSecretHash: string | null;
+  redirectUris: string[];
+  isPublic: boolean;
+  createdAt: Date;
+}
+
+export interface OAuthAuthorizationCodeRecord {
+  code: string;
+  clientId: string;
+  userId: string;
+  organizationId: string;
+  redirectUri: string;
+  scopes: ApiKeyScope[];
+  codeChallenge: string;
+  codeChallengeMethod: 'S256' | 'plain';
+  expiresAt: Date;
+  isUsed: boolean;
+  createdAt: Date;
+}
+
+export interface OAuthTokenRecord {
+  accessToken: string;
+  refreshToken: string;
+  clientId: string;
+  userId: string;
+  organizationId: string;
+  scopes: ApiKeyScope[];
+  expiresAt: Date;
+  refreshExpiresAt: Date;
+  revokedAt: Date | null;
+  createdAt: Date;
+}
+
 export class MemoryStore {
   users = new Map<string, UserRecord>();
   usersByEmail = new Map<string, string>(); // email -> userId
@@ -395,6 +432,12 @@ export class MemoryStore {
   webhookEndpoints = new Map<string, WebhookEndpointRecord>(); // id -> record
   outboxEvents: OutboxEventRecord[] = [];
 
+  // OAuth 2.0 PKCE Server Maps
+  oauthClients = new Map<string, OAuthClientRecord>(); // clientId -> record
+  oauthCodes = new Map<string, OAuthAuthorizationCodeRecord>(); // code -> record
+  oauthTokens = new Map<string, OAuthTokenRecord>(); // accessToken -> record
+  oauthTokensByRefresh = new Map<string, string>(); // refreshToken -> accessToken
+
   constructor() {
     this.seedDefaultCatalog();
   }
@@ -430,6 +473,11 @@ export class MemoryStore {
     this.apiKeysByHash.clear();
     this.webhookEndpoints.clear();
     this.outboxEvents = [];
+
+    this.oauthClients.clear();
+    this.oauthCodes.clear();
+    this.oauthTokens.clear();
+    this.oauthTokensByRefresh.clear();
 
     this.seedDefaultCatalog();
   }

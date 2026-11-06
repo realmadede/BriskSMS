@@ -10,6 +10,7 @@ const SRC_DIR = existsSync(join(process.cwd(), 'apps/web/src'))
 
 const HTML_PATH = join(SRC_DIR, 'index.html');
 const DEVELOPERS_PATH = join(SRC_DIR, 'developers.html');
+const CONSOLE_PATH = join(SRC_DIR, 'console.html');
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -60,6 +61,23 @@ const server = createServer((req: IncomingMessage, res: ServerResponse) => {
     }
     res.writeHead(404, { 'Content-Type': 'text/plain' });
     res.end('404: Developers Page Not Found');
+    return;
+  }
+
+  // Dedicated /console, /app, and /dashboard merchant routes
+  if (path === '/console' || path === '/console.html' || path === '/app' || path === '/dashboard') {
+    if (existsSync(CONSOLE_PATH)) {
+      res.writeHead(200, {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+      });
+      res.end(readFileSync(CONSOLE_PATH, 'utf-8'));
+      return;
+    }
+    res.writeHead(404, { 'Content-Type': 'text/plain' });
+    res.end('404: Merchant Console Page Not Found');
     return;
   }
 

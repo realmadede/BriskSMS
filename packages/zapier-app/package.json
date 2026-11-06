@@ -1,0 +1,22 @@
+{
+  "name": "@brisksms/zapier-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Official BriskSMS Zapier Application - Automated Payment Reconciliation & Cellular Messaging",
+  "author": "BriskSMS Team",
+  "license": "SEE LICENSE IN LICENSE",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@brisksms/shared": "*"
+  },
+  "devDependencies": {
+    "@brisksms/config": "*",
+    "@types/node": "^20.0.0",
+    "undici-types": "^6.20.0"
+  }
+}

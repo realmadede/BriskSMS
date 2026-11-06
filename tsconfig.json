@@ -5,6 +5,7 @@
     { "path": "./packages/db" },
     { "path": "./packages/parser-engine" },
     { "path": "./packages/ui" },
+    { "path": "./packages/zapier-app" },
     { "path": "./apps/web" },
     { "path": "./apps/api" }
   ]
