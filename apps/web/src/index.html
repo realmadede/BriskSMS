@@ -268,7 +268,8 @@
       right: 0;
       width: 100%;
       z-index: 99999 !important;
-      background: rgba(244, 241, 234, 0.96) !important;
+      background: #F4F1EA !important;
+      background: rgba(244, 241, 234, 0.98) !important;
       -webkit-backdrop-filter: blur(28px) saturate(180%);
       backdrop-filter: blur(28px) saturate(180%);
       border-bottom: 1px solid rgba(11, 10, 9, 0.08);
@@ -279,7 +280,7 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 1.25rem;
+      gap: 1.5rem;
       height: 72px;
     }
 
@@ -290,6 +291,7 @@
       text-decoration: none;
       color: var(--text-main);
       flex-shrink: 0;
+      margin-right: 0.5rem;
     }
 
     .nav-wordmark {
@@ -297,14 +299,15 @@
       font-weight: 800;
       letter-spacing: -0.035em;
       color: var(--text-main);
+      white-space: nowrap;
     }
 
     .nav-links {
       display: flex;
       align-items: center;
-      gap: clamp(0.75rem, 1.5vw, 1.65rem);
+      gap: clamp(0.75rem, 1.4vw, 1.4rem);
       list-style: none;
-      margin: 0;
+      margin: 0 auto;
       padding: 0;
       flex-shrink: 1;
       min-width: 0;
@@ -318,7 +321,7 @@
     .nav-links a {
       color: var(--text-main);
       text-decoration: none;
-      font-size: 0.9rem;
+      font-size: 0.885rem;
       font-weight: 500;
       opacity: 0.85;
       white-space: nowrap;
@@ -344,9 +347,10 @@
 
     .nav-actions {
       display: flex;
-      gap: 0.5rem;
+      gap: 0.65rem;
       align-items: center;
       flex-shrink: 0;
+      margin-left: 0.5rem;
     }
 
     .btn-console {
@@ -1697,7 +1701,6 @@
         <ul class="nav-links">
           <li><a href="#payment-intelligence">Payments</a></li>
           <li><a href="#bulk-sms">Messaging</a></li>
-          <li><a href="#merchant-console">Console</a></li>
           <li><a href="#integrations">Integrations</a></li>
           <li><a href="/developers">Developers</a></li>
           <li class="nav-secondary"><a href="#how-it-works">How It Works</a></li>
