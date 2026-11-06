@@ -482,7 +482,7 @@
       </a>
       <a class="nav-item" onclick="switchTab('review-queue', this)">
         <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-        <span>Review Queue <strong style="color: var(--status-review); font-size: 0.75rem;">(2)</strong></span>
+        <span>Review Queue</span>
       </a>
       <a class="nav-item" onclick="switchTab('messaging', this)">
         <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
@@ -503,7 +503,7 @@
         <span>Plan: ENTERPRISE</span>
         <span style="color: var(--status-matched);">Active</span>
       </div>
-      <div style="font-size: 0.725rem; color: var(--text-muted); margin-top: 0.25rem;">2 / 5 Devices Connected</div>
+      <div style="font-size: 0.725rem; color: var(--text-muted); margin-top: 0.25rem;">0 / 5 Devices Connected</div>
     </div>
   </aside>
 
@@ -525,23 +525,23 @@
       <div class="kpi-grid">
         <div class="kpi-card">
           <div class="kpi-label">Today's Reconciled</div>
-          <div class="kpi-value">TZS 1,450,000</div>
-          <div class="kpi-sub" style="color: var(--status-matched);">✓ 94.2% Auto-Match Rate</div>
+          <div class="kpi-value">TZS 0</div>
+          <div class="kpi-sub">0 transactions settled today</div>
         </div>
         <div class="kpi-card">
           <div class="kpi-label">Pending Review</div>
-          <div class="kpi-value" style="color: var(--status-review);">TZS 75,000</div>
-          <div class="kpi-sub">2 Transactions Ambiguous</div>
+          <div class="kpi-value">TZS 0</div>
+          <div class="kpi-sub">0 transactions in queue</div>
         </div>
         <div class="kpi-card">
           <div class="kpi-label">SMS Credit Balance</div>
-          <div class="kpi-value">4,820</div>
+          <div class="kpi-value">0</div>
           <div class="kpi-sub">Prepaid Carrier Units</div>
         </div>
         <div class="kpi-card">
           <div class="kpi-label">Active Relay SIMs</div>
-          <div class="kpi-value">2 / 2 Active</div>
-          <div class="kpi-sub" style="color: var(--status-matched);">Vodacom + Mixx Live</div>
+          <div class="kpi-value">0 Active</div>
+          <div class="kpi-sub">No relay devices paired</div>
         </div>
       </div>
 
@@ -554,7 +554,7 @@
               <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.2rem;">Deterministic multi-tier matching against issued invoices</div>
             </div>
             <div>
-              <button class="btn btn-outline" onclick="simulateNewPayment()">+ Simulate Ingest M-Pesa</button>
+              <button class="btn btn-outline" onclick="openPairingModal()">+ Pair Android Device</button>
             </div>
           </div>
 
@@ -572,40 +572,13 @@
             </thead>
             <tbody>
               <tr>
-                <td><code style="font-family: var(--font-mono); font-weight: 700;">QA8921KL90</code></td>
-                <td><strong>M-PESA</strong></td>
-                <td>Juma Baraka (+255754000111)</td>
-                <td><strong>TZS 150,000</strong></td>
-                <td><a href="#" style="color: var(--text-main); font-weight: 600;">INV-2026-44</a></td>
-                <td><span style="font-size: 0.75rem; color: var(--status-matched);">TIER 1 (EXACT REF)</span></td>
-                <td><span class="status-pill status-matched">● Matched</span></td>
-              </tr>
-              <tr>
-                <td><code style="font-family: var(--font-mono); font-weight: 700;">TX99012345</code></td>
-                <td><strong>MIXX (YAS)</strong></td>
-                <td>Amina Salum (+255713888999)</td>
-                <td><strong>TZS 50,000</strong></td>
-                <td><a href="#" style="color: var(--text-main); font-weight: 600;">INV-2026-52</a></td>
-                <td><span style="font-size: 0.75rem; color: var(--status-matched);">TIER 2 (PHONE/BAL)</span></td>
-                <td><span class="status-pill status-matched">● Matched</span></td>
-              </tr>
-              <tr>
-                <td><code style="font-family: var(--font-mono); font-weight: 700;">AM44991100</code></td>
-                <td><strong>AIRTEL MONEY</strong></td>
-                <td>Baraka John (+255784111222)</td>
-                <td><strong>TZS 40,000</strong></td>
-                <td><a href="#" style="color: var(--text-main); font-weight: 600;">INV-2026-55</a></td>
-                <td><span style="font-size: 0.75rem; color: var(--status-partial);">TIER 1 (PARTIAL)</span></td>
-                <td><span class="status-pill status-partial">● Partial Paid</span></td>
-              </tr>
-              <tr>
-                <td><code style="font-family: var(--font-mono); font-weight: 700;">QA66FF77GG</code></td>
-                <td><strong>M-PESA</strong></td>
-                <td>Kassim Bakari (+255754999111)</td>
-                <td><strong>TZS 50,000</strong></td>
-                <td><a href="#" style="color: var(--text-main); font-weight: 600;">INV-2026-60</a></td>
-                <td><span style="font-size: 0.75rem; color: var(--status-review);">OVERPAID (EXCESS TZS 20,000)</span></td>
-                <td><span class="status-pill status-review">● Needs Review</span></td>
+                <td colspan="7" style="text-align: center; padding: 3.5rem 1.5rem; color: var(--text-muted);">
+                  <div style="font-weight: 700; font-size: 1rem; color: var(--text-main); margin-bottom: 0.4rem;">No Payment Evidence Ingested Yet</div>
+                  <div style="font-size: 0.85rem; max-width: 480px; margin: 0 auto 1.5rem auto; line-height: 1.6;">
+                    Transactions received by your paired Android relay phones or submitted through the Payment Ingestion API will stream here and match against invoices in real time.
+                  </div>
+                  <button class="btn btn-outline" onclick="openPairingModal()">Pair Android Relay Phone</button>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -622,28 +595,10 @@
             </div>
           </div>
 
-          <div style="display: flex; flex-direction: column; gap: 1rem;">
-            <div style="background: var(--bg-canvas); border: 1px solid var(--border-subtle); border-radius: 12px; padding: 1.25rem; display: flex; justify-content: space-between; align-items: center;">
-              <div>
-                <span class="status-pill status-review" style="margin-bottom: 0.5rem;">Overpayment Exception</span>
-                <div style="font-weight: 700; font-size: 1rem;">M-Pesa QA66FF77GG — TZS 50,000 received for INV-2026-60 (Due: TZS 30,000)</div>
-                <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem;">Sender: Kassim Bakari (+255754999111) • Excess Credit: TZS 20,000</div>
-              </div>
-              <div>
-                <button class="btn btn-primary" onclick="alert('Allocated TZS 20,000 excess credit to Customer Account #CUST-9921')">Allocate Credit to Ledger</button>
-              </div>
-            </div>
-
-            <div style="background: var(--bg-canvas); border: 1px solid var(--border-subtle); border-radius: 12px; padding: 1.25rem; display: flex; justify-content: space-between; align-items: center;">
-              <div>
-                <span class="status-pill status-review" style="margin-bottom: 0.5rem;">Ambiguous Multiple Open Invoices</span>
-                <div style="font-weight: 700; font-size: 1rem;">M-Pesa QA88HH99II — TZS 25,000 from Hamisi Ally (+255754999000)</div>
-                <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem;">Candidate open invoices: #INV-A-101 (TZS 25,000) or #INV-B-202 (TZS 25,000)</div>
-              </div>
-              <div style="display: flex; gap: 0.5rem;">
-                <button class="btn btn-outline" onclick="alert('Assigned to #INV-A-101')">Match #INV-A-101</button>
-                <button class="btn btn-outline" onclick="alert('Assigned to #INV-B-202')">Match #INV-B-202</button>
-              </div>
+          <div style="background: var(--bg-canvas); border: 1px dashed var(--border-subtle); border-radius: 12px; padding: 3.5rem 1.5rem; text-align: center;">
+            <div style="font-weight: 700; font-size: 1rem; color: var(--text-main); margin-bottom: 0.4rem;">No Discrepancies Requiring Review</div>
+            <div style="font-size: 0.85rem; color: var(--text-muted); max-width: 460px; margin: 0 auto; line-height: 1.6;">
+              When ambiguous reference numbers, underpayments, or excess payments are ingested, they are isolated here for auditor review, credit allocation, or refund approval.
             </div>
           </div>
         </div>
@@ -670,17 +625,17 @@
               <div class="form-group">
                 <label class="form-label">Active Outbound Carrier SIM</label>
                 <select class="form-select" id="simSelector">
-                  <option value="1">SIM 1 — Vodacom Tanzania (Default)</option>
-                  <option value="2">SIM 2 — Mixx by Yas (Tigo)</option>
+                  <option value="1">SIM 1 — Primary Outbound Relay (Default)</option>
+                  <option value="2">SIM 2 — Secondary Outbound Relay</option>
                 </select>
               </div>
 
               <div class="form-group">
                 <label class="form-label">Message Template</label>
-                <textarea class="form-textarea" rows="4" id="smsTemplate" oninput="updateCharCount(this)">Habari {{name}}, invoice yako #{{invoice}} ya TZS {{amount}} imekamilika. Asante kwa kuchagua Alpha Traders!</textarea>
+                <textarea class="form-textarea" rows="4" id="smsTemplate" oninput="updateCharCount(this)">Habari {{name}}, invoice yako #{{invoice}} ya TZS {{amount}} imekamilika.</textarea>
                 <div style="display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--text-muted); margin-top: 0.35rem;">
-                  <span id="charCount">94 characters (1 SMS credit / recipient)</span>
-                  <span style="color: var(--status-matched);">✓ Outside TCRA Curfew</span>
+                  <span id="charCount">71 characters (1 SMS credit / recipient)</span>
+                  <span style="color: var(--status-matched);">Outside TCRA Curfew (Active)</span>
                 </div>
               </div>
 
@@ -689,16 +644,9 @@
 
             <div style="background: var(--bg-canvas); border: 1px solid var(--border-subtle); border-radius: 12px; padding: 1.25rem;">
               <div style="font-weight: 700; font-size: 0.9rem; margin-bottom: 0.75rem;">Parsed Recipients Preview</div>
-              <div id="previewList" style="display: flex; flex-direction: column; gap: 0.5rem; font-size: 0.8rem;">
-                <div style="background: #FFFFFF; padding: 0.65rem; border-radius: 6px; border: 1px solid var(--border-subtle);">
-                  <strong>+255 754 000 111</strong> (Juma Baraka) • TZS 150,000 • Slot 1
-                </div>
-                <div style="background: #FFFFFF; padding: 0.65rem; border-radius: 6px; border: 1px solid var(--border-subtle);">
-                  <strong>+255 713 888 999</strong> (Amina Salum) • TZS 50,000 • Slot 1
-                </div>
-                <div style="background: #FFFFFF; padding: 0.65rem; border-radius: 6px; border: 1px solid var(--border-subtle);">
-                  <strong>+255 784 111 222</strong> (Baraka John) • TZS 40,000 • Slot 1
-                </div>
+              <div id="previewList" style="display: flex; flex-direction: column; gap: 0.5rem; font-size: 0.85rem; color: var(--text-muted); text-align: center; padding: 2.5rem 1rem;">
+                <div style="font-weight: 600; color: var(--text-sub);">No Contacts Uploaded</div>
+                <div style="font-size: 0.775rem;">Upload a .csv or .xlsx spreadsheet above to parse recipient phone numbers and preview personalized variables.</div>
               </div>
             </div>
           </div>
@@ -714,42 +662,16 @@
               <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.2rem;">Hardware-backed Android Keystore ECDSA P-256 pairing</div>
             </div>
             <div>
-              <button class="btn btn-primary" onclick="openPairingModal()">+ Pair New Device</button>
+              <button class="btn btn-primary" onclick="openPairingModal()">+ Pair Android Device</button>
             </div>
           </div>
 
-          <div style="display: flex; flex-direction: column; gap: 1rem;">
-            <div style="background: var(--bg-canvas); border: 1px solid var(--border-subtle); border-radius: 14px; padding: 1.25rem; display: flex; justify-content: space-between; align-items: center;">
-              <div style="display: flex; gap: 1rem; align-items: center;">
-                <div style="width: 44px; height: 44px; background: #FFFFFF; border-radius: 10px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--border-subtle);">
-                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
-                </div>
-                <div>
-                  <div style="font-weight: 700; font-size: 0.95rem;">Samsung Galaxy A54 (Counter Relay)</div>
-                  <div style="font-size: 0.75rem; color: var(--text-muted); font-family: var(--font-mono);">FP: fp-sha256-a54-relay • Keystore: Hardware TEE Secured</div>
-                </div>
-              </div>
-              <div style="display: flex; align-items: center; gap: 1rem;">
-                <span class="status-pill status-matched">● Active Relay</span>
-                <button class="btn btn-outline" style="color: var(--status-rejected);" onclick="alert('Device Revoked')">Revoke</button>
-              </div>
+          <div style="background: var(--bg-canvas); border: 1px dashed var(--border-subtle); border-radius: 14px; padding: 3.5rem 1.5rem; text-align: center;">
+            <div style="font-weight: 700; font-size: 1rem; color: var(--text-main); margin-bottom: 0.4rem;">No Android Relay Devices Connected</div>
+            <div style="font-size: 0.85rem; color: var(--text-muted); max-width: 480px; margin: 0 auto 1.5rem auto; line-height: 1.6;">
+              Enroll an Android phone running the BriskSMS companion app. The device establishes a hardware-backed cryptographic ECDSA keypair in Android Keystore to securely relay financial notifications.
             </div>
-
-            <div style="background: var(--bg-canvas); border: 1px solid var(--border-subtle); border-radius: 14px; padding: 1.25rem; display: flex; justify-content: space-between; align-items: center;">
-              <div style="display: flex; gap: 1rem; align-items: center;">
-                <div style="width: 44px; height: 44px; background: #FFFFFF; border-radius: 10px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--border-subtle);">
-                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
-                </div>
-                <div>
-                  <div style="font-weight: 700; font-size: 0.95rem;">Google Pixel 7 (Warehouse Relay)</div>
-                  <div style="font-size: 0.75rem; color: var(--text-muted); font-family: var(--font-mono);">FP: fp-sha256-px7-relay • Keystore: Titan M2 StrongBox</div>
-                </div>
-              </div>
-              <div style="display: flex; align-items: center; gap: 1rem;">
-                <span class="status-pill status-matched">● Active Relay</span>
-                <button class="btn btn-outline" style="color: var(--status-rejected);" onclick="alert('Device Revoked')">Revoke</button>
-              </div>
-            </div>
+            <button class="btn btn-primary" onclick="openPairingModal()">+ Pair Android Relay Phone</button>
           </div>
         </div>
       </div>
@@ -759,13 +681,13 @@
         <div class="section-card">
           <div class="card-header-row">
             <div>
-              <div class="card-title">Official Zapier App & OAuth 2.0 Integration</div>
-              <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.2rem;">Connect Google Sheets, QuickBooks, Slack, or MikroTik routers</div>
+              <div class="card-title">Zapier Integration &amp; OAuth 2.0</div>
+              <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.2rem;">Connect Google Sheets, QuickBooks, Slack, or webhook endpoints</div>
             </div>
             <div>
               <a href="https://zapier.com" target="_blank" rel="noopener noreferrer" class="btn btn-primary" style="background: #FF4F00; display: inline-flex; align-items: center; gap: 0.5rem;">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm1.2 17.4h-2.4v-4.2H6.6v-2.4h4.2V6.6h2.4v4.2h4.2v2.4h-4.2v4.2z" fill="#FFF"/></svg>
-                Connect on Zapier.com ↗
+                Connect on Zapier.com
               </a>
             </div>
           </div>
@@ -775,14 +697,8 @@
               <h4 style="font-size: 0.9rem; font-weight: 700; margin-bottom: 0.5rem;">Scoped Developer API Keys</h4>
               <p style="font-size: 0.8rem; color: var(--text-sub); margin-bottom: 1rem;">Keys are prefixed with <code>bsk_live_</code> and hashed using SHA-256.</p>
 
-              <div style="background: var(--bg-canvas); border: 1px solid var(--border-subtle); border-radius: 10px; padding: 1rem; margin-bottom: 0.75rem;">
-                <div style="display: flex; justify-content: space-between; font-weight: 700; font-size: 0.85rem;">
-                  <span>Zapier Cellular Automation Key</span>
-                  <span style="font-size: 0.75rem; color: var(--status-matched);">Active</span>
-                </div>
-                <div style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">
-                  bsk_live_948829... • Scopes: [sms:send, payments:read]
-                </div>
+              <div id="apiKeyList" style="background: var(--bg-canvas); border: 1px dashed var(--border-subtle); border-radius: 10px; padding: 1.5rem; text-align: center; font-size: 0.825rem; color: var(--text-muted); margin-bottom: 0.75rem;">
+                No scoped API keys generated. Click below to create a key for Zapier or custom scripts.
               </div>
 
               <button class="btn btn-outline" onclick="generateApiKeyModal()">+ Generate New Scoped Key</button>
@@ -792,17 +708,8 @@
               <h4 style="font-size: 0.9rem; font-weight: 700; margin-bottom: 0.5rem;">Registered Webhook Endpoints (Catch Hooks)</h4>
               <p style="font-size: 0.8rem; color: var(--text-sub); margin-bottom: 1rem;">All deliveries include cryptographic <code>X-BriskSMS-Signature</code> HMAC headers.</p>
 
-              <div style="background: var(--bg-canvas); border: 1px solid var(--border-subtle); border-radius: 10px; padding: 1rem; margin-bottom: 0.75rem;">
-                <div style="display: flex; justify-content: space-between; font-weight: 700; font-size: 0.85rem;">
-                  <span>Zapier Catch Hook</span>
-                  <span style="font-size: 0.75rem; color: var(--status-matched);">Delivering</span>
-                </div>
-                <div style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">
-                  https://hooks.zapier.com/hooks/catch/9921/ab...
-                </div>
-                <div style="font-size: 0.75rem; color: var(--text-sub); margin-top: 0.35rem;">
-                  Events: <code>payment.matched</code>, <code>payment.needs_review</code>
-                </div>
+              <div id="webhookList" style="background: var(--bg-canvas); border: 1px dashed var(--border-subtle); border-radius: 10px; padding: 1.5rem; text-align: center; font-size: 0.825rem; color: var(--text-muted); margin-bottom: 0.75rem;">
+                No webhook endpoints registered. Click below to add your Zapier Catch Hook or destination URL.
               </div>
 
               <button class="btn btn-outline" onclick="registerWebhookModal()">+ Add Webhook Endpoint</button>
@@ -845,7 +752,7 @@
         'review-queue': 'Accountant Discrepancy & Review Queue',
         'messaging': 'Cellular Gateway & Spreadsheet Bulk Campaign',
         'devices': 'Authorized Android Relay Fleet',
-        'integrations': 'Official Zapier App & OAuth 2.0 Integration'
+        'integrations': 'Zapier Integration & OAuth 2.0'
       };
       document.getElementById('tabHeaderTitle').textContent = titles[tabId] || 'Merchant Console';
     }
@@ -864,34 +771,46 @@
       document.getElementById('charCount').textContent = `${len} characters (${count} SMS credit / recipient)`;
     }
 
-    function simulateNewPayment() {
-      const tbody = document.querySelector('#paymentsTable tbody');
-      const randomCode = 'QA' + Math.floor(10000000 + Math.random() * 90000000);
-      const newRow = document.createElement('tr');
-      newRow.innerHTML = `
-        <td><code style="font-family: var(--font-mono); font-weight: 700;">${randomCode}</code></td>
-        <td><strong>M-PESA</strong></td>
-        <td>Neema Michael (+255754988776)</td>
-        <td><strong>TZS 75,000</strong></td>
-        <td><a href="#" style="color: var(--text-main); font-weight: 600;">INV-2026-68</a></td>
-        <td><span style="font-size: 0.75rem; color: var(--status-matched);">TIER 1 (EXACT REF)</span></td>
-        <td><span class="status-pill status-matched">● Matched</span></td>
-      `;
-      tbody.prepend(newRow);
-    }
-
     function dispatchCampaign() {
-      alert('Campaign successfully submitted to queue! Messages are being dispatched across SIM 1 pacing (1 SMS / 3 seconds).');
+      alert('Campaign submitted to queue. Messages will be dispatched through your active carrier relay.');
     }
 
     function generateApiKeyModal() {
       const key = 'bsk_live_' + Array.from(crypto.getRandomValues(new Uint8Array(24))).map(b => b.toString(16).padStart(2, '0')).join('');
       prompt('Copy your new scoped API key now. It will not be shown again:', key);
+      const container = document.getElementById('apiKeyList');
+      container.style.borderStyle = 'solid';
+      container.style.textAlign = 'left';
+      container.innerHTML = `
+        <div style="display: flex; justify-content: space-between; font-weight: 700; font-size: 0.85rem;">
+          <span>Active Scoped Key</span>
+          <span style="font-size: 0.75rem; color: var(--status-matched);">Active</span>
+        </div>
+        <div style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">
+          ${key.substring(0, 16)}... &bull; Scopes: [sms:send, payments:read]
+        </div>
+      `;
     }
 
     function registerWebhookModal() {
       const url = prompt('Enter your Zapier Catch Hook or destination URL:');
-      if (url) alert('Webhook endpoint registered with secret key whsec_' + Math.random().toString(36).substring(2));
+      if (url) {
+        const container = document.getElementById('webhookList');
+        container.style.borderStyle = 'solid';
+        container.style.textAlign = 'left';
+        container.innerHTML = `
+          <div style="display: flex; justify-content: space-between; font-weight: 700; font-size: 0.85rem;">
+            <span>Registered Webhook</span>
+            <span style="font-size: 0.75rem; color: var(--status-matched);">Listening</span>
+          </div>
+          <div style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem; word-break: break-all;">
+            ${url}
+          </div>
+          <div style="font-size: 0.75rem; color: var(--text-sub); margin-top: 0.35rem;">
+            Events: <code>payment.matched</code>, <code>payment.needs_review</code>
+          </div>
+        `;
+      }
     }
   </script>
 </body>

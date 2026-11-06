@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import App from '../src/index.js';
 import { ZapierZ, ZapierBundle } from '../src/authentication.js';
 
-describe('Official BriskSMS Zapier Application (@brisksms/zapier-app)', () => {
+describe('BriskSMS Zapier Integration (@brisksms/zapier-app)', () => {
   it('exports valid Zapier platform application configuration', () => {
     assert.equal(App.version, '1.0.0');
     assert.equal(App.authentication.type, 'oauth2');

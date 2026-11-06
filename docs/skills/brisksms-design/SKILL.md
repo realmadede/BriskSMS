@@ -134,10 +134,10 @@ Liquid Glass is a **material enhancement**, not a blanket surface replacement.
 
 ### 6.2. Status Communication (Non-Color Dependency)
 Every status indicator must display **both** an explicit symbol/icon and text:
-- `[✓] VERIFIED` (Green `#2E7D32` with checkmark icon)
-- `[!] REVIEW_REQUIRED` (Amber `#ED6C02` with alert triangle icon)
-- `[✕] REJECTED` (Crimson `#D32F2F` with cross icon)
-- `[•] OBSERVED` (Muted Umber `#666666` with pulse dot)
+- `[VERIFIED]` (Green `#2E7D32` with checkmark icon)
+- `[REVIEW_REQUIRED]` (Amber `#ED6C02` with alert triangle icon)
+- `[REJECTED]` (Crimson `#D32F2F` with cross icon)
+- `[OBSERVED]` (Muted Umber `#666666` with pulse dot)
 
 ---
 
