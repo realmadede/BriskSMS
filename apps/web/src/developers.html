@@ -51,6 +51,12 @@
       color: var(--text-main);
       line-height: 1.55;
       overflow-x: hidden;
+      padding-top: 72px;
+    }
+
+    /* Anchor target offset for fixed navigation bar */
+    [id] {
+      scroll-margin-top: 84px;
     }
 
     /* Container Utility - Multi-Screen Responsive */
@@ -179,11 +185,12 @@
       transform: translateY(-1.5px);
     }
 
-    /* 1. STICKY LIQUID GLASS NAVIGATION */
+    /* 1. FIXED LIQUID GLASS NAVIGATION */
     .top-nav-wrapper {
-      position: sticky;
+      position: fixed;
       top: 0;
       left: 0;
+      right: 0;
       width: 100%;
       z-index: 99999 !important;
       background: var(--glisse-surface) !important;
