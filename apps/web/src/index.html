@@ -912,6 +912,89 @@
       line-height: 1.65;
     }
 
+    /* INTEGRATIONS: YOUR BUSINESS TOOLS CONNECTED */
+    .integrations-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1.5rem;
+      margin-top: 3.5rem;
+    }
+
+    .integration-card {
+      background: #FFFFFF;
+      border: 1px solid var(--border-subtle);
+      border-radius: 20px;
+      padding: 2.25rem 1.75rem;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      box-shadow: 0 10px 30px -10px rgba(25, 20, 15, 0.04);
+      transition: transform 0.22s ease, box-shadow 0.22s ease;
+    }
+
+    .integration-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 16px 36px -10px rgba(25, 20, 15, 0.08);
+    }
+
+    .integration-badge {
+      display: inline-block;
+      font-size: 0.725rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--accent-sand-hover);
+      margin-bottom: 0.65rem;
+    }
+
+    .integration-title {
+      font-size: 1.25rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: var(--text-main);
+      margin-bottom: 0.75rem;
+    }
+
+    .integration-text {
+      font-size: 0.9rem;
+      color: var(--text-sub);
+      line-height: 1.65;
+    }
+
+    .integration-diagram {
+      background: var(--bg-bone);
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      padding: 0.85rem 1rem;
+      margin: 1.25rem 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.45rem;
+      font-size: 0.75rem;
+      font-weight: 600;
+      flex-wrap: wrap;
+    }
+
+    .diagram-pill {
+      background: #FFFFFF;
+      border: 1px solid var(--border-subtle);
+      padding: 0.35rem 0.65rem;
+      border-radius: 6px;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      white-space: nowrap;
+      font-family: var(--font-mono);
+      font-size: 0.725rem;
+    }
+
+    .diagram-arrow {
+      color: #2E7D32;
+      font-weight: 800;
+      font-size: 0.9rem;
+    }
+
     /* 8. SECURITY AND ACCOUNTABILITY */
     .security-grid {
       display: grid;
@@ -1107,7 +1190,7 @@
 
     /* RESPONSIVE DESIGN */
     @media (max-width: 1080px) {
-      .steps-grid, .usecases-grid {
+      .steps-grid, .usecases-grid, .integrations-grid {
         grid-template-columns: repeat(2, 1fr);
       }
       .security-grid {
@@ -1297,11 +1380,11 @@
       .commercial-independence-card p {
         font-size: 0.925rem;
       }
-      .steps-grid, .usecases-grid, .security-grid {
+      .steps-grid, .usecases-grid, .integrations-grid, .security-grid {
         grid-template-columns: 1fr;
         gap: 1rem;
       }
-      .step-card, .usecase-card, .sec-card {
+      .step-card, .usecase-card, .integration-card, .sec-card {
         padding: 1.5rem 1.25rem;
       }
       .supporting-note-banner {
@@ -1383,6 +1466,7 @@
           <li><a href="#platform">Platform</a></li>
           <li><a href="#payment-intelligence">Payment Intelligence</a></li>
           <li><a href="#bulk-sms">Bulk SMS</a></li>
+          <li><a href="#integrations">Integrations</a></li>
           <li><a href="/developers">Developers</a></li>
           <li><a href="#how-it-works">How It Works</a></li>
           <li><a href="#about">About</a></li>
@@ -1768,6 +1852,90 @@
             <div class="step-number">04</div>
             <h3 class="step-title">Review and take action</h3>
             <p class="step-text">Your team can review uncertain transactions, resolve outstanding items, and maintain an accountable reconciliation history.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- INTEGRATIONS SECTION -->
+    <section class="section-padding" id="integrations">
+      <div class="container">
+        <div class="eyebrow">SEAMLESS CONNECTIVITY & AUTOMATION</div>
+        <h2 class="section-title kinetic-text">
+          <span class="kinetic-word">Your</span> <span class="kinetic-word">business</span> <span class="kinetic-word">tools.</span> <span class="kinetic-word">Connected</span> <span class="kinetic-word">through</span> <span class="kinetic-word">BriskSMS.</span>
+        </h2>
+        <p class="section-desc">
+          Automate message dispatch from spreadsheets and deliver verified payment notifications directly to your accounting, CRM, and workflow tools with zero manual data entry.
+        </p>
+
+        <div class="integrations-grid">
+          <!-- Card 1: Google Sheets via Zapier -->
+          <div class="integration-card scroll-build">
+            <div>
+              <span class="integration-badge">Cellular SMS Automation</span>
+              <h3 class="integration-title">Google Sheets & Excel via Zapier</h3>
+              <p class="integration-text">
+                Connect your business spreadsheets directly to BriskSMS. Send personalized transactional or promotional SMS whenever a new row is added, routing messages through your private cellular relay with zero per-message markup.
+              </p>
+              <div class="integration-diagram">
+                <span class="diagram-pill">Google Sheets</span>
+                <span class="diagram-arrow">→</span>
+                <span class="diagram-pill">Zapier Catch Hook</span>
+                <span class="diagram-arrow">→</span>
+                <span class="diagram-pill">BriskSMS Carrier Relay</span>
+              </div>
+            </div>
+            <div style="margin-top: 1rem;">
+              <a href="/developers#zapier-sms" style="font-size: 0.825rem; font-weight: 700; color: var(--text-main); text-decoration: none; display: inline-flex; align-items: center; gap: 0.35rem;">
+                Explore Spreadsheet Dispatch <span>→</span>
+              </a>
+            </div>
+          </div>
+
+          <!-- Card 2: Real-Time Payment Outbox -->
+          <div class="integration-card scroll-build">
+            <div>
+              <span class="integration-badge">Real-Time Financial Outbox</span>
+              <h3 class="integration-title">Instant Payment Reconciliation Webhooks</h3>
+              <p class="integration-text">
+                When customer payments settle against invoices, BriskSMS signs and dispatches transactional webhooks to your destination. Automatically mark invoices paid in QuickBooks, unlock MikroTik internet access, or notify your billing team.
+              </p>
+              <div class="integration-diagram">
+                <span class="diagram-pill">M-Pesa / Mixx / Airtel</span>
+                <span class="diagram-arrow">→</span>
+                <span class="diagram-pill">BriskSMS Engine</span>
+                <span class="diagram-arrow">→</span>
+                <span class="diagram-pill">HMAC-Signed Webhook</span>
+              </div>
+            </div>
+            <div style="margin-top: 1rem;">
+              <a href="/developers#webhooks" style="font-size: 0.825rem; font-weight: 700; color: var(--text-main); text-decoration: none; display: inline-flex; align-items: center; gap: 0.35rem;">
+                View Webhook Specifications <span>→</span>
+              </a>
+            </div>
+          </div>
+
+          <!-- Card 3: Developer-First REST API -->
+          <div class="integration-card scroll-build">
+            <div>
+              <span class="integration-badge">Developer-First Architecture</span>
+              <h3 class="integration-title">Scoped API Keys & Private Carrier Relays</h3>
+              <p class="integration-text">
+                Issue scoped keys (<code>bsk_live_...</code>) for microservices and backends. Dispatch high-throughput SMS via cellular lines, query payment history, or sync invoice balances with predictable JSON payloads.
+              </p>
+              <div class="integration-diagram">
+                <span class="diagram-pill">x-api-key: bsk_live_...</span>
+                <span class="diagram-arrow">→</span>
+                <span class="diagram-pill">POST /v1/messages/send</span>
+                <span class="diagram-arrow">→</span>
+                <span class="diagram-pill">Multi-SIM Dispatch</span>
+              </div>
+            </div>
+            <div style="margin-top: 1rem;">
+              <a href="/developers#api-reference" style="font-size: 0.825rem; font-weight: 700; color: var(--text-main); text-decoration: none; display: inline-flex; align-items: center; gap: 0.35rem;">
+                Browse API Documentation <span>→</span>
+              </a>
+            </div>
           </div>
         </div>
       </div>

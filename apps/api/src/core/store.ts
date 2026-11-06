@@ -12,6 +12,12 @@ import {
   CreditLedgerEntryType,
   SmsStatus,
   CampaignStatus,
+  EvidenceSourceType,
+  TransactionState,
+  PaymentProvider,
+  InvoiceStatus,
+  ApiKeyScope,
+  BusinessEventType,
 } from '@brisksms/shared';
 import { assertTenantContext } from '@brisksms/db';
 
@@ -251,6 +257,92 @@ export interface SmsCampaignRecord {
   updatedAt: Date;
 }
 
+export interface RawPaymentEvidenceRecord {
+  id: string;
+  organizationId: string;
+  sourceType: EvidenceSourceType;
+  deviceId?: string | null;
+  senderAddress: string;
+  rawPayload: string;
+  simSlot: number;
+  deviceTimestamp: Date;
+  signature?: string | null;
+  nonce?: string | null;
+  sequenceNumber?: bigint | null;
+  receivedAt: Date;
+}
+
+export interface NormalizedPaymentRecord {
+  id: string;
+  organizationId: string;
+  deviceId?: string | null;
+  rawEvidenceId: string;
+  provider: PaymentProvider;
+  reference: string;
+  amountCents: bigint;
+  currency: string;
+  senderPhone: string;
+  senderName: string | null;
+  recipientAccount: string | null;
+  customerMemo: string | null;
+  providerTimestamp: Date;
+  state: TransactionState;
+  deduplicationHash: string;
+  matchedInvoiceId: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface InvoiceRecord {
+  id: string;
+  organizationId: string;
+  customerId?: string | null;
+  referenceNumber: string;
+  totalAmountCents: bigint;
+  paidAmountCents: bigint;
+  currency: string;
+  status: InvoiceStatus;
+  customerPhone?: string | null;
+  customerName?: string | null;
+  dueDate?: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ApiKeyRecord {
+  id: string;
+  organizationId: string;
+  keyHash: string;
+  keyPrefix: string;
+  label: string;
+  scopes: ApiKeyScope[];
+  lastUsedAt?: Date | null;
+  revokedAt?: Date | null;
+  createdAt: Date;
+}
+
+export interface WebhookEndpointRecord {
+  id: string;
+  organizationId: string;
+  url: string;
+  secret: string;
+  subscribedEvents: BusinessEventType[];
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface OutboxEventRecord {
+  id: string;
+  organizationId: string;
+  eventType: BusinessEventType;
+  payload: Record<string, unknown>;
+  isDelivered: boolean;
+  attemptCount: number;
+  lastAttemptAt?: Date | null;
+  createdAt: Date;
+}
+
 export class MemoryStore {
   users = new Map<string, UserRecord>();
   usersByEmail = new Map<string, string>(); // email -> userId
@@ -290,6 +382,19 @@ export class MemoryStore {
   smsMessages = new Map<string, SmsMessageRecord>();
   smsCampaigns = new Map<string, SmsCampaignRecord>();
 
+  // Universal Ingestion & Financial Reconciliation Maps
+  rawEvidences: RawPaymentEvidenceRecord[] = [];
+  normalizedPayments = new Map<string, NormalizedPaymentRecord>(); // id -> record
+  paymentsByDeduplication = new Map<string, string>(); // `${orgId}:${dedupHash}` -> paymentId
+  invoices = new Map<string, InvoiceRecord>(); // id -> record
+  invoicesByReference = new Map<string, string>(); // `${orgId}:${refNumber}` -> invoiceId
+
+  // Developer Platform, Scoped API Keys & Outbox Webhooks
+  apiKeys = new Map<string, ApiKeyRecord>(); // id -> record
+  apiKeysByHash = new Map<string, string>(); // keyHash -> id
+  webhookEndpoints = new Map<string, WebhookEndpointRecord>(); // id -> record
+  outboxEvents: OutboxEventRecord[] = [];
+
   constructor() {
     this.seedDefaultCatalog();
   }
@@ -315,6 +420,17 @@ export class MemoryStore {
     this.messagingLedgers = [];
     this.smsMessages.clear();
     this.smsCampaigns.clear();
+
+    this.rawEvidences = [];
+    this.normalizedPayments.clear();
+    this.paymentsByDeduplication.clear();
+    this.invoices.clear();
+    this.invoicesByReference.clear();
+    this.apiKeys.clear();
+    this.apiKeysByHash.clear();
+    this.webhookEndpoints.clear();
+    this.outboxEvents = [];
+
     this.seedDefaultCatalog();
   }
 

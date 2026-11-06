@@ -64,6 +64,14 @@ enum DeviceIngestionMode {
   HYBRID
 }
 
+enum EvidenceSourceType {
+  ANDROID_NOTIFICATION_RELAY
+  DIRECT_PROVIDER_API
+  UNIFIED_AGGREGATOR
+  BANK_INTEGRATION
+  AUTHORIZED_MANUAL_IMPORT
+}
+
 enum InvoiceStatus {
   UNPAID
   PARTIALLY_PAID
@@ -144,6 +152,7 @@ model Organization {
   auditLogs             AuditLog[]
   subscription          OrganizationSubscription?
   subscriptionInvoices  SubscriptionBillingInvoice[]
+  outboxEvents          OutboxEvent[]
 
   @@map("organizations")
 }
@@ -233,21 +242,22 @@ model DeviceTelemetry {
 // ------------------------------------------------------------------------------
 
 model RawPaymentEvidence {
-  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  organizationId String   @map("organization_id") @db.Uuid
-  deviceId       String   @map("device_id") @db.Uuid
-  senderAddress  String   @map("sender_address") @db.VarChar(100)
-  rawPayload     String   @map("raw_payload") @db.Text
-  simSlot        Int      @default(1) @map("sim_slot") @db.SmallInt
-  deviceTimestamp DateTime @map("device_timestamp") @db.Timestamptz(6)
-  signature      String   @db.Text
-  nonce          String   @db.VarChar(64)
-  sequenceNumber BigInt   @map("sequence_number")
-  receivedAt     DateTime @default(now()) @map("received_at") @db.Timestamptz(6)
+  id              String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId  String             @map("organization_id") @db.Uuid
+  sourceType      EvidenceSourceType @default(ANDROID_NOTIFICATION_RELAY) @map("source_type")
+  deviceId        String?            @map("device_id") @db.Uuid
+  senderAddress   String             @map("sender_address") @db.VarChar(100)
+  rawPayload      String             @map("raw_payload") @db.Text
+  simSlot         Int                @default(1) @map("sim_slot") @db.SmallInt
+  deviceTimestamp DateTime           @map("device_timestamp") @db.Timestamptz(6)
+  signature       String?            @db.Text
+  nonce           String?            @db.VarChar(64)
+  sequenceNumber  BigInt?            @map("sequence_number")
+  receivedAt      DateTime           @default(now()) @map("received_at") @db.Timestamptz(6)
 
   // Explicitly IMMUTABLE: no updated_at column
   organization       Organization       @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  device             Device             @relation(fields: [deviceId], references: [id], onDelete: Restrict)
+  device             Device?            @relation(fields: [deviceId], references: [id], onDelete: SetNull)
   normalizedPayment  NormalizedPayment?
 
   @@index([organizationId, receivedAt(sort: Desc)])
@@ -258,7 +268,7 @@ model RawPaymentEvidence {
 model NormalizedPayment {
   id                String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   organizationId    String           @map("organization_id") @db.Uuid
-  deviceId          String           @map("device_id") @db.Uuid
+  deviceId          String?          @map("device_id") @db.Uuid
   rawEvidenceId     String           @unique @map("raw_evidence_id") @db.Uuid
   provider          PaymentProvider
   reference         String           @db.VarChar(100)
@@ -276,7 +286,7 @@ model NormalizedPayment {
   updatedAt         DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   organization    Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  device          Device              @relation(fields: [deviceId], references: [id], onDelete: Restrict)
+  device          Device?             @relation(fields: [deviceId], references: [id], onDelete: SetNull)
   rawEvidence     RawPaymentEvidence  @relation(fields: [rawEvidenceId], references: [id], onDelete: Restrict)
   matchedInvoice  Invoice?            @relation(fields: [matchedInvoiceId], references: [id], onDelete: SetNull)
   invoicePayments InvoicePayment[]
@@ -577,6 +587,22 @@ model AuditLog {
   @@index([organizationId, resourceType, resourceId])
   @@index([organizationId, createdAt(sort: Desc)])
   @@map("audit_logs")
+}
+
+model OutboxEvent {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  eventType      String    @map("event_type") @db.VarChar(100)
+  payload        Json      @db.JsonB
+  isDelivered    Boolean   @default(false) @map("is_delivered")
+  attemptCount   Int       @default(0) @map("attempt_count")
+  lastAttemptAt  DateTime? @map("last_attempt_at") @db.Timestamptz(6)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, isDelivered, createdAt])
+  @@map("outbox_events")
 }
 
 // ------------------------------------------------------------------------------

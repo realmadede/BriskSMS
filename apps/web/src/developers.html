@@ -994,6 +994,7 @@
             <div class="endpoint-tabs">
               <button class="ep-btn active" onclick="setEndpoint('ingest', this)">POST /v1/payments/ingest</button>
               <button class="ep-btn" onclick="setEndpoint('match', this)">POST /v1/reconcile/match</button>
+              <button class="ep-btn" onclick="setEndpoint('send', this)">POST /v1/messages/send</button>
               <button class="ep-btn" onclick="setEndpoint('dispatch', this)">POST /v1/messages/send-bulk</button>
               <button class="ep-btn" onclick="setEndpoint('device', this)">GET /v1/devices/status</button>
             </div>
@@ -1461,6 +1462,75 @@ matchInvoice();`,
   "remainingBalance": 0,
   "ledgerHash": "8f489a291b...",
   "webhookDispatched": true
+}`
+      },
+      send: {
+        curl: `curl -X POST https://api.brisksms.com/v1/messages/send \\
+  -H "x-api-key: bsk_live_9488291048291..." \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "recipientPhone": "+255754000111",
+    "message": "Habari Juma! Invoice #INV-2026-44 is confirmed. Karibu sana!",
+    "simSlot": 1
+  }'`,
+        node: `const axios = require("axios");
+
+async function sendCellularSms() {
+  const res = await axios.post("https://api.brisksms.com/v1/messages/send", {
+    recipientPhone: "+255754000111",
+    message: "Habari Juma! Invoice #INV-2026-44 is confirmed. Karibu sana!",
+    simSlot: 1
+  }, {
+    headers: { "x-api-key": process.env.BRISKSMS_API_KEY }
+  });
+  console.log("Message queued:", res.data.messageId);
+}
+sendCellularSms();`,
+        ts: `import axios from "axios";
+
+const res = await axios.post("https://api.brisksms.com/v1/messages/send", {
+  recipientPhone: "+255754000111",
+  message: "Habari Juma! Invoice #INV-2026-44 is confirmed. Karibu sana!",
+  simSlot: 1
+}, {
+  headers: { "x-api-key": process.env.BRISKSMS_API_KEY }
+});`,
+        python: `import requests, os
+
+response = requests.post(
+    "https://api.brisksms.com/v1/messages/send",
+    headers={"x-api-key": os.getenv("BRISKSMS_API_KEY")},
+    json={
+        "recipientPhone": "+255754000111",
+        "message": "Habari Juma! Invoice #INV-2026-44 is confirmed. Karibu sana!",
+        "simSlot": 1
+    }
+)
+print("Status:", response.json())`,
+        go: `req, _ := http.NewRequestWithContext(ctx, "POST", "https://api.brisksms.com/v1/messages/send", body)
+req.Header.Set("x-api-key", apiKey)
+req.Header.Set("Content-Type", "application/json")
+resp, _ := httpClient.Do(req)`,
+        php: `$response = $httpClient->post('https://api.brisksms.com/v1/messages/send', [
+    'headers' => ['x-api-key' => getenv('BRISKSMS_API_KEY')],
+    'json'    => [
+        'recipientPhone' => '+255754000111',
+        'message'        => 'Habari Juma! Invoice #INV-2026-44 is confirmed. Karibu sana!',
+        'simSlot'        => 1
+    ]
+]);`,
+        java: `HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.brisksms.com/v1/messages/send"))
+    .header("x-api-key", apiKey)
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
+    .build();`,
+        response: `{
+  "success": true,
+  "messageId": "msg_992019401",
+  "status": "SENT",
+  "recipientPhone": "+255754000111",
+  "costCredits": 1
 }`
       },
       dispatch: {

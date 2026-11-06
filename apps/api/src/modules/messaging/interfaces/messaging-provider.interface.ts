@@ -33,3 +33,4 @@ export interface MessagingProvider {
     rawPayload: Record<string, unknown>,
   ): NormalizedDeliveryEvent;
 }
+
