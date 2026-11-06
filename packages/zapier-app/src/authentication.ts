@@ -92,3 +92,4 @@ export const authentication = {
   },
   connectionLabel: '{{name}} - {{organization_id}}',
 };
+

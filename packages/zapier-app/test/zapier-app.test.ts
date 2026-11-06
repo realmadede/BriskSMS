@@ -91,3 +91,4 @@ describe('Official BriskSMS Zapier Application (@brisksms/zapier-app)', () => {
     assert.equal((result as { id: string }).id, 'webhook_ep_123');
   });
 });
+

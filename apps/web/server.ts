@@ -47,8 +47,8 @@ const server = createServer((req: IncomingMessage, res: ServerResponse) => {
     return;
   }
 
-  // Dedicated /developers route
-  if (path === '/developers' || path === '/developers.html') {
+  // Dedicated /developers and /developer route
+  if (path === '/developers' || path === '/developers.html' || path === '/developer' || path === '/developer.html') {
     if (existsSync(DEVELOPERS_PATH)) {
       res.writeHead(200, {
         'Content-Type': 'text/html; charset=utf-8',
