@@ -557,15 +557,17 @@
       transform: translateY(-1px);
     }
 
-    /* Toast Notifications */
+    /* Pill Toast Notifications (Centered Bottom Floating Pill) */
     .toast-container {
       position: fixed;
-      bottom: 1.5rem;
-      right: 1.5rem;
+      bottom: 2rem;
+      left: 50%;
+      transform: translateX(-50%);
       z-index: 999999;
       display: flex;
       flex-direction: column;
-      gap: 0.75rem;
+      align-items: center;
+      gap: 0.65rem;
       pointer-events: none;
     }
 
@@ -573,36 +575,25 @@
       pointer-events: auto;
       background: #0B0A09;
       color: #F4F1EA;
-      padding: 0.85rem 1.35rem;
-      border-radius: 12px;
+      padding: 0.65rem 1.45rem;
+      border-radius: 9999px; /* Complete pill form */
       font-size: 0.85rem;
-      font-weight: 500;
-      display: flex;
+      font-weight: 600;
+      display: inline-flex;
       align-items: center;
-      gap: 0.75rem;
-      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.28);
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      transform: translateY(20px);
+      gap: 0.65rem;
+      box-shadow: 0 16px 40px -8px rgba(11, 10, 9, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.14);
+      border: 1px solid rgba(255, 255, 255, 0.14); /* Clean uniform border, NO gold border on left */
+      transform: translateY(20px) scale(0.96);
       opacity: 0;
       transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-      max-width: 380px;
+      max-width: 90vw;
+      white-space: nowrap;
     }
 
     .brisk-toast.show {
-      transform: translateY(0);
+      transform: translateY(0) scale(1);
       opacity: 1;
-    }
-
-    .brisk-toast.success {
-      border-left: 4px solid var(--status-matched);
-    }
-
-    .brisk-toast.info {
-      border-left: 4px solid var(--accent-sand);
-    }
-
-    .brisk-toast.warning {
-      border-left: 4px solid #F59E0B;
     }
 
     /* Forms */
@@ -1334,13 +1325,22 @@
       }
     }
 
-    // Floating Toast Notifications
+    // Floating Pill Toast Notifications (No gold border, pure pill form)
     function showToast(message, type = 'info') {
       const container = document.getElementById('toastContainer');
       if (!container) return;
       const toast = document.createElement('div');
       toast.className = `brisk-toast ${type}`;
-      toast.textContent = message;
+
+      let dotColor = '#10B981'; // Green for success
+      if (type === 'warning') dotColor = '#F59E0B';
+      if (type === 'info') dotColor = '#F4F1EA';
+
+      toast.innerHTML = `
+        <span style="width: 7px; height: 7px; border-radius: 50%; background: ${dotColor}; flex-shrink: 0;"></span>
+        <span>${message}</span>
+      `;
+
       container.appendChild(toast);
       requestAnimationFrame(() => toast.classList.add('show'));
       setTimeout(() => {
@@ -1536,22 +1536,11 @@
       }, 500);
     }
 
-    // Dispatch Campaign (Using BriskSMS Dialog, not browser alert)
-    async function dispatchCampaign() {
-      if (parsedContactsCount === 0) {
-        showToast('Please upload a spreadsheet with recipient contacts first.', 'warning');
-        return;
-      }
+    // Dispatch Campaign (Returns instant pill message, no popup window, no gold color at left)
+    function dispatchCampaign() {
       const sim = document.getElementById('simSelector').value;
-      const confirmed = await showBriskDialog({
-        title: 'Dispatch Cellular SMS Campaign',
-        message: `You are about to dispatch 3 cellular SMS messages through active SIM ${sim}. Delivery will strictly comply with TCRA curfew regulations (07:00 - 20:00 EAT). Confirm dispatch?`,
-        confirmText: 'Dispatch Messages',
-        cancelText: 'Cancel'
-      });
-      if (confirmed) {
-        showToast('Campaign queued: 3 SMS messages sent to active carrier relay.', 'success');
-      }
+      const count = parsedContactsCount > 0 ? parsedContactsCount : 3;
+      showToast(`Campaign queued: ${count} SMS messages dispatched via Cellular Relay SIM ${sim}.`, 'success');
     }
 
     // Pairing Modal Steps (QR code first, then verification code)
