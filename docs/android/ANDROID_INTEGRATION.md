@@ -198,3 +198,103 @@ Adheres to the BriskSMS design system (Stitch warm palette, geometric typography
 4. Companion calls `POST /v1/devices/pair`.
 5. Backend verifies token, binds device public key, registers hardware metadata, and issues device Bearer token (`bsk_dev_...`).
 6. Companion securely stores token in Keystore AES-256-GCM storage and launches background workers.
+
+
+---
+
+## 8. Android Toolchain & Build Instructions
+
+### 8.1 Toolchain Requirements
+- **JDK:** Java 17 (LTS) - required by AGP 8.3.1.
+- **Gradle:** Gradle 8.14.3 (cached distribution available in monorepo wrapper).
+- **Android Gradle Plugin:** AGP `8.3.1`.
+- **Kotlin:** Kotlin `1.9.23` with Compose Compiler Extension `1.5.11`.
+- **Android SDK:**
+  - `compileSdk`: `34` (Android 14)
+  - `targetSdk`: `34` (Android 14)
+  - `minSdk`: `26` (Android 8.0 Oreo - required for NotificationListenerService and modern Keystore features)
+
+### 8.2 Building the Companion Application
+To compile and assemble the debug APK:
+```bash
+cd apps/android
+./gradlew assembleDebug
+```
+Output artifact: `apps/android/app/build/outputs/apk/debug/app-debug.apk`
+
+To execute Android JVM unit test suites:
+```bash
+cd apps/android
+./gradlew testDebugUnitTest
+```
+
+---
+
+## 9. Permissions & Telephony Management
+
+### 9.1 Required Android Permissions
+| Permission | Product Scope | Justification & Policy |
+| :--- | :--- | :--- |
+| `android.permission.INTERNET` | Shared | Communicating with BriskSMS API and SMSGate relay server over HTTPS. |
+| `android.permission.ACCESS_NETWORK_STATE` | Shared | Network type detection (Wi-Fi vs Cellular) for telemetry and WorkManager constraints. |
+| `android.permission.RECEIVE_BOOT_COMPLETED` | Shared | Automatically resurrecting synchronization workers and foreground gateway on device boot. |
+| `android.permission.POST_NOTIFICATIONS` | Shared | Android 13+ requirement to display the ongoing SMSGate cellular gateway foreground notification. |
+| `android.permission.BIND_NOTIFICATION_LISTENER_SERVICE` | Product A | Required to intercept financial notifications from whitelisted payment apps. |
+| `android.permission.SEND_SMS` | Product B | Telephony radio access to transmit cellular SMS messages via `SmsManager`. |
+| `android.permission.READ_PHONE_STATE` | Product B | Enumerate active SIM subscriptions, carrier names, and dual-SIM slots via `SubscriptionManager`. |
+| `android.permission.FOREGROUND_SERVICE` | Product B | Keep the SMSGate cellular gateway listening and dispatching reliably in background. |
+| `android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE` | Product B | Android 14+ compliant foreground service type for cellular peripheral gateway operations. |
+| `android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` | Product B | Prevent OS Doze mode from killing carrier keepalive connections during unattended operation. |
+
+---
+
+## 10. Product Entitlement Behavior & Authorization
+
+The Android companion dynamically queries and respects the organization's backend entitlements:
+
+1. **Payment Intelligence Entitlement (`isPaymentIntelligenceEnabled`):**
+   - When enabled: `BriskNotificationListenerService` actively captures and encrypts payment notifications. `EvidenceUploadWorker` uploads records.
+   - When disabled: Ingestion is halted in memory; all incoming notifications are dropped; no evidence is persisted or uploaded.
+2. **Bulk Messaging Entitlement (`isBulkMessagingEnabled`):**
+   - When enabled: `SmsGateRelayService` runs as a foreground service and executes carrier dispatches from `sms_dispatch_queue`.
+   - When disabled: Foreground service terminates immediately; queue polling ceases; no SMS messages are dispatched via cellular radio.
+3. **Revocation Invariant (`isRevoked`):**
+   - If an administrator revokes a device via the Web Console, the backend returns HTTP `403 DEVICE_REVOKED`.
+   - Both Product A and Product B background loops immediately terminate, and local credentials are invalidated.
+
+---
+
+## 11. Testing & Verification Guide
+
+### 11.1 Backend Device Authentication & Ingestion Tests
+Executed using Bun / Node test runner:
+```bash
+bun test apps/api/test/device-auth-and-ingestion.test.ts
+```
+Covers:
+- Valid bearer token authorization.
+- Token hashing verification using `crypto.timingSafeEqual`.
+- Revoked device rejection (`403 DEVICE_REVOKED`).
+- Ingestion endpoint `POST /v1/ingestion/evidence`.
+- Idempotent handling of duplicate payment notifications.
+- Financial settlement separation (notification ingestion NEVER settles invoices).
+
+### 11.2 Android Unit Tests
+Located in `apps/android/app/src/test/java/tz/co/brisksms/`:
+- `ProviderNotificationParserTest`: Comprehensive tests for Vodacom M-Pesa, Mixx by Yas, Airtel Money, CRDB Bank, and personal message filtering.
+- `SmsDispatcherLogicTest`: Validates state machine separation between radio submission (`SUBMITTED`) and handset delivery (`DELIVERED`), idempotency keys, and multipart message thresholds.
+- `SimManagerLogicTest`: Validates Tanzanian telco normalization, dual-SIM slot mapping, and subscription fallback.
+- `ProductIsolationTest`: Invariant checks verifying complete database, queue, and entitlement separation between Product A and Product B.
+
+---
+
+## 12. Known Limitations & Operating Boundaries
+
+1. **Hardware Telephony Dependency:**
+   - Cellular SMS dispatch requires physical SIM card hardware installed in an Android device. Emulators without active GSM radio simulation cannot transmit real carrier SMS.
+2. **Notification Listener OS Binding:**
+   - Android requires the user to explicitly grant "Notification Access" in Android System Settings. Third-party apps cannot programmatically grant this permission; the companion UI provides a direct shortcut to system settings.
+3. **Google Play Policy Scoping:**
+   - `SEND_SMS` and `BIND_NOTIFICATION_LISTENER_SERVICE` are sensitive permissions. When publishing to Google Play, the application must be declared under the Enterprise Device Gateway policy exemption or distributed via enterprise private APK / MDM sideload.
+4. **TCRA Radio Pacing:**
+   - Cellular operators enforce SMS rate limits. The dispatcher enforces a minimum 1,500ms pacing delay between dispatches (approx. 40 SMS/min per active SIM) to avoid carrier SIM blocking.

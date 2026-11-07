@@ -3,6 +3,7 @@ package tz.co.brisksms.payment.parser
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ProviderNotificationParserTest {
@@ -18,6 +19,30 @@ class ProviderNotificationParserTest {
         assertEquals(4500000L, result?.amountCents)
         assertEquals("+255754123456", result?.senderPhone)
         assertEquals("John Doe", result?.senderName)
+        assertEquals("TZS", result?.currency)
+    }
+
+    @Test
+    fun parseMpesaNotification_withDecimalAmount_succeeds() {
+        val payload = "09J8K7L6M6 Imethibitishwa. Umepokea Tsh 1500.50 kutoka kwa Neema Juma 0765998877 tarehe 06/11/2026."
+        val result = ProviderNotificationParser.parse("MPESA", payload)
+
+        assertNotNull(result)
+        assertEquals("MPESA", result?.provider)
+        assertEquals("09J8K7L6M6", result?.reference)
+        assertEquals(150050L, result?.amountCents)
+        assertEquals("+255765998877", result?.senderPhone)
+        assertEquals("Neema Juma", result?.senderName)
+    }
+
+    @Test
+    fun parseMpesaNotification_withInternationalPhone_succeeds() {
+        val payload = "09J8K7L6M7 Imethibitishwa. Umepokea Tsh 100,000 kutoka kwa Baraka Rashid +255754987654 tarehe 06/11/2026."
+        val result = ProviderNotificationParser.parse("MPESA", payload)
+
+        assertNotNull(result)
+        assertEquals("+255754987654", result?.senderPhone)
+        assertEquals(10000000L, result?.amountCents)
     }
 
     @Test
@@ -56,6 +81,7 @@ class ProviderNotificationParserTest {
         assertEquals("CRDB9911", result?.reference)
         assertEquals(25000000L, result?.amountCents)
         assertEquals("Sarah Peter", result?.senderName)
+        assertNull(result?.senderPhone)
     }
 
     @Test
@@ -64,5 +90,19 @@ class ProviderNotificationParserTest {
         val result = ProviderNotificationParser.parse("0712345678", personalMsg)
 
         assertNull(result)
+    }
+
+    @Test
+    fun parseUnsupportedNotification_returnsNull() {
+        val otpMsg = "Your verification code is 492019. Valid for 5 minutes."
+        val result = ProviderNotificationParser.parse("Google", otpMsg)
+
+        assertNull(result)
+    }
+
+    @Test
+    fun parseEmptyOrBlank_returnsNull() {
+        assertNull(ProviderNotificationParser.parse("MPESA", ""))
+        assertNull(ProviderNotificationParser.parse("MPESA", "    "))
     }
 }
