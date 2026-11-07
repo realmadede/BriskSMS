@@ -5,7 +5,7 @@ export class RedisUnavailableError extends Error {
   public readonly statusCode = 503;
   public readonly code = 'REDIS_UNAVAILABLE';
 
-  constructor(message: string = 'Redis queue broker is currently unavailable.', public readonly cause?: unknown) {
+  constructor(message: string = 'Redis queue broker is currently unavailable.', public override readonly cause?: unknown) {
     super(message);
     this.name = 'RedisUnavailableError';
   }

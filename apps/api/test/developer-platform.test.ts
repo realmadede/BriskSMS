@@ -8,7 +8,6 @@ import {
   GatewayMode,
   NormalizedDeliveryEvent,
 } from '@brisksms/shared';
-import { sql } from '@brisksms/db';
 import { dbStore } from '../src/core/store.js';
 import { ApiKeyService } from '../src/modules/developer/api-key.service.js';
 import { WebhookService } from '../src/modules/developer/webhook.service.js';
@@ -130,12 +129,7 @@ describe('Developer Platform & Zapier Webhook Automation', () => {
         organizationId: orgId,
         eventType: BusinessEventType.PAYMENT_MATCHED,
         payload: { reference: 'QA8921KL90', amountCents: '15000000' },
-        status: 'PENDING',
-        isDelivered: false,
-        attemptCount: 0,
         maxAttempts: 5,
-        nextAttemptAt: new Date(),
-        createdAt: new Date(),
       });
 
       let dispatchedUrl = '';

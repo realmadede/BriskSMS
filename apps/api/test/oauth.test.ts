@@ -7,8 +7,8 @@ import { OAuthService } from '../src/modules/oauth/oauth.service.js';
 
 describe('OAuth 2.0 PKCE Server (@brisksms/api)', () => {
   let oauthService: OAuthService;
-  let orgId = randomUUID();
-  let userId = randomUUID();
+  let orgId: string = randomUUID();
+  let userId: string = randomUUID();
 
   beforeEach(async () => {
     await dbStore.reset();

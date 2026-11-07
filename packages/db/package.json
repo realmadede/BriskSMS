@@ -5,6 +5,7 @@
   "description": "Database schema, migrations, and PostgreSQL client for BriskSMS",
   "author": "BriskSMS Team",
   "license": "SEE LICENSE IN LICENSE",
+  "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {

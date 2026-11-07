@@ -24,7 +24,15 @@ export interface BullJobOptions {
 export interface BullJobData {
   organizationId?: string;
   correlationId?: string;
-  [key: string]: unknown;
+}
+
+export interface NormalizedBullJobOptions {
+  attempts: number;
+  backoff: BullBackoffOptions;
+  delay: number;
+  timeoutMs: number;
+  requireOrganizationContext: boolean;
+  correlationId: string;
 }
 
 export interface BullJob<T extends BullJobData = BullJobData> {
@@ -32,7 +40,7 @@ export interface BullJob<T extends BullJobData = BullJobData> {
   name: string;
   queueName: string;
   data: T;
-  opts: Required<Omit<BullJobOptions, 'jobId' | 'correlationId'>> & { correlationId: string };
+  opts: NormalizedBullJobOptions;
   status: BullJobStatus;
   attemptsMade: number;
   failedReason?: string;

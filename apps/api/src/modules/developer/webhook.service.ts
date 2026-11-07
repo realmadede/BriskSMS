@@ -75,7 +75,7 @@ export class WebhookService {
       RETURNING *
     `;
 
-    return this.mapEndpointRow(inserted[0]);
+    return this.mapEndpointRow(inserted[0]!);
   }
 
   /**
@@ -146,7 +146,7 @@ export class WebhookService {
       throw new Error(`Outbox event ${outboxEventId} not found for organization ${organizationId}`);
     }
 
-    const row = eventRows[0];
+    const row = eventRows[0]!;
     if (row.is_delivered || row.status === OutboxStatus.DELIVERED) {
       return { delivered: true, results: [] };
     }

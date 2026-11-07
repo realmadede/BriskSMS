@@ -12,7 +12,6 @@ import {
 import {
   EvidenceSourceType,
   VerificationMethod,
-  CreditLedgerEntryType,
   BillingInterval,
 } from '@brisksms/shared';
 import { dbStore } from '../src/core/store.js';

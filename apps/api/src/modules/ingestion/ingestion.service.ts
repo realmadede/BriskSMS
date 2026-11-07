@@ -12,7 +12,6 @@ import {
 import { ParserEngine } from '@brisksms/parser-engine';
 import {
   dbStore,
-  NormalizedPaymentRecord,
   RawPaymentEvidenceRecord,
   mapNormalizedPaymentRow,
   mapRawEvidenceRow,

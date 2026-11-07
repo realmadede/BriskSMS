@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { ApiKeyScope } from '@brisksms/shared';
-import { sql, withTransaction } from '@brisksms/db';
+import { sql, SqlExecutor, withTransaction } from '@brisksms/db';
 import { OAuthClientRecord } from '../../core/store.js';
 
 export interface RegisterOAuthClientDto {
@@ -83,7 +83,7 @@ export class OAuthService {
       RETURNING *
     `;
 
-    return this.mapClientRow(inserted[0]);
+    return this.mapClientRow(inserted[0]!);
   }
 
   /**
@@ -97,7 +97,7 @@ export class OAuthService {
       throw new Error(`Invalid OAuth client_id: ${dto.clientId}`);
     }
 
-    const client = this.mapClientRow(clientRows[0]);
+    const client = this.mapClientRow(clientRows[0]!);
     if (client.organizationId !== dto.organizationId) {
       throw new Error('OAuth client does not belong to the specified organization');
     }
@@ -159,7 +159,7 @@ export class OAuthService {
       if (clientRows.length === 0) {
         throw new Error(`Invalid client_id: ${dto.clientId}`);
       }
-      const client = this.mapClientRow(clientRows[0]);
+      const client = this.mapClientRow(clientRows[0]!);
 
       if (!client.isPublic && client.clientSecretHash) {
         if (!dto.clientSecret) {
@@ -177,7 +177,7 @@ export class OAuthService {
       if (codeRows.length === 0) {
         throw new Error('Invalid authorization code');
       }
-      const codeRecord = codeRows[0];
+      const codeRecord = codeRows[0]!;
 
       if (codeRecord.used_at) {
         throw new Error('Authorization code has already been used');
@@ -239,7 +239,7 @@ export class OAuthService {
         throw new Error('Invalid refresh token');
       }
 
-      const tokenRecord = tokenRows[0];
+      const tokenRecord = tokenRows[0]!;
 
       if (tokenRecord.revoked_at) {
         throw new Error('Token has been revoked');
@@ -292,7 +292,7 @@ export class OAuthService {
       return null;
     }
 
-    const record = rows[0];
+    const record = rows[0]!;
     if (record.revoked_at) {
       return null;
     }
@@ -336,7 +336,7 @@ export class OAuthService {
   }
 
   private async issueTokenRecordTx(
-    tx: <T = Record<string, any>>(strings: TemplateStringsArray, ...values: unknown[]) => Promise<T[]>,
+    tx: SqlExecutor,
     clientId: string,
     userId: string,
     organizationId: string,

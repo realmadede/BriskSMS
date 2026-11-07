@@ -214,11 +214,17 @@ describe('Milestone 1: Strict Multi-Tenant Isolation Across All Domains & Worker
         outboxEventId: outboxEventA.id,
         eventType: BusinessEventType.PAYMENT_VERIFIED,
       },
-      attemptsMade: 0,
-      maxAttempts: 3,
-      backoffMs: 1000,
-      timeoutMs: 5000,
-      createdAt: Date.now(),
+      opts: {
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 1000 },
+        delay: 0,
+        timeoutMs: 5000,
+        requireOrganizationContext: true,
+        correlationId: 'test-forged-webhook',
+      },
+      status: 'active',
+      attemptsMade: 1,
+      timestamp: Date.now(),
     };
 
     await assert.rejects(
@@ -247,11 +253,17 @@ describe('Milestone 1: Strict Multi-Tenant Isolation Across All Domains & Worker
         organizationId: orgBId,
         campaignId: campaign.id,
       },
-      attemptsMade: 0,
-      maxAttempts: 3,
-      backoffMs: 1000,
-      timeoutMs: 5000,
-      createdAt: Date.now(),
+      opts: {
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 1000 },
+        delay: 0,
+        timeoutMs: 5000,
+        requireOrganizationContext: true,
+        correlationId: 'test-forged-campaign',
+      },
+      status: 'active',
+      attemptsMade: 1,
+      timestamp: Date.now(),
     };
 
     await assert.rejects(

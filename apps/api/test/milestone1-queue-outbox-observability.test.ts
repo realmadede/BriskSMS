@@ -2,7 +2,6 @@ import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { IncomingMessage, ServerResponse } from 'node:http';
 import { Socket } from 'node:net';
-import { randomUUID } from 'node:crypto';
 import {
   BullQueue,
   BullWorker,
@@ -18,7 +17,6 @@ import {
   EvidenceSourceType,
   FeatureKey,
   OutboxStatus,
-  SmsStatus,
 } from '@brisksms/shared';
 import {
   OutboxDispatcher,

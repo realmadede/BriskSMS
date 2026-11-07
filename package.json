@@ -10,8 +10,8 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "bun build --target node packages/shared/src/index.ts --outdir packages/shared/dist && bun build --target node --external @brisksms/shared packages/db/src/index.ts --outdir packages/db/dist && bun build --target node --external @brisksms/shared packages/parser-engine/src/index.ts --outdir packages/parser-engine/dist && bun build --target node --external @brisksms/shared packages/ui/src/index.ts --outdir packages/ui/dist && bun build --target node --external @brisksms/shared packages/zapier-app/src/index.ts --outdir packages/zapier-app/dist && bun build --target node --external @brisksms/shared --external @brisksms/db apps/worker/src/index.ts --outdir apps/worker/dist",
-    "typecheck": "tsc -b --noEmit",
+    "build": "tsc -b && bun build --target node packages/shared/src/index.ts --outdir packages/shared/dist && bun build --target node --external @brisksms/shared packages/db/src/index.ts --outdir packages/db/dist && bun build --target node --external @brisksms/shared packages/parser-engine/src/index.ts --outdir packages/parser-engine/dist && bun build --target node --external @brisksms/shared packages/ui/src/index.ts --outdir packages/ui/dist && bun build --target node --external @brisksms/shared packages/zapier-app/src/index.ts --outdir packages/zapier-app/dist && bun build --target node --external @brisksms/shared --external @brisksms/db apps/worker/src/index.ts --outdir apps/worker/dist",
+    "typecheck": "tsc -b",
     "test": "bun test packages/shared/test/ packages/parser-engine/test/ packages/ui/test/ apps/api/test/ packages/zapier-app/test/",
     "db:migrate": "bun run packages/db/src/cli.ts migrate",
     "db:seed": "bun run packages/db/src/cli.ts seed",

@@ -165,7 +165,7 @@ export async function processWebhookDeliveryJob(
     throw new Error(`Tenant isolation or missing record: Outbox event ${outboxEventId} not found for org ${organizationId}`);
   }
 
-  const row = eventRows[0];
+  const row = eventRows[0]!;
   if (row.is_delivered || row.status === OutboxStatus.DELIVERED) {
     return { delivered: true, endpointCount: 0 };
   }
@@ -321,7 +321,7 @@ export async function processSmsCampaignJob(
     throw new Error(`Tenant isolation or missing record: Campaign ${campaignId} not found for org ${organizationId}`);
   }
 
-  const campaign = campaignRows[0];
+  const campaign = campaignRows[0]!;
   if (campaign.status === CampaignStatus.COMPLETED) {
     return { sentCount: 0, failedCount: 0 };
   }
@@ -386,8 +386,8 @@ export async function processSmsCampaignJob(
         WHERE organization_id = ${organizationId}
         FOR UPDATE
       `;
-      const currentBalance = Number(acctRows[0].credit_balance);
-      const currentReserved = Number(acctRows[0].reserved_credits);
+      const currentBalance = Number(acctRows[0]!.credit_balance);
+      const currentReserved = Number(acctRows[0]!.reserved_credits);
       const nextReserved = Math.max(0, currentReserved - 1);
 
       await tx`

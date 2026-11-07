@@ -65,7 +65,7 @@ export class ApiKeyService {
       RETURNING *
     `;
 
-    const record = this.mapRow(inserted[0]);
+    const record = this.mapRow(inserted[0]!);
     const apiKeyDto: ApiKeyDto = {
       id: record.id,
       organizationId: record.organizationId,
@@ -99,7 +99,7 @@ export class ApiKeyService {
       return null;
     }
 
-    const record = this.mapRow(rows[0]);
+    const record = this.mapRow(rows[0]!);
     if (record.revokedAt) {
       return null;
     }
@@ -149,7 +149,7 @@ export class ApiKeyService {
       if (existing.length === 0) {
         throw new Error('API key not found for this organization');
       }
-      const oldRecord = this.mapRow(existing[0]);
+      const oldRecord = this.mapRow(existing[0]!);
       if (oldRecord.revokedAt) {
         throw new Error('Cannot rotate an already revoked API key');
       }
@@ -178,7 +178,7 @@ export class ApiKeyService {
         RETURNING *
       `;
 
-      const newRecord = this.mapRow(inserted[0]);
+      const newRecord = this.mapRow(inserted[0]!);
       return {
         apiKey: {
           id: newRecord.id,

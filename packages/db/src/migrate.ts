@@ -99,7 +99,7 @@ export async function migrateDeploy(): Promise<{ applied: string[]; skipped: str
 
     const migrationId = randomUUID();
     await withTransaction(async (tx) => {
-      await tx.unsafe(sqlContent);
+      await tx.unsafe!(sqlContent);
       await tx`
         INSERT INTO "_prisma_migrations" ("id", "checksum", "started_at", "finished_at", "migration_name", "applied_steps_count")
         VALUES (${migrationId}, ${checksum}, NOW(), NOW(), ${folderName}, 1)

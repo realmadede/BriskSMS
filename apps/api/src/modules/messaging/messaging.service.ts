@@ -66,6 +66,8 @@ export class MessagingService {
       simSlot: Number(row.sim_slot),
       providerMessageId: row.provider_message_id,
       gatewayProvider: row.gateway_provider as GatewayMode,
+      attemptCount: Number(row.attempt_count ?? 1),
+      lastError: row.last_error ?? undefined,
       deliveredAt: row.delivered_at ? new Date(row.delivered_at) : null,
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.updated_at),
@@ -80,7 +82,7 @@ export class MessagingService {
       SELECT * FROM messaging_accounts WHERE organization_id = ${organizationId} LIMIT 1
     `;
     if (existing.length > 0) {
-      return this.mapAccountRow(existing[0]);
+      return this.mapAccountRow(existing[0]!);
     }
 
     const id = randomUUID();
@@ -99,7 +101,7 @@ export class MessagingService {
       RETURNING *
     `;
 
-    return this.mapAccountRow(inserted[0]);
+    return this.mapAccountRow(inserted[0]!);
   }
 
   /**
@@ -136,7 +138,7 @@ export class MessagingService {
       RETURNING *
     `;
 
-    const updatedAccount = this.mapAccountRow(updated[0]);
+    const updatedAccount = this.mapAccountRow(updated[0]!);
     return {
       organizationId: updatedAccount.organizationId,
       creditBalance: updatedAccount.creditBalance,
@@ -181,6 +183,7 @@ export class MessagingService {
       entryType: row.entry_type as CreditLedgerEntryType,
       amountCredits: Number(row.amount_credits),
       balanceAfter: Number(row.balance_after),
+      reservedAfter: Number(row.reserved_after ?? 0),
       referenceId: row.reference_id,
       createdAt: new Date(row.created_at),
     }));
@@ -206,7 +209,7 @@ export class MessagingService {
         WHERE organization_id = ${organizationId}
         FOR UPDATE
       `;
-      const currentBalance = Number(rows[0].credit_balance);
+      const currentBalance = Number(rows[0]!.credit_balance);
       const newBalance = currentBalance + amountCredits;
       const now = new Date();
 
@@ -249,8 +252,8 @@ export class MessagingService {
         WHERE organization_id = ${organizationId}
         FOR UPDATE
       `;
-      const currentBalance = Number(rows[0].credit_balance);
-      const currentReserved = Number(rows[0].reserved_credits);
+      const currentBalance = Number(rows[0]!.credit_balance);
+      const currentReserved = Number(rows[0]!.reserved_credits);
 
       if (currentBalance < amountCredits) {
         throw new InsufficientCreditsError(amountCredits, currentBalance);
@@ -301,8 +304,8 @@ export class MessagingService {
         WHERE organization_id = ${organizationId}
         FOR UPDATE
       `;
-      const currentBalance = Number(rows[0].credit_balance);
-      const currentReserved = Number(rows[0].reserved_credits);
+      const currentBalance = Number(rows[0]!.credit_balance);
+      const currentReserved = Number(rows[0]!.reserved_credits);
 
       if (currentReserved < amountCredits) {
         throw new BriskError('MESSAGING_ERROR', 'Cannot release more credits than currently reserved.');
@@ -353,8 +356,8 @@ export class MessagingService {
         WHERE organization_id = ${organizationId}
         FOR UPDATE
       `;
-      const currentBalance = Number(rows[0].credit_balance);
-      const currentReserved = Number(rows[0].reserved_credits);
+      const currentBalance = Number(rows[0]!.credit_balance);
+      const currentReserved = Number(rows[0]!.reserved_credits);
 
       if (currentReserved < amountCredits) {
         throw new BriskError('MESSAGING_ERROR', 'Insufficient reserved credits to commit.');
@@ -403,7 +406,7 @@ export class MessagingService {
         WHERE organization_id = ${organizationId}
         FOR UPDATE
       `;
-      const currentBalance = Number(rows[0].credit_balance);
+      const currentBalance = Number(rows[0]!.credit_balance);
       if (currentBalance < amountCredits) {
         throw new InsufficientCreditsError(amountCredits, currentBalance);
       }
@@ -450,7 +453,7 @@ export class MessagingService {
         WHERE organization_id = ${organizationId}
         FOR UPDATE
       `;
-      const currentBalance = Number(rows[0].credit_balance);
+      const currentBalance = Number(rows[0]!.credit_balance);
       const newBalance = currentBalance + amountCredits;
       const now = new Date();
 
@@ -508,8 +511,8 @@ export class MessagingService {
         WHERE organization_id = ${organizationId}
         FOR UPDATE
       `;
-      const currentBalance = Number(accountRows[0].credit_balance);
-      const currentReserved = Number(accountRows[0].reserved_credits);
+      const currentBalance = Number(accountRows[0]!.credit_balance);
+      const currentReserved = Number(accountRows[0]!.reserved_credits);
 
       if (currentBalance < totalCost) {
         throw new InsufficientCreditsError(totalCost, currentBalance);
@@ -580,7 +583,7 @@ export class MessagingService {
         });
       }
 
-      const cRow = campaignRows[0];
+      const cRow = campaignRows[0]!;
       const campaign: SmsCampaignRecord = {
         id: cRow.id,
         organizationId: cRow.organization_id,
@@ -708,7 +711,7 @@ export class MessagingService {
       await this.refundCredits(organizationId, 1, `refund_${messageId}`);
     }
 
-    return this.mapMessageRow(inserted[0]);
+    return this.mapMessageRow(inserted[0]!);
   }
 
   /**
@@ -724,7 +727,7 @@ export class MessagingService {
     `;
     if (rows.length === 0) return null;
 
-    const targetMessage = this.mapMessageRow(rows[0]);
+    const targetMessage = this.mapMessageRow(rows[0]!);
     const now = new Date();
 
     if (event.eventType === 'DELIVERED') {
@@ -736,7 +739,7 @@ export class MessagingService {
         WHERE id = ${targetMessage.id}
         RETURNING *
       `;
-      return this.mapMessageRow(updated[0]);
+      return this.mapMessageRow(updated[0]!);
     } else if (event.eventType === 'FAILED') {
       if (targetMessage.status !== SmsStatus.FAILED) {
         const updated = await sql<Record<string, any>>`
@@ -751,7 +754,7 @@ export class MessagingService {
           targetMessage.costCredits,
           `refund_${targetMessage.id}`,
         );
-        return this.mapMessageRow(updated[0]);
+        return this.mapMessageRow(updated[0]!);
       }
     }
 

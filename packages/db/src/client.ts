@@ -31,7 +31,7 @@ export class DatabaseUnavailableError extends Error {
   public readonly statusCode = 503;
   public readonly code = 'DATABASE_UNAVAILABLE';
 
-  constructor(message: string = 'PostgreSQL database is currently unavailable.', public readonly cause?: unknown) {
+  constructor(message: string = 'PostgreSQL database is currently unavailable.', public override readonly cause?: unknown) {
     super(message);
     this.name = 'DatabaseUnavailableError';
   }
@@ -41,10 +41,11 @@ export type SqlRow = Record<string, any>;
 
 export interface SqlExecutor {
   <T extends SqlRow = SqlRow>(strings: TemplateStringsArray, ...values: unknown[]): Promise<T[]>;
-  unsafe<T extends SqlRow = SqlRow>(query: string, values?: unknown[]): Promise<T[]>;
+  unsafe?: <T extends SqlRow = SqlRow>(query: string, values?: unknown[]) => Promise<T[]>;
 }
 
 export interface SqlPool extends SqlExecutor {
+  unsafe<T extends SqlRow = SqlRow>(query: string, values?: unknown[]): Promise<T[]>;
   begin<T>(fn: (tx: SqlExecutor) => Promise<T>): Promise<T>;
   close(): Promise<void>;
 }
@@ -190,6 +191,8 @@ export async function closeDbPool(): Promise<void> {
     }
   }
 }
+
+export const closeDatabasePool = closeDbPool;
 
 function isConnectionError(err: unknown): boolean {
   if (err instanceof DatabaseUnavailableError) return true;
