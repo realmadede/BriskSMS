@@ -59,13 +59,23 @@ These capabilities have separate services, Room databases/tables, queues, permis
 
 ### 3.1 Scoped Notification Ingestion
 - **Service:** `tz.co.brisksms.service.BriskNotificationListenerService`
+- **Registry:** `tz.co.brisksms.payment.provider.PaymentProviderRegistry`
 - **Permission:** `android.permission.BIND_NOTIFICATION_LISTENER_SERVICE`
 - **Scoped Whitelist:** Only inspects notifications originating from authorized Tanzanian financial application packages:
-  - `com.mpesa.tz` (Vodacom M-Pesa)
-  - `com.yas.mixx` (Mixx by Yas / Tigo Pesa)
-  - `com.airtel.africa.money` (Airtel Money)
-  - `com.crdb.simbanking` (CRDB SimBanking)
-  - `com.nmb.mobile` (NMB Mkononi)
+  - **Verified Google Play Store Packages:**
+    - `com.vodacom.mpesa` (Vodacom M-Pesa Tanzania)
+    - `tz.tigo.mfsapp` (Mixx by Yas / Tigo Pesa Tanzania)
+    - `com.airtel.africa.selfcare` (My Airtel Africa / Tanzania)
+    - `com.halopesa.eu` (HaloPesa Tanzania)
+    - `com.crdb.simbanking` (CRDB SimBanking)
+    - `com.nmb.mkononi` (NMB Mkononi)
+  - **Provisional & Legacy Aliases:**
+    - `com.vodafone.vodapay`, `tz.co.vodacom.mpesa`, `com.mpesa.tz`
+    - `com.yas.mixx`, `com.tigo.pesa.tz`
+    - `com.airtel.africa.money`
+    - `com.halotel.halopesa`
+    - `com.crdb.mobile`
+    - `com.nmb.mobile`, `com.nmb.direct`
 - **Zero Personal Message Leakage:** Personal SMS, chats (WhatsApp, Telegram), and personal banking notifications outside the whitelist are immediately dropped in memory.
 
 ### 3.2 Client-Side Provider Normalization
@@ -89,21 +99,44 @@ These capabilities have separate services, Room databases/tables, queues, permis
 
 ## 4. Product B: Bulk Messaging through SMSGate Cellular Relay
 
-### 4.1 SMSGate Cellular Gateway Architecture
-BriskSMS operates purely as an SMSGate cellular relay using local Tanzanian SIM cards. Traditional telco aggregators (Beem, DARSMS, eHUB) and httpSMS are strictly excluded.
+### 4.1 Official SMSGate Architecture & Protocol
+BriskSMS Product B integrates strictly with the official SMSGate architecture (`android-sms-gateway` / `sms-gate.app`). Traditional telco aggregators (Beem, DARSMS, eHUB) and httpSMS are strictly excluded.
 
-Two operating modes are supported:
-1. `GatewayMode.MANAGED_GATEWAY`: Connects to organization's private VPS deployment behind Cloudflare (`https://gateway.brisksms.com/api/v1`).
-2. `GatewayMode.EXTERNAL_RELAY`: Connects to SMSGate cloud relay endpoint (`https://api.sms-gate.app/3rdparty/v1`).
+The official SMSGate integration boundary operates as follows:
+- **Base Paths & Modes:**
+  1. `GatewayMode.MANAGED_GATEWAY`: Connects to an organization's private self-hosted SMSGate server on a VPS behind Cloudflare Tunnel (`https://gateway.brisksms.com/api/v1`).
+  2. `GatewayMode.EXTERNAL_RELAY`: Connects to the official SMSGate cloud relay (`https://api.sms-gate.app/3rdparty/v1`) or tenant-provided endpoint.
+- **Outbound Dispatch Endpoint:** `POST /messages` (under configured base URL).
+- **Official Message Schema:**
+  ```json
+  {
+    "textMessage": {
+      "text": "Your message content here"
+    },
+    "phoneNumbers": ["+255754123456"],
+    "simNumber": 1,
+    "withDeliveryReport": true
+  }
+  ```
+- **Authentication:** HTTP Basic Auth (`username:password`) or JWT Bearer Token (`Authorization: Bearer <token>`).
+- **Official Webhook Event Lifecycle:**
+  - `sms:sent` -> Sent callback (Carrier SMSC acceptance; mapped to `SUBMITTED`).
+  - `sms:delivered` -> Delivery confirmation receipt (Recipient handset delivery confirmation; mapped to `DELIVERED`).
+  - `sms:failed` -> Carrier radio transmission failure (mapped to `FAILED`).
+  - `sms:received` -> Inbound SMS forwarded to webhook receiver.
 
-### 4.2 Dual-SIM Carrier Management
+### 4.2 Operating Deployment Models
+1. **Model A (Dedicated SMSGate Android Gateway):** The operator runs the official open-source SMSGate Android application (`android-sms-gateway` by capcom6) on the gateway handset. The app synchronizes directly with the SMSGate server via WebSocket/Push. BriskSMS backend orchestrates campaigns and accounting via the SMSGate REST API.
+2. **Model B (Integrated Companion Relay):** For single-app operational deployments, the BriskSMS Android Companion embeds `SmsGateRelayService`, executing telephony dispatches locally via Android `SmsManager` with strict idempotency and SIM routing.
+
+### 4.3 Dual-SIM Carrier Management
 - **Engine:** `tz.co.brisksms.messaging.sim.SimManager`
 - Uses `SubscriptionManager` to detect active SIM cards.
-- Normalizes carrier names: `Vodacom`, `Mixx by Yas`, `Airtel`, `Halotel`.
+- Normalizes carrier names: `Vodacom`, `Mixx by Yas`, `Airtel`, `Halotel`, `TTCL`.
 - Routes outbound messages to designated physical SIM slots: `simSlot: 1` vs `simSlot: 2`.
 - Graceful fallback: if a requested slot is empty, falls back to the active cellular subscription.
 
-### 4.3 Foreground Service & Radio Dispatch Engine
+### 4.4 Foreground Service & Radio Dispatch Engine
 - **Service:** `tz.co.brisksms.messaging.service.SmsGateRelayService`
 - **Foreground Type:** `connectedDevice` (`ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE`).
 - **Dispatcher:** `tz.co.brisksms.messaging.dispatcher.SmsDispatcher`
@@ -111,8 +144,8 @@ Two operating modes are supported:
 - Attaches unique `PendingIntent` callbacks for sent and delivery receipts:
   - `ACTION_SMS_SENT`: Carrier radio ACK/NACK verification (`SUBMITTED` or `FAILED`).
   - `ACTION_SMS_DELIVERED`: Handset delivery receipt (`DELIVERED`).
-- Pacing delay: 1,500ms between consecutive dispatches to comply with TCRA carrier radio rate limits.
-- Idempotency: Deduplication check prevents duplicate radio transmissions.
+- Internal Pacing Delay: Configurable 1,500ms safety delay between consecutive dispatches to prevent mobile carrier radio throttling.
+- Idempotency: Deduplication check prevents duplicate radio transmissions. Unconfirmed outcomes (`UNKNOWN`) are never blindly retried.
 
 ---
 
@@ -156,7 +189,7 @@ Adheres to the BriskSMS design system (Stitch warm palette, geometric typography
 │    • Gateway mode badge (MANAGED_GATEWAY vs EXTERNAL_RELAY)                 │
 │    • Endpoint URL display                                                   │
 │    • Dual-SIM active cards (SIM 1 / SIM 2 carriers, today's sent count)     │
-│    • Queue status (Queued, In-Flight, 40 msg/min dispatch rate)             │
+│    • Queue status (Queued, In-Flight, 1.5s / SIM safety pacing)             │
 │    • Outbound dispatch feed with masked phone numbers                       │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │ 4. Device Health Screen:                                                    │
@@ -282,6 +315,9 @@ Covers:
 ### 11.2 Android Unit Tests
 Located in `apps/android/app/src/test/java/tz/co/brisksms/`:
 - `ProviderNotificationParserTest`: Comprehensive tests for Vodacom M-Pesa, Mixx by Yas, Airtel Money, CRDB Bank, and personal message filtering.
+- `PaymentProviderRegistryTest`: Validates verified Google Play Store packages vs provisional aliases and shortcode filtering.
+- `EvidenceEncryptionLogicTest`: Validates authenticated AES-256-GCM encryption, decryption, 12-byte IV uniqueness, and authentication-tag failure on tampered payloads.
+- `SmsGateProtocolTest`: Validates official SMSGate 3rdparty v1 schema formatting, lifecycle state mapping (`sms:sent`, `sms:delivered`, `sms:failed`), and ambiguous retry prevention.
 - `SmsDispatcherLogicTest`: Validates state machine separation between radio submission (`SUBMITTED`) and handset delivery (`DELIVERED`), idempotency keys, and multipart message thresholds.
 - `SimManagerLogicTest`: Validates Tanzanian telco normalization, dual-SIM slot mapping, and subscription fallback.
 - `ProductIsolationTest`: Invariant checks verifying complete database, queue, and entitlement separation between Product A and Product B.
@@ -296,5 +332,23 @@ Located in `apps/android/app/src/test/java/tz/co/brisksms/`:
    - Android requires the user to explicitly grant "Notification Access" in Android System Settings. Third-party apps cannot programmatically grant this permission; the companion UI provides a direct shortcut to system settings.
 3. **Google Play Policy Scoping:**
    - `SEND_SMS` and `BIND_NOTIFICATION_LISTENER_SERVICE` are sensitive permissions. When publishing to Google Play, the application must be declared under the Enterprise Device Gateway policy exemption or distributed via enterprise private APK / MDM sideload.
-4. **TCRA Radio Pacing:**
-   - Cellular operators enforce SMS rate limits. The dispatcher enforces a minimum 1,500ms pacing delay between dispatches (approx. 40 SMS/min per active SIM) to avoid carrier SIM blocking.
+4. **Carrier Radio Pacing & Safety Throttle:**
+   - Cellular radio hardware requires safe dispatch pacing. The dispatcher enforces an internal engineering default of 1,500ms pacing delay between consecutive dispatches to prevent mobile carrier radio throttling and radio queue exhaustion.
+
+---
+
+## 13. Physical Device Validation Checklist
+
+The following capabilities require real Android physical hardware with active local Tanzanian SIM cards (Vodacom, Mixx by Yas, Airtel, Halotel) and cannot be proven by JVM tests alone:
+
+| Check | Required Hardware / Configuration | Expected Outcome |
+| :--- | :--- | :--- |
+| **Notification Listener Permission Prompt** | Physical device running Android 8.0 - 14 | System dialog directs user to Notification Access screen; app displays green "ACTIVE" badge upon return. |
+| **Real Payment App Interception** | Physical device with installed M-Pesa / Mixx app | Real incoming financial notification is captured, encrypted via Keystore AES-256-GCM, and inserted into Room database. |
+| **Zero Personal Chat Leakage** | WhatsApp / SMS message received | Incoming message is dropped in memory; zero non-financial notifications appear in database or logs. |
+| **StrongBox Hardware Keystore** | Device supporting hardware StrongBox Keymaster | Key pair generated with `setIsStrongBoxBacked(true)` successfully seals private key inside tamper-resistant hardware silicon. |
+| **Dual-SIM Slot Enumeration** | Device with 2 physical SIMs inserted | UI and `SimManager` accurately detect Slot 1 (Carrier A) and Slot 2 (Carrier B) with valid subscription IDs. |
+| **Cellular SMS Transmission** | Active local SIM with carrier credit | Message dispatched via `SmsManager.sendMultipartTextMessage()`; carrier radio tower accepts dispatch (`RESULT_OK`). |
+| **SMSC Sent & Handset DLR Receipts** | Real recipient handset receiving SMS | Sent BroadcastReceiver receives radio confirmation (`SUBMITTED`); delivery BroadcastReceiver receives handset confirmation (`DELIVERED`). |
+| **Foreground Keepalive Across Doze** | Device unplugged and screen turned off for > 1 hour | Foreground notification remains pinned; service continues listening without being killed by Android Doze. |
+| **Offline Buffering & Network Reconnection** | Airplane mode toggled during payment/SMS queue | WorkManager buffers records locally; upon reconnecting Wi-Fi/LTE, exponential backoff flushes queue to backend. |

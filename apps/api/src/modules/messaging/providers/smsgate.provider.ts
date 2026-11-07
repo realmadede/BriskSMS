@@ -16,13 +16,20 @@ export class SmsGateProvider implements MessagingProvider {
     payload: MessageDispatchPayload,
   ): Promise<MessageDispatchResult> {
     const baseUrl = credentials.baseUrl.replace(/\/+$/, '');
-    const endpoint = `${baseUrl}/message`;
+    const endpoint = baseUrl.endsWith('/messages') || baseUrl.endsWith('/message')
+      ? baseUrl
+      : `${baseUrl}/messages`;
     const simNumber = payload.simSlot ?? credentials.defaultSimSlot ?? 1;
 
+    // Conforms to official SMSGate OpenAPI specification (docs.sms-gate.app)
     const requestBody = {
-      phoneNumbers: [payload.to],
+      textMessage: {
+        text: payload.content,
+      },
       message: payload.content,
+      phoneNumbers: [payload.to],
       simNumber,
+      withDeliveryReport: true,
     };
 
     try {
@@ -96,20 +103,23 @@ export class SmsGateProvider implements MessagingProvider {
   normalizeWebhookPayload(
     rawPayload: Record<string, unknown>,
   ): NormalizedDeliveryEvent {
+    const payloadObj = (rawPayload.payload as Record<string, unknown>) ?? rawPayload;
     const providerMessageId =
+      (payloadObj.messageId as string) ||
+      (payloadObj.id as string) ||
       (rawPayload.id as string) ||
       (rawPayload.messageId as string) ||
       (rawPayload.providerMessageId as string) ||
       'unknown';
 
-    const event = String(rawPayload.event || rawPayload.status || '').toUpperCase();
+    const event = String(rawPayload.event || rawPayload.status || '').toLowerCase();
 
     let eventType: 'SENT' | 'DELIVERED' | 'FAILED' = 'SENT';
-    if (event.includes('DELIVER') || event === 'DELIVERED') {
+    if (event === 'sms:delivered' || event.includes('deliver')) {
       eventType = 'DELIVERED';
-    } else if (event.includes('FAIL') || event === 'FAILED' || event === 'UNDELIVERED') {
+    } else if (event === 'sms:failed' || event.includes('fail') || event.includes('undeliver')) {
       eventType = 'FAILED';
-    } else {
+    } else if (event === 'sms:sent' || event.includes('sent')) {
       eventType = 'SENT';
     }
 

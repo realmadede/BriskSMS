@@ -16,6 +16,7 @@ import tz.co.brisksms.core.storage.KeystoreSecureStorage
 import tz.co.brisksms.data.local.BriskDatabase
 import tz.co.brisksms.data.local.OfflineEvidenceEntity
 import tz.co.brisksms.payment.crypto.EvidenceEncryptor
+import tz.co.brisksms.payment.provider.PaymentProviderRegistry
 import tz.co.brisksms.security.KeystoreManager
 import tz.co.brisksms.worker.EvidenceUploadWorker
 
@@ -28,25 +29,6 @@ class BriskNotificationListenerService : NotificationListenerService() {
 
     companion object {
         private const val TAG = "BriskNotificationRelay"
-
-        // Authorized mobile money & bank app package names
-        private val AUTHORIZED_PAYMENT_PACKAGES = setOf(
-            "com.vodafone.vodapay",
-            "com.mpesa.tz",
-            "com.tigo.pesa.tz",
-            "com.yas.mixx",
-            "com.airtel.africa.money",
-            "com.halotel.halopesa",
-            "com.crdb.mobile",
-            "com.crdb.simbanking",
-            "com.nmb.mobile",
-            "com.nmb.direct"
-        )
-
-        // Known financial sender addresses for SMS notification fallbacks
-        private val FINANCIAL_SENDER_PATTERNS = listOf(
-            "M-PESA", "MPESA", "MIXX", "TIGO PESA", "AIRTELMONEY", "HALOPESA", "CRDB", "NMB"
-        )
     }
 
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -72,12 +54,10 @@ class BriskNotificationListenerService : NotificationListenerService() {
         if (rawPayload.isEmpty()) return
 
         // 1. Check if source package is an authorized payment provider application
-        val isAuthorizedApp = AUTHORIZED_PAYMENT_PACKAGES.contains(packageName)
+        val isAuthorizedApp = PaymentProviderRegistry.isAuthorizedPackage(packageName)
 
         // 2. Check if notification title or sender matches known provider shortcode
-        val isFinancialSender = FINANCIAL_SENDER_PATTERNS.any { pattern ->
-            title.contains(pattern, ignoreCase = true) || rawPayload.contains(pattern, ignoreCase = true)
-        }
+        val isFinancialSender = PaymentProviderRegistry.isFinancialShortcode(title, rawPayload)
 
         // Strictly discard any personal or unrelated notifications
         if (!isAuthorizedApp && !isFinancialSender) {

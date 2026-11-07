@@ -39,6 +39,7 @@ class SmsGateRelayService : Service() {
         private const val TAG = "SmsGateRelayService"
         private const val NOTIFICATION_ID = 2001
         private const val CHANNEL_ID = "brisksms_cellular_gateway"
+        private const val DEFAULT_DISPATCH_PACING_MS = 1500L // Internal engineering default delay between dispatches
         const val ACTION_START = "tz.co.brisksms.messaging.START_GATEWAY"
         const val ACTION_STOP = "tz.co.brisksms.messaging.STOP_GATEWAY"
     }
@@ -157,7 +158,7 @@ class SmsGateRelayService : Service() {
                 val pending = dao.getPendingDispatches(limit = 10)
                 for (dispatch in pending) {
                     smsDispatcher.dispatchMessage(dispatch, dao)
-                    delay(1500) // TCRA & carrier pacing delay between consecutive dispatches
+                    delay(DEFAULT_DISPATCH_PACING_MS) // Internal engineering delay between consecutive dispatches
                 }
 
                 delay(5000) // Queue poll interval

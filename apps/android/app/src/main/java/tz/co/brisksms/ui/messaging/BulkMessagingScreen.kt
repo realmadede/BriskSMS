@@ -315,13 +315,13 @@ fun BulkMessagingScreen() {
                 }
                 Column(horizontalAlignment = Alignment.End) {
                     Text(
-                        text = "DISPATCH RATE",
+                        text = "RADIO PACING",
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
                         color = BriskColors.TextTertiaryLight
                     )
                     Text(
-                        text = "40 msg/min",
+                        text = "1.5s / SIM",
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
                         color = BriskColors.StatusVerified
