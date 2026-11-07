@@ -110,7 +110,6 @@ enum CampaignStatus {
 enum GatewayMode {
   MANAGED_GATEWAY
   EXTERNAL_RELAY
-  TELCO_AGGREGATOR
 }
 
 enum SenderIdStatus {

@@ -37,9 +37,6 @@ export enum SenderIdStatus {
 export enum SmsGatewayProvider {
   SMSGATE_SERVER = 'SMSGATE_SERVER',
   SMSGATE_CLOUD = 'SMSGATE_CLOUD',
-  BEEM_AFRICA = 'BEEM_AFRICA',
-  DARSMS = 'DARSMS',
-  EHUB_FASTHUB = 'EHUB_FASTHUB',
   MOCK_TEST_GATEWAY = 'MOCK_TEST_GATEWAY',
 }
 
@@ -47,13 +44,10 @@ export enum SmsGatewayProvider {
  * Gateway Deployment and Connection Mode
  */
 export enum GatewayMode {
-  /** Private BriskSMS dedicated gateway hosted on 24/7 VPS behind Cloudflare */
+  /** Private BriskSMS dedicated SMSGate server hosted on 24/7 VPS behind Cloudflare */
   MANAGED_GATEWAY = 'MANAGED_GATEWAY',
 
-  /** External gateway relay connection */
+  /** External SMSGate relay connection (api.sms-gate.app) */
   EXTERNAL_RELAY = 'EXTERNAL_RELAY',
-
-  /** Direct telco aggregator connection (e.g. Beem Africa, DARSMS) */
-  TELCO_AGGREGATOR = 'TELCO_AGGREGATOR',
 }
 

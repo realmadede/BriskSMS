@@ -62,8 +62,8 @@ Production secrets must never be committed to Git. The `.env.example` template d
 | `REDIS_URL` | Worker/API | Redis connection string for BullMQ and cache. |
 | `JWT_SECRET` | Auth | Secret or private key used for signing JWT access tokens. |
 | `ENCRYPTION_MASTER_KEY` | Security | 256-bit hexadecimal key for AES-256-GCM data encryption. |
-| `BEEM_API_KEY` | Messaging | API credentials for Beem Africa SMS gateway. |
-| `DARSMS_API_KEY` | Messaging | API credentials for DARSMS gateway. |
+| `SMSGATE_BASE_URL` | Messaging | Base URL for SMSGate cellular gateway (VPS behind Cloudflare or external relay). |
+| `SMSGATE_API_TOKEN` | Messaging | Bearer token for authenticating with the SMSGate relay server. |
 | `SENTRY_DSN` | Telemetry | Sentry error tracking endpoint. |
 
 ---

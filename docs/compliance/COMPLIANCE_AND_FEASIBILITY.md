@@ -126,7 +126,7 @@ For Product B (Bulk Messaging), operations must adhere to **Tanzania Communicati
      - Certificate of Incorporation (BRELA)
      - Taxpayer Identification Number (TIN) Certificate
      - Letter of Authorization on official company letterhead signed by a company director.
-   - The Sender ID is submitted to licensed telco aggregators (Beem, DARSMS, eHUB) for whitelist approval by TCRA.
+   - Where alphanumeric sender IDs are used, the Sender ID documentation is submitted for whitelist approval in accordance with TCRA guidelines.
 2. **Anti-Spam Time Windows:**
    - Promotional and marketing SMS messages are prohibited between **20:00 and 07:00 EAT**.
    - Transactional messages (OTP verification, urgent payment alerts) are permitted 24/7.

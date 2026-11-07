@@ -165,9 +165,9 @@ BriskSMS enforces strict role-based access control across organization boundarie
   - Single SMS dispatch via dashboard or REST API.
   - Bulk campaigns with CSV recipient import, variable tag replacement (`{{name}}`, `{{invoice_amount}}`), and scheduling for future date/time.
   - Night-time TCRA anti-spam compliance: Restricts promotional broadcasts between 20:00 and 07:00 East Africa Time (EAT).
-- **FR-6.4:** **Aggregator Gateway & DLR:**
-  - Multi-provider gateway routing (Beem Africa, DARSMS, eHUB) with automatic failover.
-  - Real-time delivery report (DLR) webhook ingestion and status updates (`QUEUED`, `SENT`, `DELIVERED`, `FAILED`).
+- **FR-6.4:** **Cellular Gateway Relay & DLR:**
+  - Dual-mode cellular gateway routing via self-hosted SMSGate on private VPS behind Cloudflare (`MANAGED_GATEWAY`) or external cellular relay (`EXTERNAL_RELAY`).
+  - Real-time delivery report (DLR) webhook ingestion and status updates (`QUEUED`, `SUBMITTED`, `DELIVERED`, `FAILED`).
 
 ### Module 7: Commercial Billing & Quota Enforcement
 - **FR-7.1:** Separate commercial billing systems:
