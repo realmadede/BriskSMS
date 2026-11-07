@@ -8,6 +8,7 @@ import { registerAuthRoutes } from './modules/auth/auth.controller.js';
 import { registerOrganizationRoutes } from './modules/organization/organization.controller.js';
 import { registerDeviceRoutes } from './modules/device/device.controller.js';
 import { registerSubscriptionRoutes } from './modules/subscription/subscription.controller.js';
+import { registerIngestionRoutes } from './modules/ingestion/ingestion.controller.js';
 
 export function createApp(): Router {
   const router = new Router();
@@ -51,6 +52,7 @@ export function createApp(): Router {
   registerOrganizationRoutes(router);
   registerDeviceRoutes(router);
   registerSubscriptionRoutes(router);
+  registerIngestionRoutes(router);
 
   return router;
 }

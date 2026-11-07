@@ -4,18 +4,17 @@ import android.content.Context
 import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONObject
+import tz.co.brisksms.core.network.BriskApiClient
+import tz.co.brisksms.core.network.IngestionEvidenceRequest
+import tz.co.brisksms.core.storage.KeystoreSecureStorage
 import tz.co.brisksms.data.local.BriskDatabase
 import tz.co.brisksms.data.local.OfflineEvidenceEntity
-import java.util.concurrent.TimeUnit
+import tz.co.brisksms.payment.crypto.EvidenceEncryptor
 
 /**
  * Reliable Background Evidence Forwarding Worker
- * Employs WorkManager exponential backoff and network constraints to upload queued evidence.
+ * Employs WorkManager exponential backoff, device Bearer authentication, and dynamic backend URLs.
+ * CRITICAL FINANCIAL INVARIANT: Uploads evidence for observation only. Never confirms settlement or verification.
  */
 class EvidenceUploadWorker(
     appContext: Context,
@@ -24,16 +23,19 @@ class EvidenceUploadWorker(
 
     companion object {
         private const val TAG = "EvidenceUploadWorker"
-        private const val BACKEND_URL = "https://api.brisksms.com/v1/ingestion/evidence"
-        private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
+        private const val MAX_RETRIES = 5
     }
 
-    private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
-        .build()
+    private val secureStorage = KeystoreSecureStorage(applicationContext)
+    private val apiClient = BriskApiClient(secureStorage)
+    private val encryptor = EvidenceEncryptor(secureStorage)
 
     override suspend fun doWork(): Result {
+        if (!secureStorage.isPaired || secureStorage.isRevoked) {
+            Log.w(TAG, "Device is not paired or has been revoked. Skipping evidence upload.")
+            return Result.failure()
+        }
+
         val db = BriskDatabase.getInstance(applicationContext)
         val dao = db.evidenceDao()
 
@@ -45,6 +47,13 @@ class EvidenceUploadWorker(
         var anyFailed = false
 
         for (evidence in pendingList) {
+            // Abandon after max retries to prevent unbounded queue growth
+            if (evidence.retryCount >= MAX_RETRIES) {
+                Log.w(TAG, "Evidence [${evidence.id}] exceeded max retries. Marking failed.")
+                dao.markUploaded(evidence.id) // Archive/remove from pending queue
+                continue
+            }
+
             val uploaded = uploadSingleEvidence(evidence)
             if (uploaded) {
                 dao.markUploaded(evidence.id)
@@ -57,43 +66,29 @@ class EvidenceUploadWorker(
         return if (anyFailed) Result.retry() else Result.success()
     }
 
-    private fun uploadSingleEvidence(evidence: OfflineEvidenceEntity): Boolean {
+    private suspend fun uploadSingleEvidence(evidence: OfflineEvidenceEntity): Boolean {
         return try {
-            val prefs = applicationContext.getSharedPreferences("brisksms_config", Context.MODE_PRIVATE)
-            val orgId = prefs.getString("organization_id", null) ?: "00000000-0000-0000-0000-000000000001"
-            val deviceId = prefs.getString("device_id", null)
-
-            val json = JSONObject().apply {
-                put("organizationId", orgId)
-                put("sourceType", "ANDROID_NOTIFICATION_RELAY")
-                put("deviceId", deviceId)
-                put("senderAddress", evidence.senderAddress)
-                put("rawPayload", evidence.rawPayload)
-                put("simSlot", evidence.simSlot)
-                put("deviceTimestamp", evidence.deviceTimestamp)
-                if (evidence.signature != null) {
-                    put("signature", evidence.signature)
-                }
+            // Decrypt local payload in memory immediately before network dispatch
+            val plaintextPayload = encryptor.decryptPayload(evidence.rawPayload)
+            if (plaintextPayload.contains("[CORRUPTED_OR_TAMPERED_PAYLOAD]")) {
+                Log.e(TAG, "Integrity failure: Evidence [${evidence.id}] was corrupted or tampered.")
+                return false
             }
 
-            val request = Request.Builder()
-                .url(BACKEND_URL)
-                .post(json.toString().toRequestBody(JSON_MEDIA_TYPE))
-                .header("User-Agent", "BriskSMS-Android/1.0.0")
-                .build()
+            val request = IngestionEvidenceRequest(
+                senderAddress = evidence.senderAddress,
+                rawPayload = plaintextPayload,
+                simSlot = evidence.simSlot,
+                deviceTimestamp = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US).apply {
+                    timeZone = java.util.TimeZone.getTimeZone("UTC")
+                }.format(java.util.Date(evidence.deviceTimestamp)),
+                signature = evidence.signature
+            )
 
-            httpClient.newCall(request).execute().use { response ->
-                if (response.isSuccessful || response.code == 409) {
-                    // 200 OK or 409 Duplicate both acknowledge that evidence was processed
-                    Log.i(TAG, "Uploaded evidence [${evidence.id}], status: ${response.code}")
-                    true
-                } else {
-                    Log.w(TAG, "Upload failed for [${evidence.id}], HTTP: ${response.code}")
-                    false
-                }
-            }
+            val result = apiClient.uploadEvidence(request)
+            result.isSuccess
         } catch (e: Exception) {
-            Log.e(TAG, "Network exception uploading evidence [${evidence.id}]: ${e.message}")
+            Log.e(TAG, "Exception uploading evidence [${evidence.id}]: ${e.message}")
             false
         }
     }

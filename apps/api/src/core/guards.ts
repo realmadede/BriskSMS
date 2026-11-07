@@ -1,7 +1,9 @@
 import { RouteRequest, HttpException } from './http.js';
-import { verifyJwt } from './crypto.js';
-import { UserRole } from '@brisksms/shared';
+import { hashToken, verifyJwt } from './crypto.js';
+import { DeviceStatus, UserRole } from '@brisksms/shared';
 import { sql } from '@brisksms/db';
+import { DeviceRecord, mapDeviceRow } from './store.js';
+import { timingSafeEqual } from 'node:crypto';
 
 // Fast in-process cache synchronized with PostgreSQL `revoked_sessions` table
 export const tokenBlacklist = new Set<string>();
@@ -64,4 +66,84 @@ export function authorizeRole(req: RouteRequest, allowedRoles: UserRole[]): void
       `Action requires one of the following roles: ${allowedRoles.join(', ')}`,
     );
   }
+}
+
+export interface AuthenticatedDeviceContext {
+  deviceId: string;
+  organizationId: string;
+  device: DeviceRecord;
+}
+
+/**
+ * Extracts and verifies device Bearer token from Authorization header.
+ * Validates constant-time hash, ensures device is ACTIVE, verifies organization is ACTIVE,
+ * and sets trusted req.context.deviceId and req.context.organizationId.
+ * Strictly clears req.context.userId and req.context.role to prevent device auth from
+ * being treated as human-user auth.
+ */
+export async function authenticateDevice(req: RouteRequest): Promise<AuthenticatedDeviceContext> {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || typeof authHeader !== 'string') {
+    throw new HttpException(401, 'UNAUTHORIZED', 'Missing Authorization header with device token');
+  }
+
+  const [scheme, token] = authHeader.split(' ');
+  if (scheme !== 'Bearer' || !token) {
+    throw new HttpException(401, 'UNAUTHORIZED', 'Invalid authorization format. Expected Bearer <deviceToken>');
+  }
+
+  if (!token.startsWith('bsk_dev_')) {
+    throw new HttpException(401, 'INVALID_DEVICE_TOKEN', 'Invalid device token format');
+  }
+
+  const tokenHash = hashToken(token);
+  const rows = await sql<Record<string, any>>`
+    SELECT * FROM "devices"
+    WHERE "device_token_hash" = ${tokenHash}
+    LIMIT 1
+  `;
+
+  if (rows.length === 0) {
+    throw new HttpException(401, 'INVALID_DEVICE_TOKEN', 'Device authentication failed: unknown device token');
+  }
+
+  const device = mapDeviceRow(rows[0]!);
+
+  // Constant-time verification against stored token hash
+  const computedHashBuf = Buffer.from(tokenHash, 'hex');
+  const storedHashBuf = Buffer.from(device.deviceTokenHash, 'hex');
+  if (computedHashBuf.length !== storedHashBuf.length || !timingSafeEqual(computedHashBuf, storedHashBuf)) {
+    throw new HttpException(401, 'INVALID_DEVICE_TOKEN', 'Device authentication failed: token hash verification failed');
+  }
+
+  if (device.status === DeviceStatus.REVOKED) {
+    throw new HttpException(403, 'DEVICE_REVOKED', 'This device has been revoked and cannot perform operations');
+  }
+
+  if (device.status !== DeviceStatus.ACTIVE) {
+    throw new HttpException(403, 'DEVICE_INACTIVE', `Device is not active (current status: ${device.status})`);
+  }
+
+  // Ensure organization exists and is active
+  const orgRows = await sql<{ id: string; is_active: boolean }>`
+    SELECT "id", "is_active" FROM "organizations"
+    WHERE "id" = ${device.organizationId}
+    LIMIT 1
+  `;
+
+  if (orgRows.length === 0 || !orgRows[0]?.is_active) {
+    throw new HttpException(403, 'ORGANIZATION_INACTIVE', 'Device organization is inactive or not found');
+  }
+
+  // Establish trusted device context
+  req.context.deviceId = device.id;
+  req.context.organizationId = device.organizationId;
+  req.context.userId = undefined;
+  req.context.role = undefined;
+
+  return {
+    deviceId: device.id,
+    organizationId: device.organizationId,
+    device,
+  };
 }

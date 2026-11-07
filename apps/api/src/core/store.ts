@@ -1056,7 +1056,7 @@ export class PostgresStore {
   async getDeviceByTokenHash(tokenHash: string, tx: SqlExecutor = sql): Promise<DeviceRecord | null> {
     const rows = await tx`
       SELECT * FROM "devices"
-      WHERE "device_token_hash" = ${tokenHash} AND "status" <> 'REVOKED'
+      WHERE "device_token_hash" = ${tokenHash}
       LIMIT 1
     `;
     return rows[0] ? mapDeviceRow(rows[0]) : null;

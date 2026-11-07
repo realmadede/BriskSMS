@@ -23,6 +23,15 @@ interface EvidenceDao {
     @Query("SELECT COUNT(*) FROM offline_payment_evidence WHERE isUploaded = 0")
     suspend fun countPending(): Int
 
+    @Query("SELECT COUNT(*) FROM offline_payment_evidence WHERE createdAt >= :sinceTimestamp")
+    suspend fun countCollectedSince(sinceTimestamp: Long): Int
+
+    @Query("SELECT COUNT(*) FROM offline_payment_evidence WHERE isUploaded = 1 AND uploadedAt >= :sinceTimestamp")
+    suspend fun countUploadedSince(sinceTimestamp: Long): Int
+
     @Query("SELECT * FROM offline_payment_evidence ORDER BY createdAt DESC LIMIT 20")
     suspend fun getRecentEvidence(): List<OfflineEvidenceEntity>
+
+    @Query("DELETE FROM offline_payment_evidence WHERE isUploaded = 1")
+    suspend fun clearUploadedEvidence(): Int
 }

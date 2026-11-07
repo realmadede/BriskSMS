@@ -122,7 +122,7 @@ describe('Phase 1: DeviceModule & Cryptographic Pairing Flow', () => {
         isCharging: false,
         networkType: 'CELLULAR',
       }),
-      /Device authentication failed/,
+      /This device has been revoked|Device authentication failed/,
     );
   });
 });

@@ -78,4 +78,7 @@ dependencies {
 
     // Android Keystore & Security Crypto
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
+
+    // Unit Testing
+    testImplementation("junit:junit:4.13.2")
 }

@@ -12,8 +12,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import tz.co.brisksms.core.storage.KeystoreSecureStorage
 import tz.co.brisksms.data.local.BriskDatabase
 import tz.co.brisksms.data.local.OfflineEvidenceEntity
+import tz.co.brisksms.payment.crypto.EvidenceEncryptor
 import tz.co.brisksms.security.KeystoreManager
 import tz.co.brisksms.worker.EvidenceUploadWorker
 
@@ -54,6 +56,11 @@ class BriskNotificationListenerService : NotificationListenerService() {
         super.onNotificationPosted(sbn)
         if (sbn == null) return
 
+        val secureStorage = KeystoreSecureStorage(applicationContext)
+        if (!secureStorage.isPaired || !secureStorage.isPaymentIntelligenceEnabled) {
+            return
+        }
+
         val packageName = sbn.packageName ?: return
         val extras = sbn.notification.extras ?: return
 
@@ -87,10 +94,13 @@ class BriskNotificationListenerService : NotificationListenerService() {
             null
         }
 
+        val encryptor = EvidenceEncryptor(secureStorage)
+        val encryptedPayload = encryptor.encryptPayload(rawPayload)
+
         val evidence = OfflineEvidenceEntity(
             packageName = packageName,
             senderAddress = if (title.isNotEmpty()) title else packageName,
-            rawPayload = rawPayload,
+            rawPayload = encryptedPayload,
             deviceTimestamp = sbn.postTime,
             signature = signature
         )
