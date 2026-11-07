@@ -118,12 +118,18 @@ export class MessagingService {
     if (dto.gatewayBaseUrl !== undefined) {
       gatewayBaseUrl = dto.gatewayBaseUrl;
     } else if (dto.gatewayMode === GatewayMode.MANAGED_GATEWAY && !account.gatewayBaseUrl) {
-      gatewayBaseUrl = 'https://gateway.brisksms.com/api/v1';
+      gatewayBaseUrl = 'https://gateway.brisksms.com/api/3rdparty/v1';
     } else if (dto.gatewayMode === GatewayMode.EXTERNAL_RELAY && !account.gatewayBaseUrl) {
       gatewayBaseUrl = 'https://api.sms-gate.app/3rdparty/v1';
     }
 
-    const encryptedApiToken = dto.apiToken !== undefined ? dto.apiToken : account.encryptedApiToken;
+    let authStored: string | null = account.encryptedApiToken;
+    if (dto.auth) {
+      authStored = JSON.stringify(dto.auth);
+    } else if (dto.apiToken !== undefined) {
+      authStored = dto.apiToken;
+    }
+
     const defaultSimSlot = dto.defaultSimSlot !== undefined ? dto.defaultSimSlot : account.defaultSimSlot;
     const now = new Date();
 
@@ -131,7 +137,7 @@ export class MessagingService {
       UPDATE messaging_accounts
       SET gateway_mode = ${gatewayMode},
           gateway_base_url = ${gatewayBaseUrl},
-          encrypted_api_token = ${encryptedApiToken},
+          encrypted_api_token = ${authStored},
           default_sim_slot = ${defaultSimSlot},
           updated_at = ${now}
       WHERE organization_id = ${organizationId}
@@ -716,70 +722,94 @@ export class MessagingService {
 
   /**
    * Processes gateway delivery webhook report with strict idempotency and terminal state protection.
+   * Atomically executes in an ACID transaction with row-level locks (SELECT ... FOR UPDATE).
    * - Never moves a DELIVERED message backwards to FAILED.
    * - Never triggers duplicate refunds.
    * - Distinguishes SENT from DELIVERED.
+   * - Safely returns null on unknown provider message ID.
    */
   async handleDeliveryEvent(
     event: NormalizedDeliveryEvent,
   ): Promise<SmsMessageRecord | null> {
-    const rows = await sql<Record<string, any>>`
-      SELECT * FROM sms_messages
-      WHERE provider_message_id = ${event.providerMessageId}
-      LIMIT 1
-    `;
-    if (rows.length === 0) return null;
-
-    const targetMessage = this.mapMessageRow(rows[0]!);
-    const now = new Date();
-
-    // 1. Terminal State Protection: A delivered message cannot be reverted to failed or re-refunded
-    if (targetMessage.status === SmsStatus.DELIVERED) {
-      return targetMessage; // Idempotent no-op
-    }
-
-    if (event.eventType === 'DELIVERED') {
-      const updated = await sql<Record<string, any>>`
-        UPDATE sms_messages
-        SET status = ${SmsStatus.DELIVERED},
-            delivered_at = ${event.carrierTimestamp},
-            updated_at = ${now}
-        WHERE id = ${targetMessage.id}
-        RETURNING *
+    return withTransaction(async (tx) => {
+      const rows = await tx<Record<string, any>>`
+        SELECT * FROM sms_messages
+        WHERE provider_message_id = ${event.providerMessageId}
+        FOR UPDATE
       `;
-      return this.mapMessageRow(updated[0]!);
-    } else if (event.eventType === 'FAILED') {
-      // 2. Failure State Protection: Never refund more than once
-      if (targetMessage.status !== SmsStatus.FAILED) {
-        const updated = await sql<Record<string, any>>`
-          UPDATE sms_messages
-          SET status = ${SmsStatus.FAILED},
-              last_error = ${event.failureReason ?? 'Carrier transmission failed'},
-              updated_at = ${now}
-          WHERE id = ${targetMessage.id}
-          RETURNING *
-        `;
-        await this.refundCredits(
-          targetMessage.organizationId,
-          targetMessage.costCredits,
-          `refund_${targetMessage.id}`,
-        );
-        return this.mapMessageRow(updated[0]!);
-      }
-    } else if (event.eventType === 'SENT') {
-      if (targetMessage.status === SmsStatus.QUEUED) {
-        const updated = await sql<Record<string, any>>`
-          UPDATE sms_messages
-          SET status = ${SmsStatus.SUBMITTED},
-              updated_at = ${now}
-          WHERE id = ${targetMessage.id}
-          RETURNING *
-        `;
-        return this.mapMessageRow(updated[0]!);
-      }
-    }
+      if (rows.length === 0) return null;
 
-    return targetMessage;
+      const targetMessage = this.mapMessageRow(rows[0]!);
+      const now = new Date();
+
+      // 1. Terminal State Protection: A delivered message cannot be reverted to failed or re-refunded
+      if (targetMessage.status === SmsStatus.DELIVERED) {
+        return targetMessage; // Idempotent no-op
+      }
+
+      if (event.eventType === 'DELIVERED') {
+        const updated = await tx<Record<string, any>>`
+          UPDATE sms_messages
+          SET status = ${SmsStatus.DELIVERED},
+              delivered_at = ${event.carrierTimestamp},
+              updated_at = ${now}
+          WHERE id = ${targetMessage.id}
+          RETURNING *
+        `;
+        return this.mapMessageRow(updated[0]!);
+      } else if (event.eventType === 'FAILED') {
+        // 2. Failure State Protection: Never refund more than once
+        if (targetMessage.status !== SmsStatus.FAILED) {
+          const updated = await tx<Record<string, any>>`
+            UPDATE sms_messages
+            SET status = ${SmsStatus.FAILED},
+                last_error = ${event.failureReason ?? 'Carrier transmission failed'},
+                updated_at = ${now}
+            WHERE id = ${targetMessage.id}
+            RETURNING *
+          `;
+
+          // Atomic credit refund within the same transaction
+          const accRows = await tx<Record<string, any>>`
+            SELECT * FROM messaging_accounts
+            WHERE organization_id = ${targetMessage.organizationId}
+            FOR UPDATE
+          `;
+          if (accRows.length > 0) {
+            const currentBalance = Number(accRows[0]!.credit_balance);
+            const newBalance = currentBalance + targetMessage.costCredits;
+            await tx`
+              UPDATE messaging_accounts
+              SET credit_balance = ${newBalance}, updated_at = ${now}
+              WHERE organization_id = ${targetMessage.organizationId}
+            `;
+            await tx`
+              INSERT INTO messaging_credit_ledger (
+                id, organization_id, entry_type, amount_credits, balance_after, reference_id, created_at
+              ) VALUES (
+                ${randomUUID()}, ${targetMessage.organizationId}, ${CreditLedgerEntryType.REFUND},
+                ${targetMessage.costCredits}, ${newBalance}, ${`refund_${targetMessage.id}`}, ${now}
+              )
+            `;
+          }
+
+          return this.mapMessageRow(updated[0]!);
+        }
+      } else if (event.eventType === 'SENT') {
+        if (targetMessage.status === SmsStatus.QUEUED) {
+          const updated = await tx<Record<string, any>>`
+            UPDATE sms_messages
+            SET status = ${SmsStatus.SUBMITTED},
+                updated_at = ${now}
+            WHERE id = ${targetMessage.id}
+            RETURNING *
+          `;
+          return this.mapMessageRow(updated[0]!);
+        }
+      }
+
+      return targetMessage;
+    });
   }
 }
 

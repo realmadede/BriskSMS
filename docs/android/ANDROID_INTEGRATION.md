@@ -103,15 +103,16 @@ These capabilities have separate services, Room databases/tables, queues, permis
 BriskSMS Product B integrates strictly with the official SMSGate architecture (`android-sms-gateway` / `sms-gate.app`). Traditional telco aggregators (Beem, DARSMS, eHUB) and httpSMS are strictly excluded.
 
 #### Base Paths & Upstream Modes:
-1. `GatewayMode.MANAGED_GATEWAY`: Connects to an organization's private self-hosted SMSGate server on a VPS (`/api/3rdparty/v1`) or behind Cloudflare Tunnel / reverse-proxy rewrite (`https://gateway.brisksms.com/api/v1`).
+1. `GatewayMode.MANAGED_GATEWAY`: Connects to an organization's private self-hosted SMSGate server on a VPS (`/api/3rdparty/v1`).
+   - *Reverse-Proxy Notice:* The path `/api/v1` is an unverified alias. It is only functional if an external reverse-proxy rewrite rule (e.g. NGINX `rewrite ^/api/v1/(.*)$ /api/3rdparty/v1/$1 break;` or Cloudflare Tunnel) is explicitly deployed and verified. Without this rewrite, native SMSGate servers will return HTTP 404.
 2. `GatewayMode.EXTERNAL_RELAY`: Connects to the official SMSGate cloud relay (`https://api.sms-gate.app/3rdparty/v1`) or tenant-provided endpoint.
 
-#### Endpoint Normalization Rules:
-The backend `SmsGateProvider.resolveEndpoint()` normalizes base URLs dynamically:
+#### Endpoint Normalization & SSRF Protection Rules:
+The backend `SmsGateProvider.resolveEndpoint()` validates and normalizes base URLs dynamically:
 - Validates URL scheme: requires `http://` or `https://`.
-- Strips any trailing slashes: `https://gateway.example.com/api/3rdparty/v1/` → `https://gateway.example.com/api/3rdparty/v1`.
+- Prevents Server-Side Request Forgery (SSRF): blocks destination hostnames resolving to loopback (`127.0.0.1`, `localhost`, `::1`), link-local / cloud metadata (`169.254.169.254`, `metadata.google.internal`), and RFC 1918 private IP ranges (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7`), unless local development testing explicitly enables `ALLOW_PRIVATE_GATEWAY_NETWORKS=true`.
+- Strips trailing slashes: `https://sms.example.com/api/3rdparty/v1/` → `https://sms.example.com/api/3rdparty/v1`.
 - Appends `/messages` unless already suffixed with `/messages` or `/message`.
-- Reverse Proxy Path Rewriting: When fronted by NGINX or Cloudflare Tunnel, ensure path rewrites preserve either `/api/3rdparty/v1/messages` (upstream server default) or `/3rdparty/v1/messages` (upstream cloud relay default).
 
 #### Schema Mutual Exclusivity Invariant:
 Official SMSGate documentation ([docs.sms-gate.app/features/sending-messages](https://docs.sms-gate.app/features/sending-messages/)) mandates that the message body specifiers are **strictly mutually exclusive**:
@@ -132,12 +133,13 @@ Providing both `textMessage` and `message` is invalid and results in an HTTP 400
 }
 ```
 
-#### Authentication Header Support:
-`SmsGateProvider.buildAuthHeader()` dynamically detects and crafts the appropriate authorization header:
-- **HTTP Basic Authentication:** If credentials contain a colon (`username:password`) or `Basic `, converts to standard Base64 `Authorization: Basic <base64>`.
-- **JWT / Bearer Token:** If credentials contain a single token string or `Bearer `, crafts `Authorization: Bearer <token>`.
+#### Explicit Credential Configuration:
+`SmsGateProvider.buildAuthHeader()` strictly requires explicit credential objects and never guesses from string patterns:
+- **HTTP Basic Authentication:** `{ type: 'BASIC', username: '...', password: '...' }` → validates non-empty strings and formats to `Authorization: Basic <base64>`.
+- **JWT / Bearer Token:** `{ type: 'BEARER', token: '...' }` → validates non-empty token, decodes JWT structure, verifies that expiration (`exp`) has not passed, and formats to `Authorization: Bearer <token>`.
+- **Rejection Policy:** Ambiguous raw strings (such as un-typed colons or random strings) and unknown credential types are rejected with explicit validation errors.
 
-#### Official Webhook Contract & Payload Schema:
+#### Official Webhook Contract, Signing & Replay Defense:
 SMSGate delivers delivery reports and status updates via HTTP POST webhooks with nested payloads:
 ```json
 {
@@ -152,15 +154,30 @@ SMSGate delivers delivery reports and status updates via HTTP POST webhooks with
 }
 ```
 
-- **HMAC Signature Verification:** Incoming webhooks are signed using HMAC-SHA256. The raw request body is verified against the `X-Signature` header using the organization's gateway signing secret via `crypto.timingSafeEqual`.
+- **Official Signing Algorithm:**
+  - Header: `X-Signature` contains hexadecimal HMAC-SHA256 signature.
+  - Header: `X-Timestamp` contains Unix epoch timestamp in seconds.
+  - Signing Input: The exact raw HTTP request body string concatenated directly with the timestamp string: `signingInput = rawBody + timestamp`.
+  - Byte-Level Integrity: Raw request bytes must be verified before JSON parsing or reserialization; altered formatting or re-serialization fails verification.
+- **Timestamp Validation & Replay Prevention:**
+  - Requires integer `X-Timestamp` header.
+  - Rejects expired timestamps (> 300 seconds old).
+  - Rejects future timestamps outside clock-skew allowance (> 60 seconds in future).
+  - Maintains an in-memory replay cache of seen `${signature}:${timestamp}` pairs, rejecting duplicate replays.
+- **Per-Device & Per-Organization Key Management:**
+  - Managed by `SmsGateKeyService`.
+  - Keys are partitioned by `${organizationId}:${deviceId}` or organization gateway.
+  - Device keys from Organization A can never verify webhooks for Organization B.
+  - Supports key rotation: allows verification against an active `currentKey` and an expiring `previousKey` during a 24-hour transition grace period.
 - **Event Lifecycle Mapping:**
-  - `sms:sent` → Radio transmission acknowledged by carrier SMSC; mapped to `SUBMITTED`. Does NOT mark message as delivered.
+  - `sms:sent` → Radio transmission acknowledged by carrier SMSC; mapped to `SUBMITTED`. Does NOT mark message as delivered (`deliveredAt` remains `null`).
   - `sms:delivered` → Handset delivery confirmation receipt; mapped to `DELIVERED`. Sets `deliveredAt = carrierTimestamp`.
   - `sms:failed` → Radio transmission or carrier failure; mapped to `FAILED`.
 - **Delivery State Machine & Invariants:**
-  1. **Terminal State Immutability:** Once a message reaches `DELIVERED`, it can never transition back to `FAILED`, even if a late or out-of-order `sms:failed` event arrives.
-  2. **Exactly-Once Refund Guarantee:** Reserved credits committed upon dispatch are refunded if and only if the message permanently fails (`FAILED`). Delivered messages are never refunded. Out-of-order or duplicate `sms:failed` reports never trigger secondary credit refunds.
-  3. **Graceful Handling of Unknown Messages:** If a webhook references an unknown `providerMessageId` (e.g. from an unmanaged broadcast or deleted test), it returns `null` and logs the observation without throwing a 500 server error.
+  1. **Transactional Row-Locking:** `handleDeliveryEvent` executes inside an ACID transaction (`withTransaction`) with row-level locks (`SELECT ... FOR UPDATE`), preventing race conditions.
+  2. **Terminal State Immutability:** Once a message reaches `DELIVERED`, it can never transition back to `FAILED`, even if a late or out-of-order `sms:failed` event arrives.
+  3. **Exactly-Once Refund Guarantee:** Reserved credits committed upon dispatch are refunded atomically if and only if the message permanently fails (`FAILED`). Delivered messages are never refunded. Out-of-order or duplicate `sms:failed` reports never trigger secondary credit refunds.
+  4. **Graceful Handling of Unknown Messages:** If a webhook references an unknown `providerMessageId`, it returns `null` and logs the observation without throwing a 500 server error.
 
 ### 4.2 Operating Deployment Models
 1. **Model A (Dedicated SMSGate Android Gateway):** The operator runs the official open-source SMSGate Android application (`android-sms-gateway` by capcom6) on the gateway handset. The app synchronizes directly with the SMSGate server via WebSocket/Push. BriskSMS backend orchestrates campaigns and accounting via the SMSGate REST API.
@@ -401,3 +418,20 @@ The following capabilities require real Android physical hardware with active lo
 | **SMSC Sent & Handset DLR Receipts** | Real recipient handset receiving SMS | Sent BroadcastReceiver receives radio confirmation (`SUBMITTED`); delivery BroadcastReceiver receives handset confirmation (`DELIVERED`). |
 | **Foreground Keepalive Across Doze** | Device unplugged and screen turned off for > 1 hour | Foreground notification remains pinned; service continues listening without being killed by Android Doze. |
 | **Offline Buffering & Network Reconnection** | Airplane mode toggled during payment/SMS queue | WorkManager buffers records locally; upon reconnecting Wi-Fi/LTE, exponential backoff flushes queue to backend. |
+
+---
+
+## 14. Provider Package Verification & Ingestion Status
+
+To preserve engineering integrity and avoid unwarranted claims of verified hardware integrations, the operational status of all Tanzanian financial providers is categorized as follows:
+
+| Provider / Channel | Package Name | Regex Parser Status | Real Device Capture Status |
+| :--- | :--- | :--- | :--- |
+| **Vodacom M-Pesa (Swahili)** | `com.vodacom.mpesa` | **VERIFIED** against real anonymized SMS corpus | **PROVISIONAL** (pending physical device test) |
+| **Vodacom Lipa Till** | `com.vodacom.mpesa` | **VERIFIED** against real Till transaction corpus | **PROVISIONAL** (pending physical device test) |
+| **Mixx by Yas (Tigo Pesa)** | `tz.tigo.mfsapp` | **VERIFIED** against real anonymized SMS corpus | **PROVISIONAL** (pending physical device test) |
+| **Airtel Money** | `com.airtel.africa.selfcare` | **VERIFIED** against real anonymized SMS corpus | **PROVISIONAL** (pending physical device test) |
+| **CRDB SimBanking** | `com.crdb.simbanking` | **VERIFIED** against real credit alert corpus | **PROVISIONAL** (pending physical device test) |
+| **HaloPesa** | `com.halopesa.eu` | **PROVISIONAL** (schema defined) | **UNTESTED** on hardware |
+| **NMB Mkononi** | `com.nmb.mkononi` | **PROVISIONAL** (schema defined) | **UNTESTED** on hardware |
+| **Legacy / Secondary Aliases** | `com.vodafone.vodapay`, `com.yas.mixx`, etc. | Filtered through whitelist | Dropped unless matching verified canonical format |

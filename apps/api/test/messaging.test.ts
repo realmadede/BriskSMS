@@ -95,9 +95,15 @@ describe('Product B: BriskSMS Cellular Gateway & Messaging Engine', () => {
     });
 
     it('should format Authorization header for Bearer tokens and Basic auth', () => {
-      assert.equal(provider.buildAuthHeader('bsk_token_123'), 'Bearer bsk_token_123');
+      assert.equal(
+        provider.buildAuthHeader({ type: 'BEARER', token: 'bsk_token_123' }),
+        'Bearer bsk_token_123',
+      );
       assert.equal(provider.buildAuthHeader('Bearer custom_jwt_token'), 'Bearer custom_jwt_token');
-      assert.equal(provider.buildAuthHeader('admin:secret123'), 'Basic YWRtaW46c2VjcmV0MTIz');
+      assert.equal(
+        provider.buildAuthHeader({ type: 'BASIC', username: 'admin', password: 'secret123' }),
+        'Basic YWRtaW46c2VjcmV0MTIz',
+      );
       assert.equal(provider.buildAuthHeader('Basic YWRtaW46c2VjcmV0MTIz'), 'Basic YWRtaW46c2VjcmV0MTIz');
     });
 
@@ -329,14 +335,15 @@ describe('Product B: BriskSMS Cellular Gateway & Messaging Engine', () => {
     it('should verify valid HMAC-SHA256 webhook signatures and reject invalid ones', () => {
       const rawBody = JSON.stringify({ id: 'msg_9988', status: 'Delivered' });
       const secret = 'super_secret_signing_key_1234';
+      const timestamp = String(Math.floor(Date.now() / 1000));
 
       const validSig = createHmac('sha256', secret)
-        .update(rawBody, 'utf8')
+        .update(rawBody + timestamp, 'utf8')
         .digest('hex');
 
-      assert.equal(provider.verifyWebhookSignature(rawBody, validSig, secret), true);
-      assert.equal(provider.verifyWebhookSignature(rawBody, 'invalid_sig', secret), false);
-      assert.equal(provider.verifyWebhookSignature(rawBody, validSig, 'wrong_secret'), false);
+      assert.equal(provider.verifyWebhookSignature(rawBody, validSig, timestamp, secret), true);
+      assert.equal(provider.verifyWebhookSignature(rawBody, 'invalid_sig', timestamp, secret), false);
+      assert.equal(provider.verifyWebhookSignature(rawBody, validSig, timestamp, 'wrong_secret'), false);
     });
 
     it('should process delivery webhook and update message status', async () => {

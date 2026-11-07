@@ -24,6 +24,24 @@ export interface MessageDispatchResult {
 }
 
 /**
+ * Explicit Gateway Authentication Types
+ */
+export type GatewayAuthType = 'BASIC' | 'BEARER';
+
+export interface BasicGatewayAuth {
+  type: 'BASIC';
+  username: string;
+  password: string;
+}
+
+export interface BearerGatewayAuth {
+  type: 'BEARER';
+  token: string;
+}
+
+export type GatewayAuthCredentials = BasicGatewayAuth | BearerGatewayAuth;
+
+/**
  * Normalized Gateway Delivery Event
  */
 export interface NormalizedDeliveryEvent {
@@ -31,6 +49,7 @@ export interface NormalizedDeliveryEvent {
   eventType: 'SENT' | 'DELIVERED' | 'FAILED';
   failureReason?: string;
   carrierTimestamp: Date;
+  deviceId?: string;
 }
 
 /**
@@ -39,7 +58,8 @@ export interface NormalizedDeliveryEvent {
 export interface GatewayCredentials {
   mode: GatewayMode;
   baseUrl: string;
-  apiToken: string;
+  auth?: GatewayAuthCredentials;
+  apiToken?: string;
   defaultSimSlot?: number;
 }
 
@@ -92,6 +112,7 @@ export interface MessagingAccountDto {
 export interface UpdateGatewayConfigDto {
   gatewayMode: GatewayMode;
   gatewayBaseUrl?: string;
+  auth?: GatewayAuthCredentials;
   apiToken?: string;
   defaultSimSlot?: number;
 }

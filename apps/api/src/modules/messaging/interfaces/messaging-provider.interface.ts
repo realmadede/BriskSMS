@@ -18,12 +18,13 @@ export interface MessagingProvider {
   ): Promise<MessageDispatchResult>;
 
   /**
-   * Cryptographically verifies delivery receipt webhook signatures
+   * Cryptographically verifies delivery receipt webhook signatures conforming to official SMSGate specification
    */
   verifyWebhookSignature(
     rawBody: string,
     signatureHeader: string,
-    signingSecret: string,
+    timestampHeader: string,
+    signingSecret: string | string[],
   ): boolean;
 
   /**
