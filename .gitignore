@@ -96,7 +96,9 @@ captures/
 
 # Editor & IDE Directories
 .idea/
-.vscode/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
 .vscode-test
 *.sublime-workspace
 *.sublime-project

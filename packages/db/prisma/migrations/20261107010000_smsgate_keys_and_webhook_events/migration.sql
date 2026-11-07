@@ -19,7 +19,7 @@ CREATE TABLE "smsgate_signing_keys" (
 );
 
 -- Unique index ensuring single active key per device or single default key per organization
-CREATE UNIQUE INDEX "idx_smsgate_signing_keys_org_device" ON "smsgate_signing_keys" ("organization_id", COALESCE("device_id", '__ORG_DEFAULT__'));
+CREATE UNIQUE INDEX "idx_smsgate_signing_keys_org_device" ON "smsgate_signing_keys" ("organization_id", (COALESCE("device_id", '__ORG_DEFAULT__')));
 CREATE INDEX "idx_smsgate_signing_keys_org_lookup" ON "smsgate_signing_keys" ("organization_id");
 
 -- CreateTable

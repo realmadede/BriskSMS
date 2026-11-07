@@ -1,0 +1,55 @@
+{
+  "files.associations": {
+    "*.sql": "sql",
+    "schema.prisma": "prisma",
+    "*.prisma": "prisma"
+  },
+  "sql.dialect": "postgres",
+  "sql-language-server.dialect": "postgres",
+  "database-client.dialect": "PostgreSQL",
+  "sql.lint.enable": false,
+  "cSpell.enabledLanguageIds": [
+    "typescript",
+    "javascript",
+    "json",
+    "markdown"
+  ],
+  "cSpell.ignorePaths": [
+    "**/migrations/**",
+    "**/dist/**",
+    "**/*.sql"
+  ],
+  "cSpell.words": [
+    "airtel",
+    "apis",
+    "backoff",
+    "brisksms",
+    "bullmq",
+    "crdb",
+    "deduplication",
+    "glisse",
+    "halopesa",
+    "idempotency",
+    "lipa",
+    "mixx",
+    "mkononi",
+    "mpesa",
+    "outbox",
+    "pesa",
+    "resp",
+    "scrypt",
+    "simbanking",
+    "smsgate",
+    "tanzanian",
+    "tcra",
+    "timestamptz",
+    "vodacom",
+    "webhook",
+    "webhooks"
+  ],
+  "typescript.tsdk": "node_modules/typescript/lib",
+  "editor.tabSize": 2,
+  "editor.insertSpaces": true,
+  "files.eol": "\n",
+  "files.trimTrailingWhitespace": true
+}

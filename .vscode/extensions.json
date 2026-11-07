@@ -1,0 +1,7 @@
+{
+  "recommendations": [
+    "Prisma.prisma",
+    "mtxr.sqltools",
+    "dbaeumer.vscode-eslint"
+  ]
+}
