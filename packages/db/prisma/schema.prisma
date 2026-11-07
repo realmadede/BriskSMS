@@ -83,6 +83,8 @@ enum InvoiceStatus {
 
 enum CreditLedgerEntryType {
   PURCHASE
+  RESERVATION
+  RELEASE
   USAGE_DEDUCTION
   REFUND
   ADMIN_ADJUSTMENT
@@ -106,9 +108,9 @@ enum CampaignStatus {
 }
 
 enum GatewayMode {
-  MANAGED_GATEWAY  // Private BriskSMS dedicated gateway on 24/7 VPS behind Cloudflare
-  EXTERNAL_RELAY   // External gateway relay
-  TELCO_AGGREGATOR // Direct aggregator connection (e.g. Beem, DARSMS)
+  MANAGED_GATEWAY
+  EXTERNAL_RELAY
+  TELCO_AGGREGATOR
 }
 
 enum SenderIdStatus {
@@ -118,8 +120,51 @@ enum SenderIdStatus {
   REJECTED
 }
 
+enum OutboxStatus {
+  PENDING
+  PROCESSING
+  DELIVERED
+  FAILED
+  DEAD_LETTER
+}
+
+enum VerificationMethod {
+  INDEPENDENT_PROVIDER_QUERY
+  BANK_STATEMENT_RECONCILIATION
+  MANUAL_FINANCE_APPROVAL
+  MANUAL_REJECTION
+}
+
+enum ProductType {
+  PAYMENT_INTELLIGENCE
+  BULK_MESSAGING
+}
+
+enum BillingInterval {
+  MONTHLY
+  QUARTERLY
+  SEMI_ANNUALLY
+  ANNUALLY
+  CUSTOM
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  SUSPENDED
+  CANCELED
+  EXPIRED
+}
+
+enum EntitlementType {
+  NUMERIC_LIMIT
+  BOOLEAN_FLAG
+  TIERED_TIER
+}
+
 // ------------------------------------------------------------------------------
-// Identity & Organizations
+// A. Identity & Organizations
 // ------------------------------------------------------------------------------
 
 model Organization {
@@ -133,24 +178,34 @@ model Organization {
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  // Relations
   memberships           UserOrganization[]
+  invitations           OrganizationInvitation[]
   devices               Device[]
+  pairingTokens         PairingToken[]
   rawEvidences          RawPaymentEvidence[]
   normalizedPayments    NormalizedPayment[]
+  paymentVerifications  PaymentVerification[]
   customers             Customer[]
   invoices              Invoice[]
+  invoicePayments       InvoicePayment[]
   automationRules       AutomationRule[]
   automationLogs        AutomationLog[]
   messagingAccount      MessagingAccount?
   messagingLedgers      MessagingCreditLedger[]
   senderIds             SenderId[]
   smsCampaigns          SmsCampaign[]
+  smsCampaignRecipients SmsCampaignRecipient[]
   smsMessages           SmsMessage[]
+  smsDeliveryAttempts   SmsDeliveryAttempt[]
   apiKeys               ApiKey[]
+  oauthClients          OAuthClient[]
+  oauthAuthCodes        OAuthAuthorizationCode[]
+  oauthTokens           OAuthToken[]
   webhookEndpoints      WebhookEndpoint[]
+  webhookDeliveries     WebhookDelivery[]
   auditLogs             AuditLog[]
   subscription          OrganizationSubscription?
+  subscriptionHistory   SubscriptionHistory[]
   subscriptionInvoices  SubscriptionBillingInvoice[]
   outboxEvents          OutboxEvent[]
 
@@ -158,20 +213,20 @@ model Organization {
 }
 
 model User {
-  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  email              String   @unique @db.VarChar(255)
-  passwordHash       String   @map("password_hash") @db.VarChar(255)
-  fullName           String   @map("full_name") @db.VarChar(255)
-  phoneNumber        String?  @map("phone_number") @db.VarChar(50)
-  isEmailVerified    Boolean  @default(false) @map("is_email_verified")
-  isActive           Boolean  @default(true) @map("is_active")
-  twoFactorSecret    String?  @map("two_factor_secret") @db.VarChar(100)
-  twoFactorEnabled   Boolean  @default(false) @map("two_factor_enabled")
-  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt          DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email            String   @unique @db.VarChar(255)
+  passwordHash     String   @map("password_hash") @db.VarChar(255)
+  fullName         String   @map("full_name") @db.VarChar(255)
+  phoneNumber      String?  @map("phone_number") @db.VarChar(50)
+  isEmailVerified  Boolean  @default(false) @map("is_email_verified")
+  isActive         Boolean  @default(true) @map("is_active")
+  twoFactorSecret  String?  @map("two_factor_secret") @db.VarChar(100)
+  twoFactorEnabled Boolean  @default(false) @map("two_factor_enabled")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  // Relations
-  memberships UserOrganization[]
+  memberships   UserOrganization[]
+  refreshTokens RefreshToken[]
 
   @@map("users")
 }
@@ -192,25 +247,72 @@ model UserOrganization {
   @@map("users_organizations")
 }
 
+model OrganizationInvitation {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  email          String    @db.VarChar(255)
+  role           UserRole  @default(FINANCE)
+  invitedById    String    @map("invited_by_id") @db.Uuid
+  tokenHash      String    @unique @map("token_hash") @db.VarChar(64)
+  status         String    @default("PENDING") @db.VarChar(20)
+  expiresAt      DateTime  @map("expires_at") @db.Timestamptz(6)
+  acceptedAt     DateTime? @map("accepted_at") @db.Timestamptz(6)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, status])
+  @@map("organization_invitations")
+}
+
+model RefreshToken {
+  tokenHash String    @id @map("token_hash") @db.VarChar(64)
+  userId    String    @map("user_id") @db.Uuid
+  jti       String    @db.VarChar(64)
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([jti])
+  @@map("refresh_tokens")
+}
+
+model RevokedSession {
+  jti       String   @id @db.VarChar(64)
+  userId    String?  @map("user_id") @db.Uuid
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(6)
+  revokedAt DateTime @default(now()) @map("revoked_at") @db.Timestamptz(6)
+
+  @@index([expiresAt])
+  @@map("revoked_sessions")
+}
+
 // ------------------------------------------------------------------------------
-// Devices & Android Telemetry
+// B. Devices & Android Telemetry
 // ------------------------------------------------------------------------------
 
 model Device {
-  id             String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  organizationId String              @map("organization_id") @db.Uuid
-  label          String              @db.VarChar(100)
-  deviceModel    String              @map("device_model") @db.VarChar(100)
-  manufacturer   String              @db.VarChar(100)
-  androidVersion String              @map("android_version") @db.VarChar(20)
-  appVersion     String              @map("app_version") @db.VarChar(20)
-  publicKeyPem   String              @map("public_key_pem") @db.Text
-  status         DeviceStatus        @default(PENDING_PAIRING)
-  ingestionMode  DeviceIngestionMode @default(NOTIFICATION_LISTENER) @map("ingestion_mode")
-  lastSyncAt     DateTime?           @map("last_sync_at") @db.Timestamptz(6)
-  revokedAt      DateTime?           @map("revoked_at") @db.Timestamptz(6)
-  createdAt      DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id               String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId   String              @map("organization_id") @db.Uuid
+  label            String              @db.VarChar(100)
+  deviceModel      String              @map("device_model") @db.VarChar(100)
+  manufacturer     String              @db.VarChar(100)
+  androidVersion   String              @map("android_version") @db.VarChar(20)
+  appVersion       String              @map("app_version") @db.VarChar(20)
+  publicKeyPem     String              @map("public_key_pem") @db.Text
+  deviceTokenHash  String              @unique @map("device_token_hash") @db.VarChar(64)
+  status           DeviceStatus        @default(PENDING_PAIRING)
+  ingestionMode    DeviceIngestionMode @default(NOTIFICATION_LISTENER) @map("ingestion_mode")
+  lastSyncAt       DateTime?           @map("last_sync_at") @db.Timestamptz(6)
+  revokedAt        DateTime?           @map("revoked_at") @db.Timestamptz(6)
+  revokedById      String?             @map("revoked_by_id") @db.Uuid
+  revocationReason String?             @map("revocation_reason") @db.VarChar(255)
+  createdAt        DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   organization Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   telemetries  DeviceTelemetry[]
@@ -219,6 +321,22 @@ model Device {
 
   @@index([organizationId, status])
   @@map("devices")
+}
+
+model PairingToken {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  token          String    @unique @db.VarChar(128)
+  organizationId String    @map("organization_id") @db.Uuid
+  createdById    String    @map("created_by_id") @db.Uuid
+  expiresAt      DateTime  @map("expires_at") @db.Timestamptz(6)
+  usedAt         DateTime? @map("used_at") @db.Timestamptz(6)
+  usedByDeviceId String?   @map("used_by_device_id") @db.Uuid
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, expiresAt])
+  @@map("pairing_tokens")
 }
 
 model DeviceTelemetry {
@@ -238,7 +356,7 @@ model DeviceTelemetry {
 }
 
 // ------------------------------------------------------------------------------
-// Payment Evidence & Normalized Financial Records
+// C. Payment Evidence & Normalized Financial Records
 // ------------------------------------------------------------------------------
 
 model RawPaymentEvidence {
@@ -253,12 +371,14 @@ model RawPaymentEvidence {
   signature       String?            @db.Text
   nonce           String?            @db.VarChar(64)
   sequenceNumber  BigInt?            @map("sequence_number")
+  parserVersion   String             @default("1.0.0") @map("parser_version") @db.VarChar(32)
+  parseStatus     String             @default("OBSERVED") @map("parse_status") @db.VarChar(32)
   receivedAt      DateTime           @default(now()) @map("received_at") @db.Timestamptz(6)
 
   // Explicitly IMMUTABLE: no updated_at column
-  organization       Organization       @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  device             Device?            @relation(fields: [deviceId], references: [id], onDelete: SetNull)
-  normalizedPayment  NormalizedPayment?
+  organization      Organization       @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  device            Device?            @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  normalizedPayment NormalizedPayment?
 
   @@index([organizationId, receivedAt(sort: Desc)])
   @@index([deviceId, sequenceNumber])
@@ -266,29 +386,36 @@ model RawPaymentEvidence {
 }
 
 model NormalizedPayment {
-  id                String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  organizationId    String           @map("organization_id") @db.Uuid
-  deviceId          String?          @map("device_id") @db.Uuid
-  rawEvidenceId     String           @unique @map("raw_evidence_id") @db.Uuid
-  provider          PaymentProvider
-  reference         String           @db.VarChar(100)
-  amountCents       BigInt           @map("amount_cents")
-  currency          String           @default("TZS") @db.VarChar(3)
-  senderPhone       String           @map("sender_phone") @db.VarChar(50)
-  senderName        String?          @map("sender_name") @db.VarChar(255)
-  recipientAccount  String?          @map("recipient_account") @db.VarChar(100)
-  customerMemo      String?          @map("customer_memo") @db.VarChar(255)
-  providerTimestamp DateTime         @map("provider_timestamp") @db.Timestamptz(6)
-  state             TransactionState @default(OBSERVED)
-  deduplicationHash String           @map("deduplication_hash") @db.VarChar(64)
-  matchedInvoiceId  String?          @map("matched_invoice_id") @db.Uuid
-  createdAt         DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt         DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id                 String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId     String           @map("organization_id") @db.Uuid
+  deviceId           String?          @map("device_id") @db.Uuid
+  rawEvidenceId      String           @unique @map("raw_evidence_id") @db.Uuid
+  provider           PaymentProvider
+  reference          String           @db.VarChar(100)
+  amountCents        BigInt           @map("amount_cents")
+  currency           String           @default("TZS") @db.VarChar(3)
+  senderPhone        String           @map("sender_phone") @db.VarChar(50)
+  senderName         String?          @map("sender_name") @db.VarChar(255)
+  recipientAccount   String?          @map("recipient_account") @db.VarChar(100)
+  customerMemo       String?          @map("customer_memo") @db.VarChar(255)
+  providerTimestamp  DateTime         @map("provider_timestamp") @db.Timestamptz(6)
+  parserVersion      String           @default("1.0.0") @map("parser_version") @db.VarChar(32)
+  state              TransactionState @default(OBSERVED)
+  confidenceTier     String?          @map("confidence_tier") @db.VarChar(50)
+  deduplicationHash  String           @map("deduplication_hash") @db.VarChar(64)
+  candidateInvoiceId String?          @map("candidate_invoice_id") @db.Uuid
+  matchedInvoiceId   String?          @map("matched_invoice_id") @db.Uuid
+  reviewReason       String?          @map("review_reason") @db.Text
+  verifiedAt         DateTime?        @map("verified_at") @db.Timestamptz(6)
+  verifiedById       String?          @map("verified_by_id") @db.Uuid
+  createdAt          DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  organization    Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  device          Device?             @relation(fields: [deviceId], references: [id], onDelete: SetNull)
-  rawEvidence     RawPaymentEvidence  @relation(fields: [rawEvidenceId], references: [id], onDelete: Restrict)
-  matchedInvoice  Invoice?            @relation(fields: [matchedInvoiceId], references: [id], onDelete: SetNull)
+  organization    Organization          @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  device          Device?               @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  rawEvidence     RawPaymentEvidence    @relation(fields: [rawEvidenceId], references: [id], onDelete: Restrict)
+  matchedInvoice  Invoice?              @relation(fields: [matchedInvoiceId], references: [id], onDelete: SetNull)
+  verifications   PaymentVerification[]
   invoicePayments InvoicePayment[]
   automationLogs  AutomationLog[]
 
@@ -297,6 +424,28 @@ model NormalizedPayment {
   @@index([organizationId, reference])
   @@index([organizationId, senderPhone])
   @@map("normalized_payments")
+}
+
+model PaymentVerification {
+  id                      String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId          String             @map("organization_id") @db.Uuid
+  paymentId               String             @map("payment_id") @db.Uuid
+  invoiceId               String?            @map("invoice_id") @db.Uuid
+  verificationMethod      VerificationMethod @map("verification_method")
+  decision                String             @db.VarChar(20) // APPROVED, REJECTED
+  verifiedById            String?            @map("verified_by_id") @db.Uuid
+  externalVerificationRef String?            @map("external_verification_ref") @db.VarChar(100)
+  notes                   String?            @db.Text
+  previousState           TransactionState   @map("previous_state")
+  newState                TransactionState   @map("new_state")
+  createdAt               DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  // Explicitly IMMUTABLE: no updated_at
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  payment      NormalizedPayment @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, paymentId])
+  @@map("payment_verifications")
 }
 
 // ------------------------------------------------------------------------------
@@ -328,10 +477,13 @@ model Invoice {
   customerId       String?       @map("customer_id") @db.Uuid
   referenceNumber  String        @map("reference_number") @db.VarChar(100)
   totalAmountCents BigInt        @map("total_amount_cents")
+  paidAmountCents  BigInt        @default(0) @map("paid_amount_cents")
   balanceCents     BigInt        @map("balance_cents")
   currency         String        @default("TZS") @db.VarChar(3)
+  customerPhone    String?       @map("customer_phone") @db.VarChar(50)
+  customerName     String?       @map("customer_name") @db.VarChar(255)
   status           InvoiceStatus @default(UNPAID)
-  dueDate          DateTime      @map("due_date") @db.Timestamptz(6)
+  dueDate          DateTime?     @map("due_date") @db.Timestamptz(6)
   metadata         Json?         @db.JsonB
   createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt        DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -344,16 +496,17 @@ model Invoice {
 
   @@unique([organizationId, referenceNumber])
   @@index([organizationId, status, dueDate])
+  @@index([organizationId, customerPhone])
   @@map("invoices")
 }
 
 model InvoiceItem {
-  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  invoiceId       String   @map("invoice_id") @db.Uuid
-  description     String   @db.VarChar(255)
-  quantity        Int      @default(1)
-  unitPriceCents  BigInt   @map("unit_price_cents")
-  totalPriceCents BigInt   @map("total_price_cents")
+  id              String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  invoiceId       String @map("invoice_id") @db.Uuid
+  description     String @db.VarChar(255)
+  quantity        Int    @default(1)
+  unitPriceCents  BigInt @map("unit_price_cents")
+  totalPriceCents BigInt @map("total_price_cents")
 
   invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
 
@@ -362,21 +515,25 @@ model InvoiceItem {
 
 model InvoicePayment {
   id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId     String   @map("organization_id") @db.Uuid
   invoiceId          String   @map("invoice_id") @db.Uuid
   paymentId          String   @map("payment_id") @db.Uuid
+  verificationId     String?  @map("verification_id") @db.Uuid
   appliedAmountCents BigInt   @map("applied_amount_cents")
   createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  invoice Invoice           @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
-  payment NormalizedPayment @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  invoice      Invoice           @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  payment      NormalizedPayment @relation(fields: [paymentId], references: [id], onDelete: Restrict)
 
-  @@index([invoiceId])
+  @@unique([invoiceId, paymentId])
+  @@index([organizationId, invoiceId])
   @@index([paymentId])
   @@map("invoice_payments")
 }
 
 // ------------------------------------------------------------------------------
-// Business Automation Engine (MikroTik / WHMCS / Webhooks)
+// Business Automation Engine
 // ------------------------------------------------------------------------------
 
 model AutomationRule {
@@ -404,7 +561,7 @@ model AutomationLog {
   ruleId         String   @map("rule_id") @db.Uuid
   paymentId      String?  @map("payment_id") @db.Uuid
   actionType     String   @map("action_type") @db.VarChar(50)
-  status         String   @db.VarChar(20) // SUCCESS, FAILED, RETRYING
+  status         String   @db.VarChar(20)
   idempotencyKey String   @unique @map("idempotency_key") @db.VarChar(64)
   attemptCount   Int      @default(1) @map("attempt_count")
   lastError      String?  @map("last_error") @db.Text
@@ -419,20 +576,21 @@ model AutomationLog {
 }
 
 // ------------------------------------------------------------------------------
-// Product B: Bulk Messaging & Independent Credit Ledger
+// E. Product B: Bulk Messaging & Independent Credit Ledger
 // ------------------------------------------------------------------------------
 
 model MessagingAccount {
-  id                 String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  organizationId     String      @unique @map("organization_id") @db.Uuid
-  creditBalance      Int         @default(0) @map("credit_balance")
-  gatewayMode        GatewayMode @default(MANAGED_GATEWAY) @map("gateway_mode")
-  gatewayBaseUrl     String?     @map("gateway_base_url") @db.VarChar(255)
-  encryptedApiToken  String?     @map("encrypted_api_token") @db.Text
-  defaultSimSlot     Int         @default(1) @map("default_sim_slot")
-  isActive           Boolean     @default(true) @map("is_active")
-  createdAt          DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt          DateTime    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id                String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId    String      @unique @map("organization_id") @db.Uuid
+  creditBalance     Int         @default(0) @map("credit_balance")
+  reservedCredits   Int         @default(0) @map("reserved_credits")
+  gatewayMode       GatewayMode @default(MANAGED_GATEWAY) @map("gateway_mode")
+  gatewayBaseUrl    String?     @map("gateway_base_url") @db.VarChar(255)
+  encryptedApiToken String?     @map("encrypted_api_token") @db.Text
+  defaultSimSlot    Int         @default(1) @map("default_sim_slot")
+  isActive          Boolean     @default(true) @map("is_active")
+  createdAt         DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
 
@@ -445,7 +603,9 @@ model MessagingCreditLedger {
   entryType      CreditLedgerEntryType @map("entry_type")
   amountCredits  Int                   @map("amount_credits")
   balanceAfter   Int                   @map("balance_after")
+  reservedAfter  Int                   @default(0) @map("reserved_after")
   referenceId    String?               @map("reference_id") @db.VarChar(100)
+  metadata       Json?                 @db.JsonB
   createdAt      DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
 
   // Explicitly IMMUTABLE: no updated_at
@@ -474,21 +634,44 @@ model SenderId {
 model SmsCampaign {
   id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   organizationId  String         @map("organization_id") @db.Uuid
-  senderIdId      String         @map("sender_id_id") @db.Uuid
+  senderIdId      String?        @map("sender_id_id") @db.Uuid
   name            String         @db.VarChar(100)
   messageTemplate String         @map("message_template") @db.Text
   status          CampaignStatus @default(DRAFT)
   recipientCount  Int            @default(0) @map("recipient_count")
   scheduledAt     DateTime?      @map("scheduled_at") @db.Timestamptz(6)
+  completedAt     DateTime?      @map("completed_at") @db.Timestamptz(6)
   createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  senderId     SenderId     @relation(fields: [senderIdId], references: [id], onDelete: Restrict)
+  organization Organization          @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  senderId     SenderId?             @relation(fields: [senderIdId], references: [id], onDelete: Restrict)
+  recipients   SmsCampaignRecipient[]
   messages     SmsMessage[]
 
   @@index([organizationId, status])
+  @@index([status, scheduledAt])
   @@map("sms_campaigns")
+}
+
+model SmsCampaignRecipient {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId   String    @map("organization_id") @db.Uuid
+  campaignId       String    @map("campaign_id") @db.Uuid
+  recipientPhone   String    @map("recipient_phone") @db.VarChar(50)
+  variables        Json?     @db.JsonB
+  interpolatedText String    @map("interpolated_text") @db.Text
+  status           SmsStatus @default(QUEUED)
+  messageId        String?   @map("message_id") @db.Uuid
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  campaign     SmsCampaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, recipientPhone])
+  @@index([organizationId, campaignId, status])
+  @@map("sms_campaign_recipients")
 }
 
 model SmsMessage {
@@ -502,20 +685,42 @@ model SmsMessage {
   simSlot           Int       @default(1) @map("sim_slot")
   providerMessageId String?   @map("provider_message_id") @db.VarChar(100)
   gatewayProvider   String?   @map("gateway_provider") @db.VarChar(50)
+  attemptCount      Int       @default(1) @map("attempt_count")
+  lastError         String?   @map("last_error") @db.Text
   deliveredAt       DateTime? @map("delivered_at") @db.Timestamptz(6)
   createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  campaign     SmsCampaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  organization Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  campaign     SmsCampaign?         @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  attempts     SmsDeliveryAttempt[]
 
   @@index([organizationId, status])
   @@index([providerMessageId])
   @@map("sms_messages")
 }
 
+model SmsDeliveryAttempt {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId    String    @map("organization_id") @db.Uuid
+  messageId         String    @map("message_id") @db.Uuid
+  attemptNumber     Int       @default(1) @map("attempt_number")
+  gatewayProvider   String    @map("gateway_provider") @db.VarChar(50)
+  providerMessageId String?   @map("provider_message_id") @db.VarChar(100)
+  status            SmsStatus
+  errorMessage      String?   @map("error_message") @db.Text
+  rawResponse       Json?     @map("raw_response") @db.JsonB
+  attemptedAt       DateTime  @default(now()) @map("attempted_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  message      SmsMessage   @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, messageId])
+  @@map("sms_delivery_attempts")
+}
+
 // ------------------------------------------------------------------------------
-// Developer Platform & Audit Trails
+// F. Developer Platform, OAuth 2.0, Webhooks & Outbox
 // ------------------------------------------------------------------------------
 
 model ApiKey {
@@ -527,12 +732,71 @@ model ApiKey {
   permissions    Json      @db.JsonB
   lastUsedAt     DateTime? @map("last_used_at") @db.Timestamptz(6)
   revokedAt      DateTime? @map("revoked_at") @db.Timestamptz(6)
+  rotatedFromId  String?   @map("rotated_from_id") @db.Uuid
   createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
 
   @@index([organizationId, revokedAt])
   @@map("api_keys")
+}
+
+model OAuthClient {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId   String   @map("organization_id") @db.Uuid
+  name             String   @db.VarChar(100)
+  clientSecretHash String?  @map("client_secret_hash") @db.VarChar(64)
+  redirectUris     Json     @map("redirect_uris") @db.JsonB
+  isPublic         Boolean  @default(true) @map("is_public")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization             @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  authCodes    OAuthAuthorizationCode[]
+  tokens       OAuthToken[]
+
+  @@index([organizationId])
+  @@map("oauth_clients")
+}
+
+model OAuthAuthorizationCode {
+  code                String    @id @db.VarChar(128)
+  clientId            String    @map("client_id") @db.Uuid
+  userId              String    @map("user_id") @db.Uuid
+  organizationId      String    @map("organization_id") @db.Uuid
+  redirectUri         String    @map("redirect_uri") @db.VarChar(500)
+  scopes              Json      @db.JsonB
+  codeChallenge       String    @map("code_challenge") @db.VarChar(128)
+  codeChallengeMethod String    @default("S256") @map("code_challenge_method") @db.VarChar(10)
+  expiresAt           DateTime  @map("expires_at") @db.Timestamptz(6)
+  usedAt              DateTime? @map("used_at") @db.Timestamptz(6)
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  client       OAuthClient  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, clientId])
+  @@map("oauth_authorization_codes")
+}
+
+model OAuthToken {
+  id                    String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  accessTokenHash       String    @unique @map("access_token_hash") @db.VarChar(64)
+  refreshTokenHash      String    @unique @map("refresh_token_hash") @db.VarChar(64)
+  clientId              String    @map("client_id") @db.Uuid
+  userId                String    @map("user_id") @db.Uuid
+  organizationId        String    @map("organization_id") @db.Uuid
+  scopes                Json      @db.JsonB
+  accessTokenExpiresAt  DateTime  @map("access_token_expires_at") @db.Timestamptz(6)
+  refreshTokenExpiresAt DateTime  @map("refresh_token_expires_at") @db.Timestamptz(6)
+  revokedAt             DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  client       OAuthClient  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, clientId])
+  @@map("oauth_tokens")
 }
 
 model WebhookEndpoint {
@@ -553,18 +817,24 @@ model WebhookEndpoint {
 }
 
 model WebhookDelivery {
-  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  endpointId     String   @map("endpoint_id") @db.Uuid
-  eventType      String   @map("event_type") @db.VarChar(100)
-  payload        Json     @db.JsonB
-  responseStatus Int?     @map("response_status")
-  responseBody   String?  @map("response_body") @db.Text
-  attemptNumber  Int      @default(1) @map("attempt_number")
-  deliveredAt    DateTime @default(now()) @map("delivered_at") @db.Timestamptz(6)
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  endpointId     String    @map("endpoint_id") @db.Uuid
+  outboxEventId  String?   @map("outbox_event_id") @db.Uuid
+  eventType      String    @map("event_type") @db.VarChar(100)
+  payload        Json      @db.JsonB
+  responseStatus Int?      @map("response_status")
+  responseBody   String?   @map("response_body") @db.Text
+  attemptNumber  Int       @default(1) @map("attempt_number")
+  status         String    @default("DELIVERED") @db.VarChar(20)
+  nextRetryAt    DateTime? @map("next_retry_at") @db.Timestamptz(6)
+  deliveredAt    DateTime  @default(now()) @map("delivered_at") @db.Timestamptz(6)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  endpoint WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+  organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  endpoint     WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
 
-  @@index([endpointId, deliveredAt(sort: Desc)])
+  @@index([organizationId, endpointId, deliveredAt(sort: Desc)])
   @@map("webhook_deliveries")
 }
 
@@ -572,7 +842,7 @@ model AuditLog {
   id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   organizationId String   @map("organization_id") @db.Uuid
   actorId        String   @map("actor_id") @db.Uuid
-  actorType      String   @map("actor_type") @db.VarChar(20) // USER, DEVICE, SYSTEM, API_KEY
+  actorType      String   @map("actor_type") @db.VarChar(20)
   action         String   @db.VarChar(100)
   resourceType   String   @map("resource_type") @db.VarChar(50)
   resourceId     String   @map("resource_id") @db.Uuid
@@ -590,52 +860,32 @@ model AuditLog {
 }
 
 model OutboxEvent {
-  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  organizationId String    @map("organization_id") @db.Uuid
-  eventType      String    @map("event_type") @db.VarChar(100)
-  payload        Json      @db.JsonB
-  isDelivered    Boolean   @default(false) @map("is_delivered")
-  attemptCount   Int       @default(0) @map("attempt_count")
-  lastAttemptAt  DateTime? @map("last_attempt_at") @db.Timestamptz(6)
-  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  eventType      String       @map("event_type") @db.VarChar(100)
+  payload        Json         @db.JsonB
+  status         OutboxStatus @default(PENDING)
+  isDelivered    Boolean      @default(false) @map("is_delivered")
+  attemptCount   Int          @default(0) @map("attempt_count")
+  maxAttempts    Int          @default(5) @map("max_attempts")
+  nextAttemptAt  DateTime     @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
+  lastAttemptAt  DateTime?    @map("last_attempt_at") @db.Timestamptz(6)
+  lockedAt       DateTime?    @map("locked_at") @db.Timestamptz(6)
+  lockedBy       String?      @map("locked_by") @db.VarChar(100)
+  lastError      String?      @map("last_error") @db.Text
+  deliveredAt    DateTime?    @map("delivered_at") @db.Timestamptz(6)
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
 
+  @@index([status, nextAttemptAt, createdAt])
   @@index([organizationId, isDelivered, createdAt])
   @@map("outbox_events")
 }
 
 // ------------------------------------------------------------------------------
-// Dynamic Subscription & Commercial Catalog
+// D. Dynamic Subscription & Commercial Catalog
 // ------------------------------------------------------------------------------
-
-enum ProductType {
-  PAYMENT_INTELLIGENCE
-  BULK_MESSAGING
-}
-
-enum BillingInterval {
-  MONTHLY
-  QUARTERLY
-  SEMI_ANNUALLY
-  ANNUALLY
-  CUSTOM
-}
-
-enum SubscriptionStatus {
-  TRIALING
-  ACTIVE
-  PAST_DUE
-  SUSPENDED
-  CANCELED
-  EXPIRED
-}
-
-enum EntitlementType {
-  NUMERIC_LIMIT
-  BOOLEAN_FLAG
-  TIERED_TIER
-}
 
 model CommercialProduct {
   id          String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
@@ -647,42 +897,42 @@ model CommercialProduct {
   createdAt   DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  plans       SubscriptionPlan[]
+  plans SubscriptionPlan[]
 
   @@map("commercial_products")
 }
 
 model SubscriptionPlan {
-  id          String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  productId   String             @map("product_id") @db.Uuid
-  code        String             @unique @db.VarChar(50)
-  name        String             @db.VarChar(100)
-  description String?            @db.Text
-  isPublic    Boolean            @default(true) @map("is_public")
-  createdAt   DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id          String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  productId   String            @map("product_id") @db.Uuid
+  code        String            @unique @db.VarChar(50)
+  name        String            @db.VarChar(100)
+  description String?           @db.Text
+  isPublic    Boolean           @default(true) @map("is_public")
+  createdAt   DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime          @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  product     CommercialProduct  @relation(fields: [productId], references: [id], onDelete: Restrict)
-  versions    PlanVersion[]
+  product  CommercialProduct @relation(fields: [productId], references: [id], onDelete: Restrict)
+  versions PlanVersion[]
 
   @@map("subscription_plans")
 }
 
 model PlanVersion {
-  id              String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  planId          String             @map("plan_id") @db.Uuid
-  versionNumber   Int                @map("version_number")
-  effectiveFrom   DateTime           @default(now()) @map("effective_from") @db.Timestamptz(6)
-  effectiveTo     DateTime?          @map("effective_to") @db.Timestamptz(6)
-  isActive        Boolean            @default(true) @map("is_active")
-  trialPeriodDays Int                @default(0) @map("trial_period_days")
-  gracePeriodDays Int                @default(3) @map("grace_period_days")
-  createdAt       DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  id              String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  planId          String                     @map("plan_id") @db.Uuid
+  versionNumber   Int                        @map("version_number")
+  effectiveFrom   DateTime                   @default(now()) @map("effective_from") @db.Timestamptz(6)
+  effectiveTo     DateTime?                  @map("effective_to") @db.Timestamptz(6)
+  isActive        Boolean                    @default(true) @map("is_active")
+  trialPeriodDays Int                        @default(0) @map("trial_period_days")
+  gracePeriodDays Int                        @default(3) @map("grace_period_days")
+  createdAt       DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  plan            SubscriptionPlan   @relation(fields: [planId], references: [id], onDelete: Restrict)
-  prices          PlanPrice[]
-  entitlements    PlanEntitlement[]
-  subscriptions   OrganizationSubscription[]
+  plan          SubscriptionPlan           @relation(fields: [planId], references: [id], onDelete: Restrict)
+  prices        PlanPrice[]
+  entitlements  PlanEntitlement[]
+  subscriptions OrganizationSubscription[]
 
   @@unique([planId, versionNumber])
   @@map("plan_versions")
@@ -697,7 +947,7 @@ model PlanPrice {
   isActive        Boolean         @default(true) @map("is_active")
   createdAt       DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  planVersion     PlanVersion     @relation(fields: [planVersionId], references: [id], onDelete: Cascade)
+  planVersion PlanVersion @relation(fields: [planVersionId], references: [id], onDelete: Cascade)
 
   @@unique([planVersionId, currency, billingInterval])
   @@map("plan_prices")
@@ -724,8 +974,8 @@ model PlanEntitlement {
   value         String            @db.VarChar(100)
   createdAt     DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  planVersion   PlanVersion       @relation(fields: [planVersionId], references: [id], onDelete: Cascade)
-  feature       FeatureDefinition @relation(fields: [featureKey], references: [key], onDelete: Restrict)
+  planVersion PlanVersion       @relation(fields: [planVersionId], references: [id], onDelete: Cascade)
+  feature     FeatureDefinition @relation(fields: [featureKey], references: [key], onDelete: Restrict)
 
   @@unique([planVersionId, featureKey])
   @@map("plan_entitlements")
@@ -747,33 +997,55 @@ model OrganizationSubscription {
   createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt          DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  organization       Organization       @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  planVersion        PlanVersion        @relation(fields: [planVersionId], references: [id], onDelete: Restrict)
-  invoices           SubscriptionBillingInvoice[]
+  organization Organization                 @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  planVersion  PlanVersion                  @relation(fields: [planVersionId], references: [id], onDelete: Restrict)
+  invoices     SubscriptionBillingInvoice[]
+  history      SubscriptionHistory[]
 
   @@index([organizationId, status])
   @@map("organization_subscriptions")
 }
 
-model SubscriptionBillingInvoice {
-  id                 String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  organizationId     String             @map("organization_id") @db.Uuid
-  subscriptionId     String             @map("subscription_id") @db.Uuid
-  invoiceNumber      String             @unique @map("invoice_number") @db.VarChar(50)
-  amountCents        BigInt             @map("amount_cents")
-  currency           String             @db.VarChar(3)
-  periodStart        DateTime           @map("period_start") @db.Timestamptz(6)
-  periodEnd          DateTime           @map("period_end") @db.Timestamptz(6)
-  isPaid             Boolean            @default(false) @map("is_paid")
-  paidAt             DateTime?          @map("paid_at") @db.Timestamptz(6)
-  paymentProviderRef String?            @map("payment_provider_ref") @db.VarChar(100)
-  createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+model SubscriptionHistory {
+  id              String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId  String              @map("organization_id") @db.Uuid
+  subscriptionId  String              @map("subscription_id") @db.Uuid
+  planVersionId   String              @map("plan_version_id") @db.Uuid
+  eventType       String              @map("event_type") @db.VarChar(50) // CREATED, UPGRADED, RENEWED, CANCELED
+  previousStatus  SubscriptionStatus? @map("previous_status")
+  newStatus       SubscriptionStatus  @map("new_status")
+  unitPriceCents  BigInt              @map("unit_price_cents")
+  currency        String              @db.VarChar(3)
+  billingInterval BillingInterval     @map("billing_interval")
+  actorId         String?             @map("actor_id") @db.Uuid
+  metadata        Json?               @db.JsonB
+  createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  organization       Organization             @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  subscription       OrganizationSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+  // Explicitly IMMUTABLE: no updated_at
+  organization Organization             @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  subscription OrganizationSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, subscriptionId, createdAt(sort: Desc)])
+  @@map("subscription_history")
+}
+
+model SubscriptionBillingInvoice {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId     String   @map("organization_id") @db.Uuid
+  subscriptionId     String   @map("subscription_id") @db.Uuid
+  invoiceNumber      String   @unique @map("invoice_number") @db.VarChar(50)
+  amountCents        BigInt   @map("amount_cents")
+  currency           String   @db.VarChar(3)
+  periodStart        DateTime @map("period_start") @db.Timestamptz(6)
+  periodEnd          DateTime @map("period_end") @db.Timestamptz(6)
+  isPaid             Boolean  @default(false) @map("is_paid")
+  paidAt             DateTime? @map("paid_at") @db.Timestamptz(6)
+  paymentProviderRef String?  @map("payment_provider_ref") @db.VarChar(100)
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  organization Organization             @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  subscription OrganizationSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
 
   @@index([organizationId, isPaid])
   @@map("subscription_billing_invoices")
 }
-
-

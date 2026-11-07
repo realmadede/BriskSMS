@@ -7,8 +7,9 @@ import {
   InvoiceStatus,
   DeviceStatus,
   DeviceIngestionMode,
+  VerificationMethod,
 } from '@brisksms/shared';
-import { dbStore, OrganizationRecord, DeviceRecord } from '../src/core/store.js';
+import { dbStore } from '../src/core/store.js';
 import { IngestionService } from '../src/modules/ingestion/ingestion.service.js';
 import { ReconciliationService } from '../src/modules/reconciliation/reconciliation.service.js';
 
@@ -18,27 +19,22 @@ describe('Universal Ingestion & Financial Reconciliation Engine', () => {
   const orgId = randomUUID();
   const deviceId = randomUUID();
 
-  beforeEach(() => {
-    dbStore.reset();
+  beforeEach(async () => {
+    await dbStore.reset();
     reconciliationService = new ReconciliationService();
     ingestionService = new IngestionService(reconciliationService);
 
-    // Seed test organization
-    const org: OrganizationRecord = {
+    await dbStore.seedOrganizationDirect({
       id: orgId,
       name: 'Alpha Traders Ltd',
-      slug: 'alpha-traders',
-      countryCode: 'TZ',
+      slug: `alpha-traders-${orgId.slice(0, 8)}`,
+      countryCode: 'TZA',
       timezone: 'Africa/Dar_es_Salaam',
       planTier: 'ENTERPRISE',
       isActive: true,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-    dbStore.organizations.set(orgId, org);
+    });
 
-    // Seed active Android device
-    const device: DeviceRecord = {
+    await dbStore.registerDevice({
       id: deviceId,
       organizationId: orgId,
       label: 'Samsung Galaxy A54 Relay',
@@ -49,18 +45,13 @@ describe('Universal Ingestion & Financial Reconciliation Engine', () => {
       publicKeyPem: 'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A...',
       status: DeviceStatus.ACTIVE,
       ingestionMode: DeviceIngestionMode.NOTIFICATION_LISTENER,
-      deviceTokenHash: 'token_hash_a54',
-      lastSyncAt: new Date(),
-      revokedAt: null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-    dbStore.devices.set(deviceId, device);
+      tokenHash: `token_hash_${deviceId}`,
+    });
   });
 
-  it('ingests M-Pesa notification and achieves Tier 1 Exact Reference reconciliation', async () => {
+  it('ingests M-Pesa notification into MATCHED candidate state (never settling invoice on notification alone) and updates invoice balance only upon independent/manual verification', async () => {
     // 1. Create open invoice
-    const invoice = reconciliationService.createInvoice(orgId, {
+    const invoice = await reconciliationService.createInvoice(orgId, {
       referenceNumber: 'QA8921KL90',
       totalAmountCents: 15000000n, // 150,000 TZS
       customerPhone: '+255754000111',
@@ -87,20 +78,36 @@ describe('Universal Ingestion & Financial Reconciliation Engine', () => {
     assert.equal(ack.state, TransactionState.MATCHED);
     assert.equal(ack.matchedInvoiceId, invoice.id);
 
-    // 3. Verify invoice is fully paid and ledger settled
-    const updatedInvoice = reconciliationService.findInvoiceById(orgId, invoice.id);
-    assert.equal(updatedInvoice?.status, InvoiceStatus.PAID);
-    assert.equal(updatedInvoice?.paidAmountCents, 15000000n);
+    // 3. CRITICAL INVARIANT: Notification alone must NOT mark the invoice PAID or payment VERIFIED
+    const invoiceBeforeVerification = await reconciliationService.findInvoiceById(orgId, invoice.id);
+    assert.equal(invoiceBeforeVerification?.status, InvoiceStatus.UNPAID);
+    assert.equal(invoiceBeforeVerification?.paidAmountCents, 0n);
 
-    // 4. Verify outbox events were emitted
-    const outbox = dbStore.outboxEvents.filter((e) => e.organizationId === orgId);
+    // 4. Independent/manual verification transitions payment to VERIFIED and settles the invoice balance
+    const verificationResult = await reconciliationService.verifyPayment(orgId, {
+      paymentId: ack.paymentId!,
+      invoiceId: invoice.id,
+      verificationMethod: VerificationMethod.INDEPENDENT_PROVIDER_QUERY,
+      externalVerificationRef: 'VODACOM-STMT-QA8921KL90',
+      notes: 'Verified against Vodacom merchant statement',
+    });
+
+    assert.equal(verificationResult.payment.state, TransactionState.VERIFIED);
+    assert.equal(verificationResult.invoice.status, InvoiceStatus.PAID);
+    assert.equal(verificationResult.invoice.paidAmountCents, 15000000n);
+    assert.equal(verificationResult.fulfillmentEligible, true);
+
+    // 5. Verify outbox events were emitted across the full lifecycle
+    const outbox = await dbStore.getOutboxEventsByOrg(orgId);
     assert.equal(outbox.some((e) => e.eventType === 'payment.evidence.received'), true);
     assert.equal(outbox.some((e) => e.eventType === 'payment.matched'), true);
+    assert.equal(outbox.some((e) => e.eventType === 'payment.verified'), true);
     assert.equal(outbox.some((e) => e.eventType === 'invoice.paid'), true);
+    assert.equal(outbox.some((e) => e.eventType === 'fulfillment.eligible'), true);
   });
 
   it('rejects duplicate payment notifications idempotently without duplicate settlement', async () => {
-    reconciliationService.createInvoice(orgId, {
+    await reconciliationService.createInvoice(orgId, {
       referenceNumber: 'QA8921KL90',
       totalAmountCents: 15000000n,
     });
@@ -133,23 +140,22 @@ describe('Universal Ingestion & Financial Reconciliation Engine', () => {
     assert.equal(ack2.paymentId, ack1.paymentId);
 
     // Verify raw evidence log is append-only (persists both attempts for forensic audit)
-    const rawLogs = dbStore.rawEvidences.filter((e) => e.organizationId === orgId);
+    const rawLogs = await dbStore.getRawEvidencesByOrg(orgId);
     assert.equal(rawLogs.length, 2);
 
     // Verify normalized payment was NOT duplicated
-    const payments = dbStore.normalizedPayments;
-    assert.equal(payments.size, 1);
+    const payments = await dbStore.getNormalizedPaymentsByOrg(orgId);
+    assert.equal(payments.length, 1);
   });
 
   it('performs Tier 2 customer phone heuristic matching when reference is not in memo', async () => {
-    const invoice = reconciliationService.createInvoice(orgId, {
+    const invoice = await reconciliationService.createInvoice(orgId, {
       referenceNumber: 'INV-OCT-9901',
       totalAmountCents: 5000000n, // 50,000 TZS
       customerPhone: '+255713888999',
       customerName: 'Amina Salum',
     });
 
-    // Notification contains different provider reference (Mixx 98765432101), but matching customer phone & exact balance
     const rawPayload = 'Umepokea Tsh 50,000 kutoka kwa AMINA SALUM (255713888999). Kumbukumbu namba: 98765432101. Tarehe 05/11/2026 15:45.';
 
     const ack = await ingestionService.ingestEvidence({
@@ -165,12 +171,18 @@ describe('Universal Ingestion & Financial Reconciliation Engine', () => {
     assert.equal(ack.state, TransactionState.MATCHED);
     assert.equal(ack.matchedInvoiceId, invoice.id);
 
-    const updatedInvoice = reconciliationService.findInvoiceById(orgId, invoice.id);
+    // Verify candidate match after independent verification settles invoice
+    await reconciliationService.verifyPayment(orgId, {
+      paymentId: ack.paymentId!,
+      verificationMethod: VerificationMethod.MANUAL_FINANCE_APPROVAL,
+    });
+
+    const updatedInvoice = await reconciliationService.findInvoiceById(orgId, invoice.id);
     assert.equal(updatedInvoice?.status, InvoiceStatus.PAID);
   });
 
-  it('handles underpayment by marking invoice PARTIALLY_PAID', async () => {
-    const invoice = reconciliationService.createInvoice(orgId, {
+  it('handles underpayment by marking candidate MATCHED and transitioning invoice to PARTIALLY_PAID upon verification', async () => {
+    const invoice = await reconciliationService.createInvoice(orgId, {
       referenceNumber: 'QA44DD55EE',
       totalAmountCents: 10000000n, // 100,000 TZS
     });
@@ -189,13 +201,18 @@ describe('Universal Ingestion & Financial Reconciliation Engine', () => {
 
     assert.equal(ack.state, TransactionState.MATCHED);
 
-    const updatedInvoice = reconciliationService.findInvoiceById(orgId, invoice.id);
+    await reconciliationService.verifyPayment(orgId, {
+      paymentId: ack.paymentId!,
+      verificationMethod: VerificationMethod.MANUAL_FINANCE_APPROVAL,
+    });
+
+    const updatedInvoice = await reconciliationService.findInvoiceById(orgId, invoice.id);
     assert.equal(updatedInvoice?.status, InvoiceStatus.PARTIALLY_PAID);
     assert.equal(updatedInvoice?.paidAmountCents, 4000000n);
   });
 
   it('routes overpayment to REVIEW_REQUIRED without silent settlement', async () => {
-    const invoice = reconciliationService.createInvoice(orgId, {
+    const invoice = await reconciliationService.createInvoice(orgId, {
       referenceNumber: 'QA66FF77GG',
       totalAmountCents: 3000000n, // 30,000 TZS
     });
@@ -214,28 +231,27 @@ describe('Universal Ingestion & Financial Reconciliation Engine', () => {
 
     assert.equal(ack.state, TransactionState.REVIEW_REQUIRED);
 
-    const updatedInvoice = reconciliationService.findInvoiceById(orgId, invoice.id);
-    assert.equal(updatedInvoice?.status, InvoiceStatus.OVERPAID);
+    // Invoice remains UNPAID until a human finance reviewer explicitly verifies/allocates the overpayment
+    const invoiceBeforeReview = await reconciliationService.findInvoiceById(orgId, invoice.id);
+    assert.equal(invoiceBeforeReview?.status, InvoiceStatus.UNPAID);
 
     // Verify outbox emitted review required event
-    const outbox = dbStore.outboxEvents.filter((e) => e.organizationId === orgId);
+    const outbox = await dbStore.getOutboxEventsByOrg(orgId);
     assert.equal(outbox.some((e) => e.eventType === 'payment.needs_review'), true);
   });
 
   it('routes ambiguous multiple open invoices for the same phone to REVIEW_REQUIRED', async () => {
-    // Two distinct open invoices for the same customer phone
-    reconciliationService.createInvoice(orgId, {
+    await reconciliationService.createInvoice(orgId, {
       referenceNumber: 'INV-A-101',
       totalAmountCents: 2000000n,
       customerPhone: '+255754999000',
     });
-    reconciliationService.createInvoice(orgId, {
+    await reconciliationService.createInvoice(orgId, {
       referenceNumber: 'INV-B-202',
       totalAmountCents: 2000000n,
       customerPhone: '+255754999000',
     });
 
-    // Notification does not specify invoice reference
     const rawPayload = 'QA88HH99II Imethibitishwa. Umepokea Tsh20,000 kutoka kwa Hamisi Ally 255754999000 tarehe 05/11/2026 saa 12:00.';
 
     const ack = await ingestionService.ingestEvidence({
@@ -247,7 +263,6 @@ describe('Universal Ingestion & Financial Reconciliation Engine', () => {
       deviceTimestamp: new Date('2026-11-05T12:00:00Z'),
     });
 
-    // Strict non-guesswork rule: Must route to REVIEW_REQUIRED
     assert.equal(ack.state, TransactionState.REVIEW_REQUIRED);
     assert.equal(ack.matchedInvoiceId, undefined);
   });

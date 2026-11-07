@@ -6,24 +6,26 @@ import {
   EntitlementCheckResult,
 } from '@brisksms/shared';
 import { dbStore } from '../../core/store.js';
+import { SqlExecutor, sql } from '@brisksms/db';
 
 export class EntitlementService {
   /**
-   * Resolves the full feature entitlement dictionary for an organization.
+   * Resolves the full feature entitlement dictionary for an organization from PostgreSQL.
    * If the organization has no active subscription, returns default values from FeatureDefinitions.
    */
-  getEntitlements(organizationId: string): Record<string, string> {
-    const sub = dbStore.getOrganizationSubscription(organizationId);
-    const result: Record<string, string> = {};
+  async getEntitlements(organizationId: string, tx: SqlExecutor = sql): Promise<Record<string, string>> {
+    const [featureDefs, sub] = await Promise.all([
+      dbStore.getFeatureDefinitions(tx),
+      dbStore.getOrganizationSubscription(organizationId, tx),
+    ]);
 
-    // 1. Populate system defaults from FeatureDefinitions
-    for (const feat of dbStore.featureDefinitions.values()) {
+    const result: Record<string, string> = {};
+    for (const feat of featureDefs) {
       result[feat.key] = feat.defaultValue;
     }
 
-    // 2. If organization has an active/trialing subscription, override with configured plan version values
     if (sub && (sub.status === SubscriptionStatus.ACTIVE || sub.status === SubscriptionStatus.TRIALING)) {
-      const planEntitlements = dbStore.getPlanEntitlements(sub.planVersionId);
+      const planEntitlements = await dbStore.getPlanEntitlements(sub.planVersionId, tx);
       for (const ent of planEntitlements) {
         result[ent.featureKey] = ent.value;
       }
@@ -35,8 +37,8 @@ export class EntitlementService {
   /**
    * Evaluates a boolean feature flag for an organization
    */
-  isFeatureEnabled(organizationId: string, featureKey: string): boolean {
-    const entitlements = this.getEntitlements(organizationId);
+  async isFeatureEnabled(organizationId: string, featureKey: string, tx: SqlExecutor = sql): Promise<boolean> {
+    const entitlements = await this.getEntitlements(organizationId, tx);
     const val = entitlements[featureKey];
     return val === 'true' || val === '1';
   }
@@ -44,8 +46,8 @@ export class EntitlementService {
   /**
    * Asserts that a boolean feature is enabled, throwing FeatureDisabledError if not
    */
-  assertFeatureEnabled(organizationId: string, featureKey: string): void {
-    if (!this.isFeatureEnabled(organizationId, featureKey)) {
+  async assertFeatureEnabled(organizationId: string, featureKey: string, tx: SqlExecutor = sql): Promise<void> {
+    if (!(await this.isFeatureEnabled(organizationId, featureKey, tx))) {
       throw new FeatureDisabledError(featureKey);
     }
   }
@@ -53,8 +55,13 @@ export class EntitlementService {
   /**
    * Evaluates a numeric quota limit against current usage
    */
-  checkNumericLimit(organizationId: string, featureKey: string, currentUsage: number): EntitlementCheckResult {
-    const entitlements = this.getEntitlements(organizationId);
+  async checkNumericLimit(
+    organizationId: string,
+    featureKey: string,
+    currentUsage: number,
+    tx: SqlExecutor = sql,
+  ): Promise<EntitlementCheckResult> {
+    const entitlements = await this.getEntitlements(organizationId, tx);
     const rawLimit = entitlements[featureKey];
     const limit = rawLimit !== undefined ? parseInt(rawLimit, 10) : 1;
     const allowed = currentUsage < limit;
@@ -72,10 +79,10 @@ export class EntitlementService {
   /**
    * Enforces device pairing quota dynamically based on configured plan limit
    */
-  enforceDeviceQuota(organizationId: string): void {
-    const devices = dbStore.getOrgDevices(organizationId);
+  async enforceDeviceQuota(organizationId: string, tx: SqlExecutor = sql): Promise<void> {
+    const devices = await dbStore.getOrgDevices(organizationId, tx);
     const activeCount = devices.filter((d) => d.status === 'ACTIVE' || d.status === 'PENDING_PAIRING').length;
-    const check = this.checkNumericLimit(organizationId, FeatureKey.MAX_CONNECTED_DEVICES, activeCount);
+    const check = await this.checkNumericLimit(organizationId, FeatureKey.MAX_CONNECTED_DEVICES, activeCount, tx);
 
     if (!check.allowed) {
       throw new QuotaExceededError('connected Android devices', check.limit ?? 1);
@@ -85,15 +92,9 @@ export class EntitlementService {
   /**
    * Enforces organization member quota dynamically based on configured plan limit
    */
-  enforceMemberQuota(organizationId: string): void {
-    let memberCount = 0;
-    for (const mem of dbStore.memberships.values()) {
-      if (mem.organizationId === organizationId) {
-        memberCount++;
-      }
-    }
-
-    const check = this.checkNumericLimit(organizationId, FeatureKey.MAX_ORGANIZATION_MEMBERS, memberCount);
+  async enforceMemberQuota(organizationId: string, tx: SqlExecutor = sql): Promise<void> {
+    const memberCount = await dbStore.countOrgMembers(organizationId, tx);
+    const check = await this.checkNumericLimit(organizationId, FeatureKey.MAX_ORGANIZATION_MEMBERS, memberCount, tx);
     if (!check.allowed) {
       throw new QuotaExceededError('organization members', check.limit ?? 2);
     }

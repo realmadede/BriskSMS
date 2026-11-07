@@ -1,9 +1,22 @@
 import { RouteRequest, HttpException } from './http.js';
 import { verifyJwt } from './crypto.js';
 import { UserRole } from '@brisksms/shared';
+import { sql } from '@brisksms/db';
 
-// In-memory token revocation blacklist (JTI -> expiration)
+// Fast in-process cache synchronized with PostgreSQL `revoked_sessions` table
 export const tokenBlacklist = new Set<string>();
+
+export async function isTokenRevoked(jti: string): Promise<boolean> {
+  if (tokenBlacklist.has(jti)) return true;
+  const rows = await sql<{ jti: string }>`
+    SELECT "jti" FROM "revoked_sessions" WHERE "jti" = ${jti} AND "expires_at" > NOW() LIMIT 1
+  `;
+  if (rows.length > 0) {
+    tokenBlacklist.add(jti);
+    return true;
+  }
+  return false;
+}
 
 /**
  * Extracts and verifies JWT from Authorization header

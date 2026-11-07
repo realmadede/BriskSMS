@@ -2,18 +2,24 @@
   "name": "@brisksms/db",
   "version": "1.0.0",
   "private": true,
-  "description": "Database schema, migrations, and Prisma client for BriskSMS",
+  "description": "Database schema, migrations, and PostgreSQL client for BriskSMS",
   "author": "BriskSMS Team",
   "license": "SEE LICENSE IN LICENSE",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {
     "build": "bun build --target node src/index.ts --outdir dist",
+    "migrate": "bun run src/cli.ts migrate",
+    "seed": "bun run src/cli.ts seed",
+    "reset:dev": "bun run src/cli.ts reset-dev",
+    "status": "bun run src/cli.ts status",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev"
+    "prisma:migrate": "prisma migrate deploy"
+  },
+  "dependencies": {
+    "@brisksms/shared": "*"
   },
   "devDependencies": {
     "@brisksms/config": "*"
   }
 }
-

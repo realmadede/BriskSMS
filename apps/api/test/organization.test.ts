@@ -6,8 +6,8 @@ import { dbStore } from '../src/core/store.js';
 import { UserRole } from '@brisksms/shared';
 
 describe('Phase 1: OrganizationModule & Multi-Tenancy Isolation', () => {
-  beforeEach(() => {
-    dbStore.reset();
+  beforeEach(async () => {
+    await dbStore.reset();
   });
 
   it('should provision a new organization and assign the creator as OWNER', async () => {

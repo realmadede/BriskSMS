@@ -27,9 +27,11 @@ export interface IngestionAckResult {
   deduplicationHash?: string;
   status: 'OBSERVED' | 'DUPLICATE' | 'PARSE_FAILED';
   matchedInvoiceId?: string | null;
+  candidateInvoiceId?: string | null;
   paymentId?: string;
   amountCents?: string;
   reference?: string;
+  parserVersion?: string;
   state?: TransactionState;
 }
 
@@ -50,8 +52,12 @@ export interface NormalizedPaymentRecordDto {
   recipientAccount: string | null;
   customerMemo: string | null;
   providerTimestamp: Date;
+  parserVersion?: string;
   state: TransactionState;
   deduplicationHash: string;
+  candidateInvoiceId?: string | null;
   matchedInvoiceId: string | null;
+  verifiedAt?: Date | null;
+  verifiedById?: string | null;
   createdAt: Date;
 }

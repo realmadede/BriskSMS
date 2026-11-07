@@ -10,7 +10,7 @@ describe('Phase 1: DeviceModule & Cryptographic Pairing Flow', () => {
   let ownerUserId: string;
 
   beforeEach(async () => {
-    dbStore.reset();
+    await dbStore.reset();
     const userRes = await authService.register({
       email: 'isp-owner@mwanza.co.tz',
       password: 'StrongPassword123!',
@@ -52,7 +52,7 @@ describe('Phase 1: DeviceModule & Cryptographic Pairing Flow', () => {
     assert.ok(pairResult.deviceToken.startsWith('bsk_dev_'));
 
     // Verify device in store
-    const device = dbStore.getDeviceById(pairResult.deviceId);
+    const device = await dbStore.getDeviceById(pairResult.deviceId);
     assert.ok(device);
     assert.equal(device?.status, DeviceStatus.ACTIVE);
     assert.equal(device?.deviceModel, 'SM-S911B');
@@ -95,7 +95,7 @@ describe('Phase 1: DeviceModule & Cryptographic Pairing Flow', () => {
     assert.equal(telemetry.signalStrengthDbm, -65);
 
     // Verify device lastSyncAt was updated
-    const device = dbStore.getDeviceById(pairResult.deviceId);
+    const device = await dbStore.getDeviceById(pairResult.deviceId);
     assert.ok(device?.lastSyncAt);
   });
 

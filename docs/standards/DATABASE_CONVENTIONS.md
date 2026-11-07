@@ -56,15 +56,40 @@ updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 
 ---
 
-## 5. Migration Rules
+## 5. Migration Rules & CLI Workflow
 
-1. **Forward-Only Migrations:** All schema changes must be committed via versioned Prisma migrations (`prisma migrate dev`). Never edit previous migration files.
-2. **Zero-Downtime Schema Evolution:**
+1. **Forward-Only Versioned Migrations:** All schema changes are committed via version-controlled SQL migrations under `packages/db/prisma/migrations/` and tracked in the PostgreSQL `_prisma_migrations` table with SHA-256 checksums (`20261107000000_init_foundation`). Never edit applied migration files.
+2. **Database Lifecycle Commands:**
+   - `npm run db:migrate` — Applies pending SQL migrations idempotently inside ACID transactions and records SHA-256 checksums in `_prisma_migrations`.
+   - `npm run db:seed` — Idempotently seeds the dynamic commercial catalog (`PROD_PAYMENT_INTELLIGENCE`, `PROD_BULK_MESSAGING`, `PLAN_STARTER`, `PLAN_GROWTH`, `PLAN_ENTERPRISE`, feature definitions, and plan entitlements).
+   - `npm run db:status` — Reports PostgreSQL connectivity, latency, and applied migrations.
+   - `npm run db:reset:dev` — Truncates development/test tables and re-seeds the commercial catalog (strictly blocked when `NODE_ENV=production`).
+3. **Zero-Downtime Schema Evolution:**
    - Never rename or drop a column in a single release.
    - Follow the Expand-Contract pattern:
      1. Release 1: Add new nullable column.
      2. Release 2: Double-write to both columns and backfill existing rows.
      3. Release 3: Switch reads to new column.
      4. Release 4: Drop old column.
-3. **Destructive Operations:** Dropping tables or executing destructive data migrations requires explicit technical lead review and a verified database backup snapshot.
+4. **Destructive Operations:** Dropping tables or executing destructive data migrations requires explicit technical lead review and a verified database backup snapshot.
+
+---
+
+## 6. Database-Level Immutability & Financial Integrity Enforcement
+
+1. **Append-Only Immutability Triggers (`prevent_immutable_record_mutation()`):**
+   - PostgreSQL `BEFORE UPDATE OR DELETE` triggers block any modification or deletion on:
+     - `raw_payment_evidence`
+     - `payment_verifications`
+     - `messaging_credit_ledger`
+     - `subscription_history`
+     - `audit_logs`
+   - Any attempt to `UPDATE` or `DELETE` rows in these tables raises `IMMUTABLE_RECORD_VIOLATION` (`23514`).
+2. **Historical Billing Snapshot Protection (`prevent_billing_invoice_snapshot_mutation()`):**
+   - `subscription_billing_invoices` protects `plan_code_snapshot`, `version_number_snapshot`, `amount_cents`, `currency`, `billing_interval`, `entitlements_snapshot`, and `organization_id` from ever being altered after invoice issuance.
+3. **Financial Retention (`ON DELETE RESTRICT`):**
+   - Organizations owning financial or audit records (`invoices`, `raw_payment_evidence`, `normalized_payments`, `payment_verifications`, `messaging_accounts`, `messaging_credit_ledger`, `organization_subscriptions`, `subscription_billing_invoices`, `audit_logs`) cannot be deleted via `ON DELETE RESTRICT`.
+4. **Transactional Outbox & Redis Queue Reliability:**
+   - All domain events (`payment.evidence.received`, `payment.matched`, `payment.verified`, `invoice.paid`, `fulfillment.eligible`, `sms.status.updated`) are inserted into `outbox_events` inside the **same PostgreSQL ACID transaction** as the business state mutation.
+   - `OutboxDispatcher` (`@brisksms/worker`) polls `outbox_events` using `SELECT ... FOR UPDATE SKIP LOCKED` and dispatches jobs to Redis-backed queues (`webhook-delivery`, `payment-processing`, `sms-campaign`, `sms-delivery-retry`, `maintenance-cleanup`) with deterministic `jobId` deduplication, exponential backoff, and Dead-Letter Queue (`dlq`) isolation.
 

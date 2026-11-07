@@ -5,8 +5,8 @@ import { dbStore } from '../src/core/store.js';
 import { verifyJwt } from '../src/core/crypto.js';
 
 describe('Phase 1: AuthModule & Identity Lifecycle', () => {
-  beforeEach(() => {
-    dbStore.reset();
+  beforeEach(async () => {
+    await dbStore.reset();
   });
 
   it('should successfully register a new user with hashed password and return access/refresh tokens', async () => {
@@ -30,7 +30,7 @@ describe('Phase 1: AuthModule & Identity Lifecycle', () => {
     assert.equal(decoded?.role, 'OWNER');
 
     // Verify password is not plaintext
-    const storedUser = dbStore.findUserById(result.user.id);
+    const storedUser = await dbStore.findUserById(result.user.id);
     assert.ok(storedUser?.passwordHash.startsWith('scrypt:'));
     assert.ok(!storedUser?.passwordHash.includes('StrongPassword123!'));
   });
@@ -121,7 +121,7 @@ describe('Phase 1: AuthModule & Identity Lifecycle', () => {
 
     await authService.verifyEmail(reg.user.id);
 
-    const updatedUser = dbStore.findUserById(reg.user.id);
+    const updatedUser = await dbStore.findUserById(reg.user.id);
     assert.equal(updatedUser?.isEmailVerified, true);
   });
 });

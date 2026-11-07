@@ -3,6 +3,7 @@ import { DeviceStatus, DeviceIngestionMode, UserRole } from '@brisksms/shared';
 import { HttpException } from '../../core/http.js';
 import { generateSecureToken, hashToken } from '../../core/crypto.js';
 import { entitlementService } from '../subscription/entitlement.service.js';
+import { withTransaction } from '@brisksms/db';
 
 export interface PairingTokenResponse {
   pairingToken: string;
@@ -39,20 +40,19 @@ export interface TelemetryDto {
 
 export class DeviceService {
   async createPairingToken(organizationId: string, actorUserId: string): Promise<PairingTokenResponse> {
-    const mem = dbStore.getMembership(organizationId, actorUserId);
+    const mem = await dbStore.getMembership(organizationId, actorUserId);
     if (!mem || ![UserRole.OWNER, UserRole.ADMIN].includes(mem.role)) {
       throw new HttpException(403, 'INSUFFICIENT_PERMISSIONS', 'Only Owners and Admins can pair new Android devices');
     }
 
-    // Dynamic Entitlement: Prevent issuing pairing token if tenant exceeds configured device quota
-    entitlementService.enforceDeviceQuota(organizationId);
+    await entitlementService.enforceDeviceQuota(organizationId);
 
     const rawToken = generateSecureToken('bsk_pair', 24);
-    const pairingRecord = dbStore.createPairingToken({
+    const pairingRecord = await dbStore.createPairingToken({
       organizationId,
       createdById: actorUserId,
       token: rawToken,
-      ttlSeconds: 300, // 5 minutes validity
+      ttlSeconds: 300,
     });
 
     const qrPayload = JSON.stringify({
@@ -75,39 +75,55 @@ export class DeviceService {
       throw new HttpException(400, 'INVALID_PAYLOAD', 'enrollmentToken, publicKeyPem, and deviceModel are required');
     }
 
-    const tokenRecord = dbStore.getPairingToken(dto.enrollmentToken);
-    if (!tokenRecord) {
-      throw new HttpException(401, 'INVALID_PAIRING_TOKEN', 'Pairing token is invalid, already used, or expired');
-    }
+    return withTransaction(async (tx) => {
+      // Lock the pairing token row to enforce atomic single-use semantics
+      const tokenRows = await tx`
+        SELECT * FROM "pairing_tokens"
+        WHERE "token" = ${dto.enrollmentToken}
+        FOR UPDATE
+      `;
+      const tokenRecord = tokenRows[0];
 
-    // Mark pairing token as consumed
-    tokenRecord.usedAt = new Date();
+      if (!tokenRecord || tokenRecord.used_at !== null || new Date(tokenRecord.expires_at) <= new Date()) {
+        throw new HttpException(401, 'INVALID_PAIRING_TOKEN', 'Pairing token is invalid, already used, or expired');
+      }
 
-    const rawDeviceToken = generateSecureToken('bsk_dev', 32);
-    const tokenHash = hashToken(rawDeviceToken);
+      const rawDeviceToken = generateSecureToken('bsk_dev', 32);
+      const tokenHash = hashToken(rawDeviceToken);
 
-    const device = dbStore.registerDevice({
-      organizationId: tokenRecord.organizationId,
-      label: dto.label || `${dto.manufacturer || 'Android'} ${dto.deviceModel}`,
-      deviceModel: dto.deviceModel,
-      manufacturer: dto.manufacturer || 'Generic',
-      androidVersion: dto.androidVersion || '14',
-      appVersion: dto.appVersion || '1.0.0',
-      publicKeyPem: dto.publicKeyPem,
-      ingestionMode: dto.ingestionMode || DeviceIngestionMode.NOTIFICATION_LISTENER,
-      tokenHash,
+      const device = await dbStore.registerDevice(
+        {
+          organizationId: tokenRecord.organization_id,
+          label: dto.label || `${dto.manufacturer || 'Android'} ${dto.deviceModel}`,
+          deviceModel: dto.deviceModel,
+          manufacturer: dto.manufacturer || 'Generic',
+          androidVersion: dto.androidVersion || '14',
+          appVersion: dto.appVersion || '1.0.0',
+          publicKeyPem: dto.publicKeyPem,
+          ingestionMode: dto.ingestionMode || DeviceIngestionMode.NOTIFICATION_LISTENER,
+          tokenHash,
+        },
+        tx,
+      );
+
+      // Mark pairing token as consumed and bind to the registered device
+      await tx`
+        UPDATE "pairing_tokens"
+        SET "used_at" = NOW(), "used_by_device_id" = ${device.id}
+        WHERE "id" = ${tokenRecord.id}
+      `;
+
+      return {
+        deviceId: device.id,
+        organizationId: device.organizationId,
+        deviceToken: rawDeviceToken,
+        syncIntervalSeconds: 30,
+      };
     });
-
-    return {
-      deviceId: device.id,
-      organizationId: device.organizationId,
-      deviceToken: rawDeviceToken,
-      syncIntervalSeconds: 30,
-    };
   }
 
   async listDevices(organizationId: string, actorUserId: string): Promise<DeviceRecord[]> {
-    const mem = dbStore.getMembership(organizationId, actorUserId);
+    const mem = await dbStore.getMembership(organizationId, actorUserId);
     if (!mem) {
       throw new HttpException(403, 'FORBIDDEN', 'No access to organization devices');
     }
@@ -115,23 +131,23 @@ export class DeviceService {
   }
 
   async getDevice(deviceId: string, organizationId: string, actorUserId: string): Promise<{ device: DeviceRecord; telemetryHistory: DeviceTelemetryRecord[] }> {
-    const mem = dbStore.getMembership(organizationId, actorUserId);
+    const mem = await dbStore.getMembership(organizationId, actorUserId);
     if (!mem) {
       throw new HttpException(403, 'FORBIDDEN', 'No access to organization devices');
     }
 
-    const device = dbStore.getDeviceById(deviceId, organizationId);
+    const device = await dbStore.getDeviceById(deviceId, organizationId);
     if (!device) {
       throw new HttpException(404, 'DEVICE_NOT_FOUND', 'Device not found in this organization');
     }
 
-    const telemetryHistory = dbStore.getDeviceTelemetry(deviceId, 20);
+    const telemetryHistory = await dbStore.getDeviceTelemetry(deviceId, 20);
     return { device, telemetryHistory };
   }
 
   async recordTelemetry(deviceId: string, deviceToken: string, dto: TelemetryDto): Promise<DeviceTelemetryRecord> {
     const tokenHash = hashToken(deviceToken);
-    const device = dbStore.getDeviceByTokenHash(tokenHash);
+    const device = await dbStore.getDeviceByTokenHash(tokenHash);
 
     if (!device || device.id !== deviceId) {
       throw new HttpException(401, 'INVALID_DEVICE_TOKEN', 'Device authentication failed');
@@ -152,7 +168,7 @@ export class DeviceService {
   }
 
   async revokeDevice(deviceId: string, organizationId: string, actorUserId: string): Promise<DeviceRecord> {
-    const mem = dbStore.getMembership(organizationId, actorUserId);
+    const mem = await dbStore.getMembership(organizationId, actorUserId);
     if (!mem || ![UserRole.OWNER, UserRole.ADMIN].includes(mem.role)) {
       throw new HttpException(403, 'INSUFFICIENT_PERMISSIONS', 'Only Owners and Admins can revoke devices');
     }

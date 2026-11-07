@@ -5,6 +5,12 @@ export enum CreditLedgerEntryType {
   /** Merchant purchased an SMS credit package */
   PURCHASE = 'PURCHASE',
 
+  /** Credits reserved prior to outbound campaign or message dispatch */
+  RESERVATION = 'RESERVATION',
+
+  /** Unused reserved credits released back to available balance */
+  RELEASE = 'RELEASE',
+
   /** Credits atomically deducted for outbound SMS dispatches */
   USAGE_DEDUCTION = 'USAGE_DEDUCTION',
 

@@ -6,8 +6,8 @@ import { catalogService } from './catalog.service.js';
 import { subscriptionService } from './subscription.service.js';
 import { entitlementService } from './entitlement.service.js';
 
-function assertOrgMemberRole(orgId: string, userId: string, allowedRoles: UserRole[]): void {
-  const membership = dbStore.getMembership(orgId, userId);
+async function assertOrgMemberRole(orgId: string, userId: string, allowedRoles: UserRole[]): Promise<void> {
+  const membership = await dbStore.getMembership(orgId, userId);
   if (!membership) {
     throw new HttpException(403, 'FORBIDDEN', 'You are not a member of this organization');
   }
@@ -23,7 +23,7 @@ function assertOrgMemberRole(orgId: string, userId: string, allowedRoles: UserRo
 export function registerSubscriptionRoutes(router: Router): void {
   // 1. Dynamic Public Catalog (Public, No Auth Needed)
   router.get('/v1/catalog/public', async (): Promise<ApiResponse> => {
-    const products = catalogService.getPublicCatalog();
+    const products = await catalogService.getPublicCatalog();
     return {
       success: true,
       data: { products },
@@ -35,7 +35,7 @@ export function registerSubscriptionRoutes(router: Router): void {
     authenticate(req);
     const userId = req.context.userId!;
     const orgId = req.params.orgId || '';
-    assertOrgMemberRole(orgId, userId, [
+    await assertOrgMemberRole(orgId, userId, [
       UserRole.OWNER,
       UserRole.ADMIN,
       UserRole.FINANCE,
@@ -43,7 +43,7 @@ export function registerSubscriptionRoutes(router: Router): void {
       UserRole.DEVELOPER,
     ]);
 
-    const subscription = subscriptionService.getOrganizationSubscription(orgId);
+    const subscription = await subscriptionService.getOrganizationSubscription(orgId);
     return {
       success: true,
       data: { subscription },
@@ -55,7 +55,7 @@ export function registerSubscriptionRoutes(router: Router): void {
     authenticate(req);
     const userId = req.context.userId!;
     const orgId = req.params.orgId || '';
-    assertOrgMemberRole(orgId, userId, [UserRole.OWNER, UserRole.ADMIN]);
+    await assertOrgMemberRole(orgId, userId, [UserRole.OWNER, UserRole.ADMIN]);
 
     const body = req.body as unknown as {
       planCode: string;
@@ -72,7 +72,7 @@ export function registerSubscriptionRoutes(router: Router): void {
       );
     }
 
-    const subscription = subscriptionService.checkoutSubscription(orgId, userId, body);
+    const subscription = await subscriptionService.checkoutSubscription(orgId, userId, body);
     return {
       success: true,
       data: { subscription },
@@ -84,10 +84,10 @@ export function registerSubscriptionRoutes(router: Router): void {
     authenticate(req);
     const userId = req.context.userId!;
     const orgId = req.params.orgId || '';
-    assertOrgMemberRole(orgId, userId, [UserRole.OWNER]);
+    await assertOrgMemberRole(orgId, userId, [UserRole.OWNER]);
 
     const body = (req.body as unknown as { immediate?: boolean }) || {};
-    const subscription = subscriptionService.cancelSubscription(orgId, userId, body.immediate ?? false);
+    const subscription = await subscriptionService.cancelSubscription(orgId, userId, body.immediate ?? false);
     return {
       success: true,
       data: { subscription },
@@ -99,7 +99,7 @@ export function registerSubscriptionRoutes(router: Router): void {
     authenticate(req);
     const userId = req.context.userId!;
     const orgId = req.params.orgId || '';
-    assertOrgMemberRole(orgId, userId, [
+    await assertOrgMemberRole(orgId, userId, [
       UserRole.OWNER,
       UserRole.ADMIN,
       UserRole.FINANCE,
@@ -107,7 +107,7 @@ export function registerSubscriptionRoutes(router: Router): void {
       UserRole.DEVELOPER,
     ]);
 
-    const entitlements = entitlementService.getEntitlements(orgId);
+    const entitlements = await entitlementService.getEntitlements(orgId);
     return {
       success: true,
       data: { entitlements },
@@ -126,7 +126,7 @@ export function registerSubscriptionRoutes(router: Router): void {
       );
     }
 
-    const result = catalogService.adminCreatePlan(body);
+    const result = await catalogService.adminCreatePlan(body);
     return {
       success: true,
       data: result,
@@ -142,7 +142,7 @@ export function registerSubscriptionRoutes(router: Router): void {
       throw new HttpException(400, 'VALIDATION_ERROR', 'prices and entitlements are required to version a plan.');
     }
 
-    const result = catalogService.adminCreateNewPlanVersion(planCode, body);
+    const result = await catalogService.adminCreateNewPlanVersion(planCode, body);
     return {
       success: true,
       data: result,

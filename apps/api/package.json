@@ -12,7 +12,8 @@
   "dependencies": {
     "@brisksms/shared": "*",
     "@brisksms/parser-engine": "*",
-    "@brisksms/db": "*"
+    "@brisksms/db": "*",
+    "@brisksms/worker": "*"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

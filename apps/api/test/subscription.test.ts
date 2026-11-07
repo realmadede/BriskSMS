@@ -15,12 +15,12 @@ import {
 } from '@brisksms/shared';
 
 describe('Phase 2: Dynamic Subscription Catalog & Entitlements Engine', () => {
-  beforeEach(() => {
-    dbStore.reset();
+  beforeEach(async () => {
+    await dbStore.reset();
   });
 
   it('should dynamically retrieve public commercial catalog with multi-currency prices and entitlements', async () => {
-    const products = catalogService.getPublicCatalog();
+    const products = await catalogService.getPublicCatalog();
 
     assert.ok(products.length >= 2, 'Should contain at least Product A and Product B');
     const paymentProduct = products.find((p) => p.code === 'PROD_PAYMENT_INTEL');
@@ -65,7 +65,7 @@ describe('Phase 2: Dynamic Subscription Catalog & Entitlements Engine', () => {
     const orgId = ownerRes.organizationId!;
 
     // Checkout Growth Plan (TZS, Monthly)
-    const subscription = subscriptionService.checkoutSubscription(orgId, ownerRes.user.id, {
+    const subscription = await subscriptionService.checkoutSubscription(orgId, ownerRes.user.id, {
       planCode: 'PLAN_GROWTH',
       currency: 'TZS',
       billingInterval: BillingInterval.MONTHLY,
@@ -80,7 +80,7 @@ describe('Phase 2: Dynamic Subscription Catalog & Entitlements Engine', () => {
     assert.equal(subscription.billingInterval, BillingInterval.MONTHLY);
 
     // Verify snapshot billing invoice was created with exact amount
-    const invoices = dbStore.getSubscriptionInvoices(orgId);
+    const invoices = await dbStore.getSubscriptionInvoices(orgId);
     assert.equal(invoices.length, 1);
     const firstInvoice = invoices[0];
     assert.ok(firstInvoice);
@@ -100,7 +100,7 @@ describe('Phase 2: Dynamic Subscription Catalog & Entitlements Engine', () => {
     const orgId = ownerRes.organizationId!;
 
     // 1. Subscribe to Starter Plan at TZS 25,000.00
-    const subInitial = subscriptionService.checkoutSubscription(orgId, ownerRes.user.id, {
+    const subInitial = await subscriptionService.checkoutSubscription(orgId, ownerRes.user.id, {
       planCode: 'PLAN_STARTER',
       currency: 'TZS',
       billingInterval: BillingInterval.MONTHLY,
@@ -108,7 +108,7 @@ describe('Phase 2: Dynamic Subscription Catalog & Entitlements Engine', () => {
     assert.equal(subInitial.unitPriceCents, '2500000');
 
     // 2. Admin creates Version 2 of PLAN_STARTER with increased price (TZS 35,000.00)
-    catalogService.adminCreateNewPlanVersion('PLAN_STARTER', {
+    await catalogService.adminCreateNewPlanVersion('PLAN_STARTER', {
       prices: [
         { currency: 'TZS', amountCents: '3500000', billingInterval: BillingInterval.MONTHLY },
         { currency: 'USD', amountCents: '1500', billingInterval: BillingInterval.MONTHLY },
@@ -120,13 +120,13 @@ describe('Phase 2: Dynamic Subscription Catalog & Entitlements Engine', () => {
     });
 
     // 3. Verify public catalog reflects Version 2
-    const updatedPlan = catalogService.getPlanByCode('PLAN_STARTER');
+    const updatedPlan = await catalogService.getPlanByCode('PLAN_STARTER');
     assert.equal(updatedPlan.currentVersion.versionNumber, 2);
     const newPrice = updatedPlan.prices.find((p) => p.currency === 'TZS' && p.billingInterval === BillingInterval.MONTHLY);
     assert.equal(newPrice?.amountCents, '3500000');
 
     // 4. Verify existing active subscription STILL retains its original snapshot terms (Version 1 price)
-    const existingSub = subscriptionService.getOrganizationSubscription(orgId);
+    const existingSub = await subscriptionService.getOrganizationSubscription(orgId);
     assert.ok(existingSub);
     assert.equal(existingSub.unitPriceCents, '2500000', 'Active subscription price must NOT change when catalog is updated');
   });
@@ -141,7 +141,7 @@ describe('Phase 2: Dynamic Subscription Catalog & Entitlements Engine', () => {
     const orgId = ownerRes.organizationId!;
 
     // Subscribe to Starter Plan (MAX_CONNECTED_DEVICES = 1)
-    subscriptionService.checkoutSubscription(orgId, ownerRes.user.id, {
+    await subscriptionService.checkoutSubscription(orgId, ownerRes.user.id, {
       planCode: 'PLAN_STARTER',
       currency: 'TZS',
       billingInterval: BillingInterval.MONTHLY,
@@ -170,7 +170,7 @@ describe('Phase 2: Dynamic Subscription Catalog & Entitlements Engine', () => {
     );
 
     // Organization upgrades to Growth Plan (MAX_CONNECTED_DEVICES = 3)
-    subscriptionService.checkoutSubscription(orgId, ownerRes.user.id, {
+    await subscriptionService.checkoutSubscription(orgId, ownerRes.user.id, {
       planCode: 'PLAN_GROWTH',
       currency: 'TZS',
       billingInterval: BillingInterval.MONTHLY,
@@ -191,31 +191,31 @@ describe('Phase 2: Dynamic Subscription Catalog & Entitlements Engine', () => {
     const orgId = ownerRes.organizationId!;
 
     // On Free/Default tier: Zapier and API access are disabled
-    assert.equal(entitlementService.isFeatureEnabled(orgId, FeatureKey.API_ACCESS), false);
-    assert.equal(entitlementService.isFeatureEnabled(orgId, FeatureKey.ZAPIER_INTEGRATION), false);
+    assert.equal(await entitlementService.isFeatureEnabled(orgId, FeatureKey.API_ACCESS), false);
+    assert.equal(await entitlementService.isFeatureEnabled(orgId, FeatureKey.ZAPIER_INTEGRATION), false);
 
     // Upgrade to Growth Plan: API and Zapier access are enabled
-    subscriptionService.checkoutSubscription(orgId, ownerRes.user.id, {
+    await subscriptionService.checkoutSubscription(orgId, ownerRes.user.id, {
       planCode: 'PLAN_GROWTH',
       currency: 'USD',
       billingInterval: BillingInterval.MONTHLY,
     });
 
-    assert.equal(entitlementService.isFeatureEnabled(orgId, FeatureKey.API_ACCESS), true);
-    assert.equal(entitlementService.isFeatureEnabled(orgId, FeatureKey.ZAPIER_INTEGRATION), true);
-    assert.equal(entitlementService.isFeatureEnabled(orgId, FeatureKey.MIKROTIK_INTEGRATION), true);
+    assert.equal(await entitlementService.isFeatureEnabled(orgId, FeatureKey.API_ACCESS), true);
+    assert.equal(await entitlementService.isFeatureEnabled(orgId, FeatureKey.ZAPIER_INTEGRATION), true);
+    assert.equal(await entitlementService.isFeatureEnabled(orgId, FeatureKey.MIKROTIK_INTEGRATION), true);
 
     // Bulk messaging is still disabled on Growth
-    assert.equal(entitlementService.isFeatureEnabled(orgId, FeatureKey.BULK_MESSAGING_ENABLED), false);
+    assert.equal(await entitlementService.isFeatureEnabled(orgId, FeatureKey.BULK_MESSAGING_ENABLED), false);
 
     // Upgrade to Enterprise: Bulk messaging is enabled
-    subscriptionService.checkoutSubscription(orgId, ownerRes.user.id, {
+    await subscriptionService.checkoutSubscription(orgId, ownerRes.user.id, {
       planCode: 'PLAN_ENTERPRISE',
       currency: 'USD',
       billingInterval: BillingInterval.ANNUALLY,
     });
 
-    assert.equal(entitlementService.isFeatureEnabled(orgId, FeatureKey.BULK_MESSAGING_ENABLED), true);
+    assert.equal(await entitlementService.isFeatureEnabled(orgId, FeatureKey.BULK_MESSAGING_ENABLED), true);
   });
 
   it('should isolate subscriptions across tenants', async () => {
@@ -232,14 +232,14 @@ describe('Phase 2: Dynamic Subscription Catalog & Entitlements Engine', () => {
       organizationName: 'Tenant B Corp',
     });
 
-    subscriptionService.checkoutSubscription(orgA.organizationId!, orgA.user.id, {
+    await subscriptionService.checkoutSubscription(orgA.organizationId!, orgA.user.id, {
       planCode: 'PLAN_GROWTH',
       currency: 'TZS',
       billingInterval: BillingInterval.MONTHLY,
     });
 
-    const subA = subscriptionService.getOrganizationSubscription(orgA.organizationId!);
-    const subB = subscriptionService.getOrganizationSubscription(orgB.organizationId!);
+    const subA = await subscriptionService.getOrganizationSubscription(orgA.organizationId!);
+    const subB = await subscriptionService.getOrganizationSubscription(orgB.organizationId!);
 
     assert.ok(subA);
     assert.equal(subA.planCode, 'PLAN_GROWTH');
@@ -256,7 +256,7 @@ describe('Phase 2: Dynamic Subscription Catalog & Entitlements Engine', () => {
 
     await assert.rejects(
       async () => {
-        subscriptionService.checkoutSubscription(ownerRes.organizationId!, ownerRes.user.id, {
+        await subscriptionService.checkoutSubscription(ownerRes.organizationId!, ownerRes.user.id, {
           planCode: 'NON_EXISTENT_PLAN',
           currency: 'TZS',
           billingInterval: BillingInterval.MONTHLY,

@@ -1,11 +1,7 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { ApiKeyScope } from '@brisksms/shared';
-import {
-  dbStore,
-  OAuthClientRecord,
-  OAuthAuthorizationCodeRecord,
-  OAuthTokenRecord,
-} from '../../core/store.js';
+import { sql, withTransaction } from '@brisksms/db';
+import { OAuthClientRecord } from '../../core/store.js';
 
 export interface RegisterOAuthClientDto {
   organizationId: string;
@@ -49,36 +45,61 @@ export interface TokenResponse {
 }
 
 export class OAuthService {
+  private mapClientRow(row: Record<string, any>): OAuthClientRecord {
+    const rawUris =
+      typeof row.redirect_uris === 'string'
+        ? JSON.parse(row.redirect_uris)
+        : row.redirect_uris;
+    return {
+      id: row.id,
+      organizationId: row.organization_id,
+      name: row.name,
+      clientSecretHash: row.client_secret_hash,
+      redirectUris: Array.isArray(rawUris) ? rawUris : [],
+      isPublic: Boolean(row.is_public),
+      createdAt: new Date(row.created_at),
+    };
+  }
+
   /**
    * Registers a client application (e.g. Zapier CLI, Make.com, n8n)
    */
-  public registerClient(dto: RegisterOAuthClientDto): OAuthClientRecord {
-    const id = `client_${randomBytes(12).toString('hex')}`;
+  public async registerClient(dto: RegisterOAuthClientDto): Promise<OAuthClientRecord> {
+    const id = randomUUID();
     const clientSecretHash = dto.clientSecret
       ? createHash('sha256').update(dto.clientSecret).digest('hex')
       : null;
+    const redirectUris = dto.redirectUris.map((u) => u.trim());
+    const isPublic = dto.isPublic ?? true;
+    const now = new Date();
 
-    const record: OAuthClientRecord = {
-      id,
-      organizationId: dto.organizationId,
-      name: dto.name.trim(),
-      clientSecretHash,
-      redirectUris: dto.redirectUris.map((u) => u.trim()),
-      isPublic: dto.isPublic ?? true, // Default to public client for PKCE
-      createdAt: new Date(),
-    };
+    const inserted = await sql<Record<string, any>>`
+      INSERT INTO oauth_clients (
+        id, organization_id, name, client_secret_hash, redirect_uris, is_public, created_at, updated_at
+      ) VALUES (
+        ${id}, ${dto.organizationId}, ${dto.name.trim()}, ${clientSecretHash},
+        ${JSON.stringify(redirectUris)}::jsonb, ${isPublic}, ${now}, ${now}
+      )
+      RETURNING *
+    `;
 
-    dbStore.oauthClients.set(id, record);
-    return record;
+    return this.mapClientRow(inserted[0]);
   }
 
   /**
    * Issues a short-lived (10-minute) single-use authorization code with PKCE challenge
    */
-  public generateAuthorizationCode(dto: AuthorizeCodeDto): string {
-    const client = dbStore.oauthClients.get(dto.clientId);
-    if (!client) {
+  public async generateAuthorizationCode(dto: AuthorizeCodeDto): Promise<string> {
+    const clientRows = await sql<Record<string, any>>`
+      SELECT * FROM oauth_clients WHERE id = ${dto.clientId} LIMIT 1
+    `;
+    if (clientRows.length === 0) {
       throw new Error(`Invalid OAuth client_id: ${dto.clientId}`);
+    }
+
+    const client = this.mapClientRow(clientRows[0]);
+    if (client.organizationId !== dto.organizationId) {
+      throw new Error('OAuth client does not belong to the specified organization');
     }
 
     if (!client.redirectUris.includes(dto.redirectUri)) {
@@ -91,23 +112,20 @@ export class OAuthService {
 
     const code = `code_${randomBytes(24).toString('hex')}`;
     const now = new Date();
-    const expiresAt = new Date(now.getTime() + 10 * 60 * 1000); // 10 minutes
+    const expiresAt = new Date(now.getTime() + 10 * 60 * 1000);
+    const scopes = [...dto.scopes];
+    const method = dto.codeChallengeMethod ?? 'S256';
 
-    const authCodeRecord: OAuthAuthorizationCodeRecord = {
-      code,
-      clientId: dto.clientId,
-      userId: dto.userId,
-      organizationId: dto.organizationId,
-      redirectUri: dto.redirectUri,
-      scopes: dto.scopes,
-      codeChallenge: dto.codeChallenge,
-      codeChallengeMethod: dto.codeChallengeMethod ?? 'S256',
-      expiresAt,
-      isUsed: false,
-      createdAt: now,
-    };
+    await sql`
+      INSERT INTO oauth_authorization_codes (
+        code, client_id, user_id, organization_id, redirect_uri,
+        scopes, code_challenge, code_challenge_method, expires_at, used_at, created_at
+      ) VALUES (
+        ${code}, ${dto.clientId}, ${dto.userId}, ${dto.organizationId}, ${dto.redirectUri},
+        ${JSON.stringify(scopes)}::jsonb, ${dto.codeChallenge}, ${method}, ${expiresAt}, NULL, ${now}
+      )
+    `;
 
-    dbStore.oauthCodes.set(code, authCodeRecord);
     return code;
   }
 
@@ -123,7 +141,6 @@ export class OAuthService {
       return codeVerifier === challenge;
     }
 
-    // S256: BASE64URL-ENCODE(SHA256(ASCII(code_verifier)))
     const computedHash = createHash('sha256')
       .update(codeVerifier, 'ascii')
       .digest('base64url');
@@ -132,197 +149,219 @@ export class OAuthService {
   }
 
   /**
-   * Exchanges authorization code for access and refresh tokens
+   * Exchanges authorization code for access and refresh tokens inside an ACID transaction
    */
-  public exchangeCodeForTokens(dto: ExchangeCodeDto): TokenResponse {
-    const client = dbStore.oauthClients.get(dto.clientId);
-    if (!client) {
-      throw new Error(`Invalid client_id: ${dto.clientId}`);
-    }
-
-    // If client is confidential, verify client_secret
-    if (!client.isPublic && client.clientSecretHash) {
-      if (!dto.clientSecret) {
-        throw new Error('client_secret is required for confidential clients');
+  public async exchangeCodeForTokens(dto: ExchangeCodeDto): Promise<TokenResponse> {
+    return withTransaction(async (tx) => {
+      const clientRows = await tx<Record<string, any>>`
+        SELECT * FROM oauth_clients WHERE id = ${dto.clientId} LIMIT 1
+      `;
+      if (clientRows.length === 0) {
+        throw new Error(`Invalid client_id: ${dto.clientId}`);
       }
-      const secretHash = createHash('sha256').update(dto.clientSecret).digest('hex');
-      if (secretHash !== client.clientSecretHash) {
-        throw new Error('Invalid client_secret');
+      const client = this.mapClientRow(clientRows[0]);
+
+      if (!client.isPublic && client.clientSecretHash) {
+        if (!dto.clientSecret) {
+          throw new Error('client_secret is required for confidential clients');
+        }
+        const secretHash = createHash('sha256').update(dto.clientSecret).digest('hex');
+        if (secretHash !== client.clientSecretHash) {
+          throw new Error('Invalid client_secret');
+        }
       }
-    }
 
-    const codeRecord = dbStore.oauthCodes.get(dto.code);
-    if (!codeRecord) {
-      throw new Error('Invalid authorization code');
-    }
+      const codeRows = await tx<Record<string, any>>`
+        SELECT * FROM oauth_authorization_codes WHERE code = ${dto.code} FOR UPDATE
+      `;
+      if (codeRows.length === 0) {
+        throw new Error('Invalid authorization code');
+      }
+      const codeRecord = codeRows[0];
 
-    if (codeRecord.isUsed) {
-      throw new Error('Authorization code has already been used');
-    }
+      if (codeRecord.used_at) {
+        throw new Error('Authorization code has already been used');
+      }
 
-    if (new Date() > codeRecord.expiresAt) {
-      throw new Error('Authorization code has expired');
-    }
+      if (new Date() > new Date(codeRecord.expires_at)) {
+        throw new Error('Authorization code has expired');
+      }
 
-    if (codeRecord.clientId !== dto.clientId) {
-      throw new Error('Authorization code was issued to a different client');
-    }
+      if (codeRecord.client_id !== dto.clientId) {
+        throw new Error('Authorization code was issued to a different client');
+      }
 
-    if (codeRecord.redirectUri !== dto.redirectUri) {
-      throw new Error('redirect_uri does not match original authorization request');
-    }
+      if (codeRecord.redirect_uri !== dto.redirectUri) {
+        throw new Error('redirect_uri does not match original authorization request');
+      }
 
-    // Verify PKCE Challenge
-    const isPkceValid = this.verifyCodeChallenge(
-      dto.codeVerifier,
-      codeRecord.codeChallenge,
-      codeRecord.codeChallengeMethod,
-    );
+      const isPkceValid = this.verifyCodeChallenge(
+        dto.codeVerifier,
+        codeRecord.code_challenge,
+        codeRecord.code_challenge_method as 'S256' | 'plain',
+      );
 
-    if (!isPkceValid) {
-      throw new Error('Invalid PKCE code_verifier');
-    }
+      if (!isPkceValid) {
+        throw new Error('Invalid PKCE code_verifier');
+      }
 
-    // Mark code as used
-    codeRecord.isUsed = true;
+      const now = new Date();
+      await tx`
+        UPDATE oauth_authorization_codes SET used_at = ${now} WHERE code = ${dto.code}
+      `;
 
-    // Issue tokens
-    return this.issueTokenRecord(
-      codeRecord.clientId,
-      codeRecord.userId,
-      codeRecord.organizationId,
-      codeRecord.scopes,
-    );
+      const rawScopes =
+        typeof codeRecord.scopes === 'string'
+          ? JSON.parse(codeRecord.scopes)
+          : codeRecord.scopes;
+
+      return this.issueTokenRecordTx(
+        tx,
+        codeRecord.client_id,
+        codeRecord.user_id,
+        codeRecord.organization_id,
+        Array.isArray(rawScopes) ? rawScopes : [],
+      );
+    });
   }
 
   /**
    * Refreshes an expired access token using a valid refresh token
    */
-  public refreshTokens(dto: RefreshTokenDto): TokenResponse {
-    const accessToken = dbStore.oauthTokensByRefresh.get(dto.refreshToken);
-    if (!accessToken) {
-      throw new Error('Invalid refresh token');
-    }
+  public async refreshTokens(dto: RefreshTokenDto): Promise<TokenResponse> {
+    const refreshTokenHash = createHash('sha256').update(dto.refreshToken).digest('hex');
 
-    const tokenRecord = dbStore.oauthTokens.get(accessToken);
-    if (!tokenRecord) {
-      throw new Error('Token record not found');
-    }
+    return withTransaction(async (tx) => {
+      const tokenRows = await tx<Record<string, any>>`
+        SELECT * FROM oauth_tokens WHERE refresh_token_hash = ${refreshTokenHash} FOR UPDATE
+      `;
+      if (tokenRows.length === 0) {
+        throw new Error('Invalid refresh token');
+      }
 
-    if (tokenRecord.revokedAt) {
-      throw new Error('Token has been revoked');
-    }
+      const tokenRecord = tokenRows[0];
 
-    if (new Date() > tokenRecord.refreshExpiresAt) {
-      throw new Error('Refresh token has expired');
-    }
+      if (tokenRecord.revoked_at) {
+        throw new Error('Token has been revoked');
+      }
 
-    if (tokenRecord.clientId !== dto.clientId) {
-      throw new Error('Refresh token was issued to a different client');
-    }
+      if (new Date() > new Date(tokenRecord.refresh_token_expires_at)) {
+        throw new Error('Refresh token has expired');
+      }
 
-    // Revoke old access token
-    tokenRecord.revokedAt = new Date();
-    dbStore.oauthTokensByRefresh.delete(dto.refreshToken);
+      if (tokenRecord.client_id !== dto.clientId) {
+        throw new Error('Refresh token was issued to a different client');
+      }
 
-    // Issue new pair
-    return this.issueTokenRecord(
-      tokenRecord.clientId,
-      tokenRecord.userId,
-      tokenRecord.organizationId,
-      tokenRecord.scopes,
-    );
+      const now = new Date();
+      await tx`
+        UPDATE oauth_tokens SET revoked_at = ${now} WHERE id = ${tokenRecord.id}
+      `;
+
+      const rawScopes =
+        typeof tokenRecord.scopes === 'string'
+          ? JSON.parse(tokenRecord.scopes)
+          : tokenRecord.scopes;
+
+      return this.issueTokenRecordTx(
+        tx,
+        tokenRecord.client_id,
+        tokenRecord.user_id,
+        tokenRecord.organization_id,
+        Array.isArray(rawScopes) ? rawScopes : [],
+      );
+    });
   }
 
   /**
    * Validates bearer access token and authorization scope
    */
-  public verifyAccessToken(
+  public async verifyAccessToken(
     token: string,
     requiredScope?: ApiKeyScope,
-  ): { organizationId: string; userId: string; scopes: ApiKeyScope[] } | null {
+  ): Promise<{ organizationId: string; userId: string; scopes: ApiKeyScope[] } | null> {
     if (!token || !token.startsWith('bsk_at_')) {
       return null;
     }
 
-    const record = dbStore.oauthTokens.get(token);
-    if (!record) {
+    const accessTokenHash = createHash('sha256').update(token).digest('hex');
+    const rows = await sql<Record<string, any>>`
+      SELECT * FROM oauth_tokens WHERE access_token_hash = ${accessTokenHash} LIMIT 1
+    `;
+    if (rows.length === 0) {
       return null;
     }
 
-    if (record.revokedAt) {
+    const record = rows[0];
+    if (record.revoked_at) {
       return null;
     }
 
-    if (new Date() > record.expiresAt) {
+    if (new Date() > new Date(record.access_token_expires_at)) {
       return null;
     }
 
-    if (requiredScope && !record.scopes.includes(requiredScope)) {
+    const rawScopes =
+      typeof record.scopes === 'string'
+        ? JSON.parse(record.scopes)
+        : record.scopes;
+    const scopes: ApiKeyScope[] = Array.isArray(rawScopes) ? rawScopes : [];
+    if (requiredScope && !scopes.includes(requiredScope)) {
       return null;
     }
 
     return {
-      organizationId: record.organizationId,
-      userId: record.userId,
-      scopes: record.scopes,
+      organizationId: record.organization_id,
+      userId: record.user_id,
+      scopes,
     };
   }
 
   /**
    * Revokes an active token (RFC 7009)
    */
-  public revokeToken(token: string): boolean {
-    const record = dbStore.oauthTokens.get(token);
-    if (record) {
-      record.revokedAt = new Date();
-      dbStore.oauthTokensByRefresh.delete(record.refreshToken);
-      return true;
-    }
+  public async revokeToken(token: string): Promise<boolean> {
+    const tokenHash = createHash('sha256').update(token).digest('hex');
+    const now = new Date();
 
-    // Check if refresh token was passed
-    const at = dbStore.oauthTokensByRefresh.get(token);
-    if (at) {
-      const rec = dbStore.oauthTokens.get(at);
-      if (rec) {
-        rec.revokedAt = new Date();
-        dbStore.oauthTokensByRefresh.delete(token);
-        return true;
-      }
-    }
+    const updated = await sql<Record<string, any>>`
+      UPDATE oauth_tokens
+      SET revoked_at = ${now}
+      WHERE (access_token_hash = ${tokenHash} OR refresh_token_hash = ${tokenHash})
+        AND revoked_at IS NULL
+      RETURNING id
+    `;
 
-    return false;
+    return updated.length > 0;
   }
 
-  private issueTokenRecord(
+  private async issueTokenRecordTx(
+    tx: <T = Record<string, any>>(strings: TemplateStringsArray, ...values: unknown[]) => Promise<T[]>,
     clientId: string,
     userId: string,
     organizationId: string,
     scopes: ApiKeyScope[],
-  ): TokenResponse {
+  ): Promise<TokenResponse> {
     const now = new Date();
-    const expiresInSeconds = 3600; // 1 hour
-    const expiresAt = new Date(now.getTime() + expiresInSeconds * 1000);
-    const refreshExpiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000); // 30 days
+    const expiresInSeconds = 3600;
+    const accessTokenExpiresAt = new Date(now.getTime() + expiresInSeconds * 1000);
+    const refreshTokenExpiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
 
     const accessToken = `bsk_at_${randomBytes(24).toString('hex')}`;
     const refreshToken = `bsk_rt_${randomBytes(32).toString('hex')}`;
 
-    const tokenRecord: OAuthTokenRecord = {
-      accessToken,
-      refreshToken,
-      clientId,
-      userId,
-      organizationId,
-      scopes,
-      expiresAt,
-      refreshExpiresAt,
-      revokedAt: null,
-      createdAt: now,
-    };
+    const accessTokenHash = createHash('sha256').update(accessToken).digest('hex');
+    const refreshTokenHash = createHash('sha256').update(refreshToken).digest('hex');
 
-    dbStore.oauthTokens.set(accessToken, tokenRecord);
-    dbStore.oauthTokensByRefresh.set(refreshToken, accessToken);
+    await tx`
+      INSERT INTO oauth_tokens (
+        id, access_token_hash, refresh_token_hash, client_id, user_id,
+        organization_id, scopes, access_token_expires_at, refresh_token_expires_at, revoked_at, created_at
+      ) VALUES (
+        ${randomUUID()}, ${accessTokenHash}, ${refreshTokenHash}, ${clientId}, ${userId},
+        ${organizationId}, ${JSON.stringify(scopes)}::jsonb, ${accessTokenExpiresAt}, ${refreshTokenExpiresAt}, NULL, ${now}
+      )
+    `;
 
     return {
       access_token: accessToken,

@@ -2,6 +2,8 @@ import { dbStore, OrganizationRecord, UserOrganizationRecord } from '../../core/
 import { UserRole } from '@brisksms/shared';
 import { HttpException } from '../../core/http.js';
 import { entitlementService } from '../subscription/entitlement.service.js';
+import { generateSecureToken, hashToken } from '../../core/crypto.js';
+import { withTransaction } from '@brisksms/db';
 import { randomUUID } from 'node:crypto';
 
 export interface CreateOrgDto {
@@ -33,7 +35,7 @@ export class OrganizationService {
       .replace(/^-|-$/g, '');
     const uniqueSlug = `${baseSlug}-${randomUUID().slice(0, 6)}`;
 
-    const { org, membership } = dbStore.createOrganization({
+    const { org, membership } = await dbStore.createOrganization({
       name: dto.name.trim(),
       slug: uniqueSlug,
       countryCode: dto.countryCode || 'TZA',
@@ -47,12 +49,12 @@ export class OrganizationService {
   }
 
   async getOrganization(orgId: string, userId: string): Promise<OrganizationRecord> {
-    const membership = dbStore.getMembership(orgId, userId);
+    const membership = await dbStore.getMembership(orgId, userId);
     if (!membership) {
       throw new HttpException(403, 'FORBIDDEN', 'You do not have access to this organization');
     }
 
-    const org = dbStore.findOrgById(orgId);
+    const org = await dbStore.findOrgById(orgId);
     if (!org || !org.isActive) {
       throw new HttpException(404, 'ORG_NOT_FOUND', 'Organization not found or inactive');
     }
@@ -61,7 +63,8 @@ export class OrganizationService {
   }
 
   async listUserOrganizations(userId: string): Promise<{ organization: OrganizationRecord; role: UserRole }[]> {
-    return dbStore.getUserOrganizations(userId).map((item) => ({
+    const list = await dbStore.getUserOrganizations(userId);
+    return list.map((item) => ({
       organization: item.org,
       role: item.role,
     }));
@@ -76,60 +79,77 @@ export class OrganizationService {
       throw new HttpException(400, 'INVALID_PAYLOAD', 'Email and role are required');
     }
 
-    // Role cannot be OWNER (only 1 owner created at org creation)
     if (dto.role === UserRole.OWNER) {
       throw new HttpException(400, 'INVALID_ROLE', 'Cannot invite a member with role OWNER');
     }
 
-    // Check actor permissions
-    const actorMem = dbStore.getMembership(orgId, actorUserId);
-    if (!actorMem || ![UserRole.OWNER, UserRole.ADMIN].includes(actorMem.role)) {
-      throw new HttpException(403, 'INSUFFICIENT_PERMISSIONS', 'Only Owners and Admins can invite team members');
-    }
+    return withTransaction(async (tx) => {
+      const actorMem = await dbStore.getMembership(orgId, actorUserId, tx);
+      if (!actorMem || ![UserRole.OWNER, UserRole.ADMIN].includes(actorMem.role)) {
+        throw new HttpException(403, 'INSUFFICIENT_PERMISSIONS', 'Only Owners and Admins can invite team members');
+      }
 
-    // Dynamic Entitlement: Prevent inviting members beyond configured plan quota
-    entitlementService.enforceMemberQuota(orgId);
+      await entitlementService.enforceMemberQuota(orgId, tx);
 
-    // Check if user already exists
-    let user = dbStore.findUserByEmail(dto.email);
-    if (!user) {
-      // Auto-provision placeholder account for invitee
-      user = dbStore.createUser({
-        email: dto.email,
-        fullName: dto.fullName || dto.email.split('@')[0] || 'Team Member',
-        passwordHash: 'pending_invitation_setup',
-      });
-    }
+      let user = await dbStore.findUserByEmail(dto.email, tx);
+      if (!user) {
+        user = await dbStore.createUser(
+          {
+            email: dto.email,
+            fullName: dto.fullName || dto.email.split('@')[0] || 'Team Member',
+            passwordHash: 'pending_invitation_setup',
+          },
+          tx,
+        );
+      }
 
-    const existingMem = dbStore.getMembership(orgId, user.id);
-    if (existingMem) {
-      throw new HttpException(409, 'ALREADY_MEMBER', 'This user is already a member of this organization');
-    }
+      const existingMem = await dbStore.getMembership(orgId, user.id, tx);
+      if (existingMem) {
+        throw new HttpException(409, 'ALREADY_MEMBER', 'This user is already a member of this organization');
+      }
 
-    const membership = dbStore.addMember({
-      organizationId: orgId,
-      userId: user.id,
-      role: dto.role,
-      actorId: actorUserId,
+      // Record invitation in organization_invitations table
+      const inviteTokenHash = hashToken(generateSecureToken('bsk_inv', 24));
+      const expiresAt = new Date(Date.now() + 7 * 86400 * 1000);
+      await tx`
+        INSERT INTO "organization_invitations" (
+          "id", "organization_id", "email", "role", "invited_by_id",
+          "token_hash", "status", "expires_at", "accepted_at"
+        )
+        VALUES (
+          ${randomUUID()}, ${orgId}, ${user.email}, ${dto.role}::"UserRole", ${actorUserId},
+          ${inviteTokenHash}, 'ACCEPTED', ${expiresAt}, NOW()
+        )
+      `;
+
+      const membership = await dbStore.addMember(
+        {
+          organizationId: orgId,
+          userId: user.id,
+          role: dto.role,
+          actorId: actorUserId,
+        },
+        tx,
+      );
+
+      return {
+        membership,
+        user: {
+          id: user.id,
+          email: user.email,
+          fullName: user.fullName,
+        },
+      };
     });
-
-    return {
-      membership,
-      user: {
-        id: user.id,
-        email: user.email,
-        fullName: user.fullName,
-      },
-    };
   }
 
   async listMembers(orgId: string, userId: string): Promise<{ id: string; email: string; fullName: string; role: UserRole }[]> {
-    const membership = dbStore.getMembership(orgId, userId);
+    const membership = await dbStore.getMembership(orgId, userId);
     if (!membership) {
       throw new HttpException(403, 'FORBIDDEN', 'You do not have access to view members of this organization');
     }
 
-    const members = dbStore.getOrgMembers(orgId);
+    const members = await dbStore.getOrgMembers(orgId);
     return members.map((m) => ({
       id: m.user.id,
       email: m.user.email,
@@ -139,7 +159,7 @@ export class OrganizationService {
   }
 
   async updateMemberRole(orgId: string, actorUserId: string, targetUserId: string, newRole: UserRole): Promise<UserOrganizationRecord> {
-    const actorMem = dbStore.getMembership(orgId, actorUserId);
+    const actorMem = await dbStore.getMembership(orgId, actorUserId);
     if (!actorMem || ![UserRole.OWNER, UserRole.ADMIN].includes(actorMem.role)) {
       throw new HttpException(403, 'INSUFFICIENT_PERMISSIONS', 'Only Owners and Admins can modify member roles');
     }
@@ -157,17 +177,17 @@ export class OrganizationService {
   }
 
   async removeMember(orgId: string, actorUserId: string, targetUserId: string): Promise<void> {
-    const actorMem = dbStore.getMembership(orgId, actorUserId);
+    const actorMem = await dbStore.getMembership(orgId, actorUserId);
     if (!actorMem || ![UserRole.OWNER, UserRole.ADMIN].includes(actorMem.role)) {
       throw new HttpException(403, 'INSUFFICIENT_PERMISSIONS', 'Only Owners and Admins can remove members');
     }
 
-    const targetMem = dbStore.getMembership(orgId, targetUserId);
+    const targetMem = await dbStore.getMembership(orgId, targetUserId);
     if (targetMem?.role === UserRole.OWNER) {
       throw new HttpException(400, 'CANNOT_REMOVE_OWNER', 'The organization OWNER cannot be removed');
     }
 
-    dbStore.removeMember(orgId, targetUserId, actorUserId);
+    await dbStore.removeMember(orgId, targetUserId, actorUserId);
   }
 }
 

@@ -38,8 +38,11 @@ export enum BusinessEventType {
   PAYMENT_EVIDENCE_RECEIVED = 'payment.evidence.received',
   PAYMENT_MATCHED = 'payment.matched',
   PAYMENT_NEEDS_REVIEW = 'payment.needs_review',
+  PAYMENT_VERIFIED = 'payment.verified',
+  PAYMENT_REJECTED = 'payment.rejected',
   INVOICE_PARTIALLY_PAID = 'invoice.partially_paid',
   INVOICE_PAID = 'invoice.paid',
+  FULFILLMENT_ELIGIBLE = 'fulfillment.eligible',
   DEVICE_OFFLINE = 'device.offline',
   DEVICE_ONLINE = 'device.online',
   SMS_SENT = 'sms.sent',
@@ -47,4 +50,25 @@ export enum BusinessEventType {
   SMS_FAILED = 'sms.failed',
   CAMPAIGN_COMPLETED = 'campaign.completed',
   CAMPAIGN_FAILED = 'campaign.failed',
+}
+
+/**
+ * Transactional Outbox Delivery Lifecycle Status
+ */
+export enum OutboxStatus {
+  PENDING = 'PENDING',
+  PROCESSING = 'PROCESSING',
+  DELIVERED = 'DELIVERED',
+  FAILED = 'FAILED',
+  DEAD_LETTER = 'DEAD_LETTER',
+}
+
+/**
+ * Independent Payment Verification Method
+ */
+export enum VerificationMethod {
+  INDEPENDENT_PROVIDER_QUERY = 'INDEPENDENT_PROVIDER_QUERY',
+  BANK_STATEMENT_RECONCILIATION = 'BANK_STATEMENT_RECONCILIATION',
+  MANUAL_FINANCE_APPROVAL = 'MANUAL_FINANCE_APPROVAL',
+  MANUAL_REJECTION = 'MANUAL_REJECTION',
 }

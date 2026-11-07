@@ -1,0 +1,22 @@
+{
+  "name": "@brisksms/worker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "BriskSMS Background Worker - Transactional Outbox Dispatcher & Redis/BullMQ Consumers",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc --build",
+    "start": "bun run src/main.ts",
+    "dev": "bun run src/main.ts"
+  },
+  "dependencies": {
+    "@brisksms/shared": "*",
+    "@brisksms/db": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.4.0"
+  }
+}

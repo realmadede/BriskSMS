@@ -8,8 +8,8 @@ import {
 import { dbStore, SubscriptionPlanRecord, PlanVersionRecord } from '../../core/store.js';
 
 export class CatalogService {
-  getPublicCatalog(): CommercialProductDto[] {
-    const rawCatalog = dbStore.getPublicCatalog();
+  async getPublicCatalog(): Promise<CommercialProductDto[]> {
+    const rawCatalog = await dbStore.getPublicCatalog();
 
     return rawCatalog.map(({ product, plans }) => ({
       id: product.id,
@@ -55,23 +55,24 @@ export class CatalogService {
     }));
   }
 
-  getPlanByCode(planCode: string): {
+  async getPlanByCode(planCode: string): Promise<{
     plan: SubscriptionPlanRecord;
     currentVersion: PlanVersionRecord;
     prices: PlanPriceDto[];
     entitlements: Record<string, string>;
-  } {
-    const plan = dbStore.getPlanByCode(planCode);
+  }> {
+    const plan = await dbStore.getPlanByCode(planCode);
     if (!plan) {
       throw new PlanNotFoundError(planCode);
     }
 
-    const currentVersion = dbStore.getActivePlanVersion(plan.id);
+    const currentVersion = await dbStore.getActivePlanVersion(plan.id);
     if (!currentVersion) {
       throw new PlanNotFoundError(`${planCode} (no active version)`);
     }
 
-    const prices = dbStore.getPlanPrices(currentVersion.id).map((p) => ({
+    const rawPrices = await dbStore.getPlanPrices(currentVersion.id);
+    const prices = rawPrices.map((p) => ({
       id: p.id,
       planVersionId: p.planVersionId,
       currency: p.currency,
@@ -80,7 +81,7 @@ export class CatalogService {
       isActive: p.isActive,
     }));
 
-    const rawEntitlements = dbStore.getPlanEntitlements(currentVersion.id);
+    const rawEntitlements = await dbStore.getPlanEntitlements(currentVersion.id);
     const entitlements: Record<string, string> = {};
     for (const ent of rawEntitlements) {
       entitlements[ent.featureKey] = ent.value;
@@ -94,12 +95,12 @@ export class CatalogService {
     };
   }
 
-  adminCreatePlan(dto: AdminCreatePlanDto): {
+  async adminCreatePlan(dto: AdminCreatePlanDto): Promise<{
     planId: string;
     planCode: string;
     versionNumber: number;
-  } {
-    const created = dbStore.adminCreatePlan({
+  }> {
+    const created = await dbStore.adminCreatePlan({
       productCode: dto.productCode,
       code: dto.code,
       name: dto.name,
@@ -122,7 +123,7 @@ export class CatalogService {
     };
   }
 
-  adminCreateNewPlanVersion(
+  async adminCreateNewPlanVersion(
     planCode: string,
     dto: {
       prices: Array<{ currency: string; amountCents: string; billingInterval: BillingInterval }>;
@@ -130,8 +131,8 @@ export class CatalogService {
       trialPeriodDays?: number;
       gracePeriodDays?: number;
     },
-  ): { versionId: string; versionNumber: number } {
-    const newVersion = dbStore.adminCreateNewPlanVersion({
+  ): Promise<{ versionId: string; versionNumber: number }> {
+    const newVersion = await dbStore.adminCreateNewPlanVersion({
       planCode,
       prices: dto.prices.map((p) => ({
         currency: p.currency,

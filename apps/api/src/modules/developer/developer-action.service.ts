@@ -30,7 +30,7 @@ export class DeveloperActionService {
     rawApiKey: string,
     dto: SendMessageActionDto,
   ): Promise<SendMessageActionResult> {
-    const keyRecord = this.apiKeyService.validateApiKey(rawApiKey, ApiKeyScope.SMS_SEND);
+    const keyRecord = await this.apiKeyService.validateApiKey(rawApiKey, ApiKeyScope.SMS_SEND);
     if (!keyRecord) {
       throw new Error('Unauthorized: Invalid, revoked, or insufficient API key scope (requires sms:send)');
     }

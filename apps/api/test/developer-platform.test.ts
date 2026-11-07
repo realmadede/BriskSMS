@@ -8,7 +8,8 @@ import {
   GatewayMode,
   NormalizedDeliveryEvent,
 } from '@brisksms/shared';
-import { dbStore, OrganizationRecord } from '../src/core/store.js';
+import { sql } from '@brisksms/db';
+import { dbStore } from '../src/core/store.js';
 import { ApiKeyService } from '../src/modules/developer/api-key.service.js';
 import { WebhookService } from '../src/modules/developer/webhook.service.js';
 import { DeveloperActionService } from '../src/modules/developer/developer-action.service.js';
@@ -22,7 +23,6 @@ describe('Developer Platform & Zapier Webhook Automation', () => {
   let developerActionService: DeveloperActionService;
   const orgId = randomUUID();
 
-  // Mock cellular gateway provider for testing
   const mockProvider: MessagingProvider = {
     async sendMessage(_creds, payload) {
       return {
@@ -43,42 +43,35 @@ describe('Developer Platform & Zapier Webhook Automation', () => {
     },
   };
 
-  beforeEach(() => {
-    dbStore.reset();
+  beforeEach(async () => {
+    await dbStore.reset();
     apiKeyService = new ApiKeyService();
     webhookService = new WebhookService();
     messagingService = new MessagingService(mockProvider);
     developerActionService = new DeveloperActionService(apiKeyService, messagingService);
 
-    const org: OrganizationRecord = {
+    await dbStore.seedOrganizationDirect({
       id: orgId,
       name: 'Kilimanjaro Logistics',
-      slug: 'kili-logistics',
-      countryCode: 'TZ',
+      slug: `kili-logistics-${orgId.slice(0, 8)}`,
+      countryCode: 'TZA',
       timezone: 'Africa/Dar_es_Salaam',
       planTier: 'BUSINESS',
       isActive: true,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-    dbStore.organizations.set(orgId, org);
+    });
 
-    // Enable bulk messaging feature entitlement
-    const featDef = dbStore.featureDefinitions.get(FeatureKey.BULK_MESSAGING_ENABLED);
-    if (featDef) {
-      featDef.defaultValue = 'true';
-    }
+    await dbStore.setFeatureDefinitionDefaultValue(FeatureKey.BULK_MESSAGING_ENABLED, 'true');
 
-    // Provision messaging account with credits and cellular gateway token
-    const account = messagingService.getOrCreateAccount(orgId);
-    account.creditBalance = 100;
-    account.gatewayMode = GatewayMode.MANAGED_GATEWAY;
-    account.encryptedApiToken = 'enc_token_sec_9918231';
+    await messagingService.purchaseCredits(orgId, 100, 'SEED_CREDITS');
+    await messagingService.updateGatewayConfig(orgId, {
+      gatewayMode: GatewayMode.MANAGED_GATEWAY,
+      apiToken: 'enc_token_sec_9918231',
+    });
   });
 
   describe('Scoped API Keys (ApiKeyService)', () => {
-    it('creates API key starting with bsk_live_ and validates scopes', () => {
-      const result = apiKeyService.createApiKey(orgId, {
+    it('creates API key starting with bsk_live_ and validates scopes', async () => {
+      const result = await apiKeyService.createApiKey(orgId, {
         organizationId: orgId,
         name: 'Zapier Inbound Webhook Trigger',
         scopes: [ApiKeyScope.SMS_SEND, ApiKeyScope.PAYMENTS_READ],
@@ -88,28 +81,26 @@ describe('Developer Platform & Zapier Webhook Automation', () => {
       assert.equal(result.apiKey.keyPrefix.startsWith('bsk_live_'), true);
       assert.equal(result.apiKey.name, 'Zapier Inbound Webhook Trigger');
 
-      // Validating with granted scope succeeds
-      const validRecord = apiKeyService.validateApiKey(result.plainTextSecret, ApiKeyScope.SMS_SEND);
+      const validRecord = await apiKeyService.validateApiKey(result.plainTextSecret, ApiKeyScope.SMS_SEND);
       assert.notEqual(validRecord, null);
       assert.equal(validRecord?.organizationId, orgId);
       assert.notEqual(validRecord?.lastUsedAt, null);
 
-      // Validating with ungranted scope fails
-      const invalidScope = apiKeyService.validateApiKey(result.plainTextSecret, ApiKeyScope.INVOICES_WRITE);
+      const invalidScope = await apiKeyService.validateApiKey(result.plainTextSecret, ApiKeyScope.INVOICES_WRITE);
       assert.equal(invalidScope, null);
     });
 
-    it('rejects revoked API keys immediately', () => {
-      const result = apiKeyService.createApiKey(orgId, {
+    it('rejects revoked API keys immediately', async () => {
+      const result = await apiKeyService.createApiKey(orgId, {
         organizationId: orgId,
         name: 'Temporary Script',
         scopes: [ApiKeyScope.SMS_SEND],
       });
 
-      const revoked = apiKeyService.revokeApiKey(orgId, result.apiKey.id);
+      const revoked = await apiKeyService.revokeApiKey(orgId, result.apiKey.id);
       assert.equal(revoked, true);
 
-      const validated = apiKeyService.validateApiKey(result.plainTextSecret);
+      const validated = await apiKeyService.validateApiKey(result.plainTextSecret);
       assert.equal(validated, null);
     });
   });
@@ -125,8 +116,7 @@ describe('Developer Platform & Zapier Webhook Automation', () => {
     });
 
     it('registers endpoint and delivers outbox events with HMAC signature', async () => {
-      // 1. Register webhook endpoint (e.g. Zapier Catch Hook)
-      const endpoint = webhookService.registerEndpoint(orgId, {
+      const endpoint = await webhookService.registerEndpoint(orgId, {
         url: 'https://hooks.zapier.com/hooks/catch/123456/abcdef/',
         subscribedEvents: [BusinessEventType.PAYMENT_MATCHED],
         secret: 'whsec_zapier_secret_key',
@@ -134,18 +124,20 @@ describe('Developer Platform & Zapier Webhook Automation', () => {
 
       assert.equal(endpoint.isActive, true);
 
-      // 2. Queue outbox event
-      dbStore.outboxEvents.push({
-        id: randomUUID(),
+      const eventId = randomUUID();
+      await dbStore.insertOutboxEvent({
+        id: eventId,
         organizationId: orgId,
         eventType: BusinessEventType.PAYMENT_MATCHED,
         payload: { reference: 'QA8921KL90', amountCents: '15000000' },
+        status: 'PENDING',
         isDelivered: false,
         attemptCount: 0,
+        maxAttempts: 5,
+        nextAttemptAt: new Date(),
         createdAt: new Date(),
       });
 
-      // 3. Dispatch outbox events with simulated fetch
       let dispatchedUrl = '';
       let dispatchedSignature = '';
       let dispatchedEvent = '';
@@ -163,20 +155,19 @@ describe('Developer Platform & Zapier Webhook Automation', () => {
       assert.equal(dispatchedEvent, BusinessEventType.PAYMENT_MATCHED);
       assert.equal(dispatchedSignature.includes('v1='), true);
 
-      // Verify event is marked delivered in store
-      assert.equal(dbStore.outboxEvents[0]?.isDelivered, true);
+      const outboxEvents = await dbStore.getOutboxEventsByOrg(orgId);
+      assert.equal(outboxEvents[0]?.isDelivered, true);
     });
   });
 
   describe('Developer Send Action (DeveloperActionService)', () => {
     it('dispatches SMS using scoped API key (Google Sheets / Zapier Action)', async () => {
-      const keyResult = apiKeyService.createApiKey(orgId, {
+      const keyResult = await apiKeyService.createApiKey(orgId, {
         organizationId: orgId,
         name: 'Zapier Cellular Action',
         scopes: [ApiKeyScope.SMS_SEND],
       });
 
-      // Override curfew for deterministic test run
       messagingService.isCurfewRestricted = () => false;
 
       const result = await developerActionService.handleSendMessageAction(
@@ -192,13 +183,12 @@ describe('Developer Platform & Zapier Webhook Automation', () => {
       assert.equal(result.status, 'SUBMITTED');
       assert.equal(result.costCredits, 1);
 
-      // Credit balance deducted by 1
-      const account = messagingService.getOrCreateAccount(orgId);
+      const account = await messagingService.getOrCreateAccount(orgId);
       assert.equal(account.creditBalance, 99);
     });
 
     it('rejects dispatch when API key lacks sms:send scope', async () => {
-      const keyResult = apiKeyService.createApiKey(orgId, {
+      const keyResult = await apiKeyService.createApiKey(orgId, {
         organizationId: orgId,
         name: 'Read-Only Key',
         scopes: [ApiKeyScope.PAYMENTS_READ],

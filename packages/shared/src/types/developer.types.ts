@@ -1,4 +1,4 @@
-import { ApiKeyScope, BusinessEventType } from '../enums/ingestion-source.enum.js';
+import { ApiKeyScope, BusinessEventType, OutboxStatus } from '../enums/ingestion-source.enum.js';
 
 /**
  * Scoped API Key Entity DTO
@@ -61,8 +61,14 @@ export interface OutboxEventRecordDto {
   organizationId: string;
   eventType: BusinessEventType;
   payload: Record<string, unknown>;
+  status?: OutboxStatus;
   isDelivered: boolean;
   attemptCount: number;
+  maxAttempts?: number;
+  nextAttemptAt?: Date | null;
   lastAttemptAt?: Date | null;
+  lockedAt?: Date | null;
+  lastError?: string | null;
+  deliveredAt?: Date | null;
   createdAt: Date;
 }

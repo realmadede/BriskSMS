@@ -1,7 +1,9 @@
 import { IncomingMessage, ServerResponse } from 'node:http';
+import { DatabaseUnavailableError, RedisUnavailableError } from '@brisksms/db';
 
 export interface ApiResponse<T = unknown> {
   success: boolean;
+  statusCode?: number;
   data?: T;
   meta?: Record<string, unknown>;
   error?: {
@@ -104,7 +106,6 @@ export class Router {
     const pathname = parsedUrl.pathname;
     const method = (req.method || 'GET').toUpperCase();
 
-    // Match route
     let matchedRoute: RouteDefinition | undefined;
     const params: Record<string, string> = {};
 
@@ -134,7 +135,6 @@ export class Router {
       return;
     }
 
-    // Parse Body
     let body: Record<string, unknown> = {};
     if (['POST', 'PATCH', 'PUT'].includes(method)) {
       try {
@@ -157,7 +157,6 @@ export class Router {
       }
     }
 
-    // Parse Query Params
     const query: Record<string, string> = {};
     parsedUrl.searchParams.forEach((val, key) => {
       query[key] = val;
@@ -178,9 +177,11 @@ export class Router {
     try {
       const response = await matchedRoute.handler(routeReq);
       if (response) {
-        const status = method === 'POST' && pathname.endsWith('/register') ? 201 : 200;
+        const defaultStatus = method === 'POST' && pathname.endsWith('/register') ? 201 : 200;
+        const status = response.statusCode ?? defaultStatus;
+        const { statusCode: _omit, ...payload } = response;
         res.writeHead(status);
-        res.end(JSON.stringify(response));
+        res.end(JSON.stringify(payload));
       } else {
         res.writeHead(204);
         res.end();
@@ -195,6 +196,17 @@ export class Router {
               code: err.code,
               message: err.message,
               details: err.details,
+            },
+          }),
+        );
+      } else if (err instanceof DatabaseUnavailableError || err instanceof RedisUnavailableError) {
+        res.writeHead(err.statusCode);
+        res.end(
+          JSON.stringify({
+            success: false,
+            error: {
+              code: err.code,
+              message: err.message,
             },
           }),
         );

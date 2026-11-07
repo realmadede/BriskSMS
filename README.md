@@ -62,6 +62,29 @@ Comprehensive engineering specifications, standards, and architecture decisions 
 
 ---
 
+## Database, Migrations & Background Worker Quickstart
+
+BriskSMS uses **PostgreSQL** as the sole authoritative persistence store (36 relational tables across 8 domains) and **Redis** for durable background job queues and worker heartbeats. The platform never silently falls back to in-memory storage when PostgreSQL is unavailable.
+
+```bash
+# 1. Start PostgreSQL and Redis via Docker Compose
+docker compose up -d postgres redis
+
+# 2. Apply version-controlled SQL migrations and seed the commercial catalog
+npm run db:migrate
+npm run db:seed
+npm run db:status
+
+# 3. Build workspace packages and run the background worker runtime
+npm run build
+npm run worker:start
+
+# 4. Run the full verification & integration test suite (PostgreSQL + Redis)
+npm test
+```
+
+---
+
 ## Operating Invariants
 
 1. **Non-Custodial Architecture:** BriskSMS is purely an informational and software automation platform. We do not hold, pool, transmit, or escrow customer funds.

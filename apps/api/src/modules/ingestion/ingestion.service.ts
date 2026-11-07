@@ -1,190 +1,297 @@
 import { randomUUID } from 'node:crypto';
 import {
+  BusinessEventType,
+  computeDeduplicationHash,
+  DeviceStatus,
   EvidenceSourceType,
   IngestEvidenceDto,
   IngestionAckResult,
+  NormalizedPaymentRecordDto,
   TransactionState,
-  DeviceStatus,
 } from '@brisksms/shared';
 import { ParserEngine } from '@brisksms/parser-engine';
 import {
   dbStore,
-  RawPaymentEvidenceRecord,
   NormalizedPaymentRecord,
+  RawPaymentEvidenceRecord,
+  mapNormalizedPaymentRow,
+  mapRawEvidenceRow,
 } from '../../core/store.js';
 import { ReconciliationService } from '../reconciliation/reconciliation.service.js';
+import { assertTenantContext, sql, withTransaction } from '@brisksms/db';
 
+export const PARSER_ENGINE_VERSION = '1.0.0';
+
+/**
+ * Universal Payment Evidence Ingestion Service
+ *
+ * CRITICAL FINANCIAL INVARIANT (Section 3.C):
+ * Ingesting an Android payment notification records immutable raw evidence (`OBSERVED`),
+ * normalizes payment fields (`NORMALIZED`), and evaluates candidate invoice matches (`MATCHED` /
+ * `REVIEW_REQUIRED` / `UNMATCHED`). It NEVER automatically marks a payment as `VERIFIED` or
+ * an invoice as `PAID`. Independent or manual verification is required via `ReconciliationService.verifyPayment()`.
+ */
 export class IngestionService {
-  private readonly parserEngine: ParserEngine;
-  private readonly reconciliationService: ReconciliationService;
+  private readonly parserEngine = new ParserEngine();
 
-  constructor(reconciliationService?: ReconciliationService, parserEngine?: ParserEngine) {
-    this.reconciliationService = reconciliationService ?? new ReconciliationService();
-    this.parserEngine = parserEngine ?? new ParserEngine();
-  }
+  constructor(private readonly reconciliationService: ReconciliationService) {}
 
-  /**
-   * Universal Payment Ingestion Handler
-   * Receives payment evidence from Android relay, bank webhooks, aggregators, or manual uploads.
-   * Preserves raw evidence immutably, runs provider parsers, deduplicates cryptographically,
-   * and routes to the financial reconciliation engine.
-   */
-  public async ingestEvidence(dto: IngestEvidenceDto): Promise<IngestionAckResult> {
-    const orgId = dto.organizationId;
-    if (!orgId) {
-      throw new Error('Organization ID is required for payment ingestion');
-    }
+  async ingestEvidence(dto: IngestEvidenceDto): Promise<IngestionAckResult> {
+    assertTenantContext({ organizationId: dto.organizationId });
 
-    const organization = dbStore.organizations.get(orgId);
-    if (!organization) {
-      throw new Error(`Organization with ID '${orgId}' does not exist`);
-    }
-
-    // Validate Android device pairing and state when coming from relay
+    // 1. Validate source device authorization when relayed from Android companion
     if (dto.sourceType === EvidenceSourceType.ANDROID_NOTIFICATION_RELAY && dto.deviceId) {
-      const device = dbStore.devices.get(dto.deviceId);
-      if (!device || device.organizationId !== orgId) {
-        throw new Error(`Device '${dto.deviceId}' is not registered under organization '${orgId}'`);
-      }
-      if (device.status === DeviceStatus.REVOKED) {
-        throw new Error(`Device '${dto.deviceId}' has been revoked`);
-      }
-      if (device.status === DeviceStatus.QUARANTINED) {
-        throw new Error(`Device '${dto.deviceId}' is quarantined`);
+      const device = await dbStore.getDeviceById(dto.deviceId, dto.organizationId);
+      if (!device || device.status !== DeviceStatus.ACTIVE) {
+        throw new Error('Unauthorized or inactive Android relay device for organization.');
       }
     }
 
-    const now = new Date();
-    const deviceTimestamp = new Date(dto.deviceTimestamp);
+    // 2. Parse notification payload using deterministic provider adapters
+    const parsed = this.parserEngine.parseNotification(
+      dto.senderAddress,
+      dto.rawPayload,
+      dto.organizationId,
+      dto.deviceTimestamp,
+    );
+    const evidenceId = randomUUID();
 
-    // 1. Immutable Raw Evidence Persistence
-    const rawRecord: RawPaymentEvidenceRecord = {
-      id: randomUUID(),
-      organizationId: orgId,
-      sourceType: dto.sourceType,
-      deviceId: dto.deviceId ?? null,
-      senderAddress: dto.senderAddress.trim(),
-      rawPayload: dto.rawPayload.trim(),
-      simSlot: dto.simSlot ?? 1,
-      deviceTimestamp: isNaN(deviceTimestamp.getTime()) ? now : deviceTimestamp,
-      signature: dto.signature ?? null,
-      nonce: dto.nonce ?? null,
-      sequenceNumber: dto.sequenceNumber ? BigInt(dto.sequenceNumber) : null,
-      receivedAt: now,
-    };
+    if (!parsed) {
+      await sql`
+        INSERT INTO "raw_payment_evidence" (
+          "id", "organization_id", "source_type", "device_id", "sender_address",
+          "raw_payload", "sim_slot", "device_timestamp", "signature", "nonce",
+          "sequence_number", "parser_version", "parse_status"
+        )
+        VALUES (
+          ${evidenceId},
+          ${dto.organizationId},
+          ${dto.sourceType}::"EvidenceSourceType",
+          ${dto.deviceId ?? null},
+          ${dto.senderAddress},
+          ${dto.rawPayload},
+          ${dto.simSlot ?? 1},
+          ${dto.deviceTimestamp},
+          ${dto.signature ?? null},
+          ${dto.nonce ?? null},
+          ${dto.sequenceNumber !== undefined && dto.sequenceNumber !== null ? dto.sequenceNumber.toString() : null}::bigint,
+          ${PARSER_ENGINE_VERSION},
+          'PARSE_FAILED'
+        )
+      `;
 
-    dbStore.rawEvidences.push(rawRecord);
+      return {
+        acknowledged: true,
+        evidenceId,
+        parserVersion: PARSER_ENGINE_VERSION,
+        status: 'PARSE_FAILED',
+      };
+    }
 
-    // 2. Extensible Provider Parsing & Canonical Normalization
-    const parsedDraft = this.parserEngine.parseNotification(
-      rawRecord.senderAddress,
-      rawRecord.rawPayload,
-      orgId,
-      rawRecord.deviceTimestamp,
+    // 3. Compute cryptographic SHA-256 deduplication key
+    const deduplicationHash = computeDeduplicationHash(
+      dto.organizationId,
+      parsed.provider,
+      parsed.reference,
+      parsed.amountCents,
+      parsed.providerTimestamp,
     );
 
-    if (!parsedDraft) {
-      // Notification is not a supported financial transaction or cannot be parsed
-      return {
-        acknowledged: true,
-        evidenceId: rawRecord.id,
-        status: 'PARSE_FAILED',
-        state: TransactionState.UNMATCHED,
-      };
-    }
+    // 4. Commit raw evidence, deduplication check, normalized payment, candidate match, and outbox events in an ACID transaction
+    return withTransaction(async (tx) => {
+      // Lock/check existing normalized payment by (organization_id, deduplication_hash)
+      const existingRows = await tx`
+        SELECT * FROM "normalized_payments"
+        WHERE "organization_id" = ${dto.organizationId} AND "deduplication_hash" = ${deduplicationHash}
+        LIMIT 1
+      `;
 
-    // 3. Cryptographic Deterministic Deduplication
-    const dedupKey = `${orgId}:${parsedDraft.deduplicationHash}`;
-    const existingPaymentId = dbStore.paymentsByDeduplication.get(dedupKey);
+      if (existingRows.length > 0) {
+        const existingPayment = mapNormalizedPaymentRow(existingRows[0]!);
 
-    if (existingPaymentId) {
-      // Deterministic replay: Return acknowledgement idempotently without duplicate records
-      const existingPayment = dbStore.normalizedPayments.get(existingPaymentId);
-      return {
-        acknowledged: true,
-        evidenceId: rawRecord.id,
-        paymentId: existingPaymentId,
-        status: 'DUPLICATE',
-        state: TransactionState.DUPLICATE_REJECTED,
-        deduplicationHash: parsedDraft.deduplicationHash,
-        matchedInvoiceId: existingPayment?.matchedInvoiceId ?? undefined,
-        amountCents: parsedDraft.amountCents.toString(),
-        reference: parsedDraft.reference,
-      };
-    }
+        // Append forensic raw evidence entry marked DUPLICATE_REJECTED
+        await tx`
+          INSERT INTO "raw_payment_evidence" (
+            "id", "organization_id", "source_type", "device_id", "sender_address",
+            "raw_payload", "sim_slot", "device_timestamp", "signature", "nonce",
+            "sequence_number", "parser_version", "parse_status"
+          )
+          VALUES (
+            ${evidenceId},
+            ${dto.organizationId},
+            ${dto.sourceType}::"EvidenceSourceType",
+            ${dto.deviceId ?? null},
+            ${dto.senderAddress},
+            ${dto.rawPayload},
+            ${dto.simSlot ?? 1},
+            ${dto.deviceTimestamp},
+            ${dto.signature ?? null},
+            ${dto.nonce ?? null},
+            ${dto.sequenceNumber !== undefined && dto.sequenceNumber !== null ? dto.sequenceNumber.toString() : null}::bigint,
+            ${PARSER_ENGINE_VERSION},
+            'DUPLICATE_REJECTED'
+          )
+        `;
 
-    // 4. Create Normalized Payment Record
-    const paymentRecord: NormalizedPaymentRecord = {
-      id: randomUUID(),
-      organizationId: orgId,
-      deviceId: dto.deviceId ?? null,
-      rawEvidenceId: rawRecord.id,
-      provider: parsedDraft.provider,
-      reference: parsedDraft.reference,
-      amountCents: parsedDraft.amountCents,
-      currency: parsedDraft.currency,
-      senderPhone: parsedDraft.senderPhone,
-      senderName: parsedDraft.senderName,
-      recipientAccount: parsedDraft.recipientAccount,
-      customerMemo: parsedDraft.customerMemo,
-      providerTimestamp: parsedDraft.providerTimestamp,
-      state: TransactionState.NORMALIZED,
-      deduplicationHash: parsedDraft.deduplicationHash,
-      matchedInvoiceId: null,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    dbStore.normalizedPayments.set(paymentRecord.id, paymentRecord);
-    dbStore.paymentsByDeduplication.set(dedupKey, paymentRecord.id);
-
-    // 5. Route to Deterministic Financial Reconciliation
-    const reconciliation = this.reconciliationService.reconcilePayment(paymentRecord);
-
-    return {
-      acknowledged: true,
-      evidenceId: rawRecord.id,
-      paymentId: paymentRecord.id,
-      status: 'OBSERVED',
-      state: reconciliation.state,
-      deduplicationHash: paymentRecord.deduplicationHash,
-      matchedInvoiceId: reconciliation.matchedInvoiceId ?? undefined,
-      amountCents: paymentRecord.amountCents.toString(),
-      reference: paymentRecord.reference,
-    };
-  }
-
-  /**
-   * Retrieves raw evidence by ID with strict tenant isolation
-   */
-  public getRawEvidence(organizationId: string, id: string): RawPaymentEvidenceRecord | null {
-    const evidence = dbStore.rawEvidences.find((e) => e.id === id && e.organizationId === organizationId);
-    return evidence ?? null;
-  }
-
-  /**
-   * Retrieves normalized payment by ID
-   */
-  public getPayment(organizationId: string, id: string): NormalizedPaymentRecord | null {
-    const payment = dbStore.normalizedPayments.get(id);
-    if (!payment || payment.organizationId !== organizationId) {
-      return null;
-    }
-    return payment;
-  }
-
-  /**
-   * Lists normalized payments with optional state filter
-   */
-  public listPayments(organizationId: string, state?: TransactionState): NormalizedPaymentRecord[] {
-    const results: NormalizedPaymentRecord[] = [];
-    for (const payment of dbStore.normalizedPayments.values()) {
-      if (payment.organizationId === organizationId) {
-        if (!state || payment.state === state) {
-          results.push(payment);
-        }
+        return {
+          acknowledged: true,
+          evidenceId,
+          deduplicationHash,
+          parserVersion: PARSER_ENGINE_VERSION,
+          status: 'DUPLICATE',
+          paymentId: existingPayment.id,
+          matchedInvoiceId: existingPayment.matchedInvoiceId,
+          candidateInvoiceId: existingPayment.candidateInvoiceId,
+          amountCents: existingPayment.amountCents.toString(),
+          reference: existingPayment.reference,
+          state: TransactionState.DUPLICATE_REJECTED,
+        };
       }
-    }
-    return results.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+
+      // Persist immutable RawPaymentEvidence (Step 1: Evidence Received)
+      await tx`
+        INSERT INTO "raw_payment_evidence" (
+          "id", "organization_id", "source_type", "device_id", "sender_address",
+          "raw_payload", "sim_slot", "device_timestamp", "signature", "nonce",
+          "sequence_number", "parser_version", "parse_status"
+        )
+        VALUES (
+          ${evidenceId},
+          ${dto.organizationId},
+          ${dto.sourceType}::"EvidenceSourceType",
+          ${dto.deviceId ?? null},
+          ${dto.senderAddress},
+          ${dto.rawPayload},
+          ${dto.simSlot ?? 1},
+          ${dto.deviceTimestamp},
+          ${dto.signature ?? null},
+          ${dto.nonce ?? null},
+          ${dto.sequenceNumber !== undefined && dto.sequenceNumber !== null ? dto.sequenceNumber.toString() : null}::bigint,
+          ${PARSER_ENGINE_VERSION},
+          'OBSERVED'
+        )
+      `;
+
+      // Persist NormalizedPayment (Step 2: Evidence Parsed)
+      const paymentId = randomUUID();
+      const payRows = await tx`
+        INSERT INTO "normalized_payments" (
+          "id", "organization_id", "device_id", "raw_evidence_id", "provider",
+          "reference", "amount_cents", "currency", "sender_phone", "sender_name",
+          "recipient_account", "customer_memo", "provider_timestamp", "parser_version",
+          "state", "deduplication_hash"
+        )
+        VALUES (
+          ${paymentId},
+          ${dto.organizationId},
+          ${dto.deviceId ?? null},
+          ${evidenceId},
+          ${parsed.provider}::"PaymentProvider",
+          ${parsed.reference},
+          ${parsed.amountCents.toString()}::bigint,
+          ${parsed.currency || 'TZS'},
+          ${parsed.senderPhone},
+          ${parsed.senderName ?? null},
+          ${parsed.recipientAccount ?? null},
+          ${parsed.customerMemo ?? null},
+          ${parsed.providerTimestamp},
+          ${PARSER_ENGINE_VERSION},
+          ${TransactionState.NORMALIZED}::"TransactionState",
+          ${deduplicationHash}
+        )
+        RETURNING *
+      `;
+      const paymentRecord = mapNormalizedPaymentRow(payRows[0]!);
+
+      // Emit payment.evidence.received outbox event in the same transaction
+      await dbStore.insertOutboxEvent(
+        {
+          organizationId: dto.organizationId,
+          eventType: BusinessEventType.PAYMENT_EVIDENCE_RECEIVED,
+          payload: {
+            paymentId,
+            evidenceId,
+            provider: parsed.provider,
+            reference: parsed.reference,
+            amountCents: parsed.amountCents.toString(),
+            currency: parsed.currency || 'TZS',
+            senderPhone: parsed.senderPhone,
+            parserVersion: PARSER_ENGINE_VERSION,
+          },
+        },
+        tx,
+      );
+
+      // Step 3: Evaluate candidate invoice match (does NOT mark invoice PAID or payment VERIFIED)
+      const matchResult = await this.reconciliationService.reconcilePayment(paymentRecord, tx);
+
+      const finalPayRows = await tx`
+        SELECT * FROM "normalized_payments" WHERE "id" = ${paymentId} LIMIT 1
+      `;
+      const finalPayment = mapNormalizedPaymentRow(finalPayRows[0]!);
+
+      return {
+        acknowledged: true,
+        evidenceId,
+        deduplicationHash,
+        parserVersion: PARSER_ENGINE_VERSION,
+        status: 'OBSERVED',
+        paymentId,
+        matchedInvoiceId: matchResult.matchedInvoiceId ?? undefined,
+        candidateInvoiceId: finalPayment.candidateInvoiceId ?? undefined,
+        amountCents: parsed.amountCents.toString(),
+        reference: parsed.reference,
+        state: finalPayment.state,
+      };
+    });
+  }
+
+  async listPayments(organizationId: string): Promise<NormalizedPaymentRecordDto[]> {
+    assertTenantContext({ organizationId });
+    const rows = await sql`
+      SELECT * FROM "normalized_payments"
+      WHERE "organization_id" = ${organizationId}
+      ORDER BY "created_at" DESC
+    `;
+    return rows.map((r) => {
+      const p = mapNormalizedPaymentRow(r);
+      return {
+        id: p.id,
+        organizationId: p.organizationId,
+        deviceId: p.deviceId,
+        rawEvidenceId: p.rawEvidenceId,
+        provider: p.provider,
+        reference: p.reference,
+        amountCents: p.amountCents,
+        currency: p.currency,
+        senderPhone: p.senderPhone,
+        senderName: p.senderName,
+        recipientAccount: p.recipientAccount,
+        customerMemo: p.customerMemo,
+        providerTimestamp: p.providerTimestamp,
+        parserVersion: p.parserVersion,
+        state: p.state,
+        deduplicationHash: p.deduplicationHash,
+        candidateInvoiceId: p.candidateInvoiceId,
+        matchedInvoiceId: p.matchedInvoiceId,
+        verifiedAt: p.verifiedAt,
+        verifiedById: p.verifiedById,
+        createdAt: p.createdAt,
+      };
+    });
+  }
+
+  async listRawEvidence(organizationId: string): Promise<RawPaymentEvidenceRecord[]> {
+    assertTenantContext({ organizationId });
+    const rows = await sql`
+      SELECT * FROM "raw_payment_evidence"
+      WHERE "organization_id" = ${organizationId}
+      ORDER BY "received_at" DESC
+    `;
+    return rows.map(mapRawEvidenceRow);
   }
 }
+
+export const ingestionService = new IngestionService(
+  new ReconciliationService(),
+);

@@ -1,7 +1,8 @@
-import { dbStore, UserRecord } from '../../core/store.js';
+import { dbStore, UserRecord, mapUserRow } from '../../core/store.js';
 import { hashPassword, verifyPassword, signJwt, generateSecureToken, hashToken } from '../../core/crypto.js';
 import { HttpException } from '../../core/http.js';
 import { tokenBlacklist } from '../../core/guards.js';
+import { sql, withTransaction } from '@brisksms/db';
 import { randomUUID } from 'node:crypto';
 
 export interface RegisterDto {
@@ -33,65 +34,76 @@ export class AuthService {
       throw new HttpException(400, 'WEAK_PASSWORD', 'Password must be at least 8 characters long');
     }
 
-    const existingUser = dbStore.findUserByEmail(dto.email);
+    const existingUser = await dbStore.findUserByEmail(dto.email);
     if (existingUser) {
       throw new HttpException(409, 'EMAIL_EXISTS', 'A user with this email address is already registered');
     }
 
     const passwordHash = hashPassword(dto.password);
-    const user = dbStore.createUser({
-      email: dto.email,
-      passwordHash,
-      fullName: dto.fullName,
-      phoneNumber: dto.phoneNumber,
+
+    return withTransaction(async (tx) => {
+      const user = await dbStore.createUser(
+        {
+          email: dto.email,
+          passwordHash,
+          fullName: dto.fullName,
+          phoneNumber: dto.phoneNumber,
+        },
+        tx,
+      );
+
+      let organizationId: string | undefined;
+      let userRole: string | undefined;
+
+      if (dto.organizationName) {
+        const slug = dto.organizationName
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/^-|-$/g, '');
+        const { org, membership } = await dbStore.createOrganization(
+          {
+            name: dto.organizationName,
+            slug: `${slug}-${randomUUID().slice(0, 6)}`,
+            creatorUserId: user.id,
+          },
+          tx,
+        );
+        organizationId = org.id;
+        userRole = membership.role;
+      }
+
+      const jti = randomUUID();
+      const accessToken = signJwt(
+        {
+          sub: user.id,
+          email: user.email,
+          organizationId,
+          role: userRole,
+          jti,
+        },
+        900,
+      );
+
+      const rawRefreshToken = generateSecureToken('bsk_ref');
+      const refreshHash = hashToken(rawRefreshToken);
+      const expiresAt = new Date(Date.now() + 30 * 86400 * 1000);
+
+      await tx`
+        INSERT INTO "refresh_tokens" ("token_hash", "user_id", "jti", "expires_at")
+        VALUES (${refreshHash}, ${user.id}, ${jti}, ${expiresAt})
+      `;
+
+      const { passwordHash: _, ...userSafe } = user;
+      return {
+        user: userSafe,
+        organizationId,
+        tokens: {
+          accessToken,
+          refreshToken: rawRefreshToken,
+          expiresIn: 900,
+        },
+      };
     });
-
-    // Optional default organization creation on signup
-    let organizationId: string | undefined;
-    let userRole: string | undefined;
-
-    if (dto.organizationName) {
-      const slug = dto.organizationName
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-|-$/g, '');
-      const { org, membership } = dbStore.createOrganization({
-        name: dto.organizationName,
-        slug: `${slug}-${randomUUID().slice(0, 6)}`,
-        creatorUserId: user.id,
-      });
-      organizationId = org.id;
-      userRole = membership.role;
-    }
-
-    const jti = randomUUID();
-    const accessToken = signJwt({
-      sub: user.id,
-      email: user.email,
-      organizationId,
-      role: userRole,
-      jti,
-    }, 900); // 15 mins
-
-    const rawRefreshToken = generateSecureToken('bsk_ref');
-    const refreshHash = hashToken(rawRefreshToken);
-    dbStore.refreshTokens.set(refreshHash, {
-      tokenHash: refreshHash,
-      userId: user.id,
-      jti,
-      expiresAt: new Date(Date.now() + 30 * 86400 * 1000), // 30 days
-    });
-
-    const { passwordHash: _, ...userSafe } = user;
-    return {
-      user: userSafe,
-      organizationId,
-      tokens: {
-        accessToken,
-        refreshToken: rawRefreshToken,
-        expiresIn: 900,
-      },
-    };
   }
 
   async login(dto: LoginDto): Promise<{ user: Omit<UserRecord, 'passwordHash'>; organizations: { id: string; name: string; role: string }[]; tokens: AuthTokens }> {
@@ -99,7 +111,7 @@ export class AuthService {
       throw new HttpException(400, 'INVALID_PAYLOAD', 'Email and password are required');
     }
 
-    const user = dbStore.findUserByEmail(dto.email);
+    const user = await dbStore.findUserByEmail(dto.email);
     if (!user) {
       throw new HttpException(401, 'INVALID_CREDENTIALS', 'Invalid email or password');
     }
@@ -113,26 +125,29 @@ export class AuthService {
       throw new HttpException(403, 'ACCOUNT_DEACTIVATED', 'Your account has been deactivated. Please contact support.');
     }
 
-    const userOrgs = dbStore.getUserOrganizations(user.id);
+    const userOrgs = await dbStore.getUserOrganizations(user.id);
     const primaryOrg = userOrgs[0];
 
     const jti = randomUUID();
-    const accessToken = signJwt({
-      sub: user.id,
-      email: user.email,
-      organizationId: primaryOrg?.org.id,
-      role: primaryOrg?.role,
-      jti,
-    }, 900);
+    const accessToken = signJwt(
+      {
+        sub: user.id,
+        email: user.email,
+        organizationId: primaryOrg?.org.id,
+        role: primaryOrg?.role,
+        jti,
+      },
+      900,
+    );
 
     const rawRefreshToken = generateSecureToken('bsk_ref');
     const refreshHash = hashToken(rawRefreshToken);
-    dbStore.refreshTokens.set(refreshHash, {
-      tokenHash: refreshHash,
-      userId: user.id,
-      jti,
-      expiresAt: new Date(Date.now() + 30 * 86400 * 1000),
-    });
+    const expiresAt = new Date(Date.now() + 30 * 86400 * 1000);
+
+    await sql`
+      INSERT INTO "refresh_tokens" ("token_hash", "user_id", "jti", "expires_at")
+      VALUES (${refreshHash}, ${user.id}, ${jti}, ${expiresAt})
+    `;
 
     const { passwordHash: _, ...userSafe } = user;
     return {
@@ -152,69 +167,92 @@ export class AuthService {
     }
 
     const refreshHash = hashToken(rawRefreshToken);
-    const record = dbStore.refreshTokens.get(refreshHash);
 
-    if (!record || record.revokedAt || record.expiresAt < new Date()) {
-      throw new HttpException(401, 'INVALID_TOKEN', 'Refresh token is expired or invalid');
-    }
+    return withTransaction(async (tx) => {
+      const tokenRows = await tx`
+        SELECT * FROM "refresh_tokens"
+        WHERE "token_hash" = ${refreshHash}
+        FOR UPDATE
+      `;
+      const record = tokenRows[0];
 
-    const user = dbStore.findUserById(record.userId);
-    if (!user || !user.isActive) {
-      throw new HttpException(401, 'USER_INACTIVE', 'User account is not active');
-    }
+      if (!record || record.revoked_at || new Date(record.expires_at) < new Date()) {
+        throw new HttpException(401, 'INVALID_TOKEN', 'Refresh token is expired or invalid');
+      }
 
-    // Revoke old refresh token (Rotation)
-    record.revokedAt = new Date();
+      const userRows = await tx`SELECT * FROM "users" WHERE "id" = ${record.user_id} LIMIT 1`;
+      const user = userRows[0] ? mapUserRow(userRows[0]) : null;
+      if (!user || !user.isActive) {
+        throw new HttpException(401, 'USER_INACTIVE', 'User account is not active');
+      }
 
-    const userOrgs = dbStore.getUserOrganizations(user.id);
-    const primaryOrg = userOrgs[0];
+      // Revoke old refresh token (Rotation)
+      await tx`
+        UPDATE "refresh_tokens" SET "revoked_at" = NOW() WHERE "token_hash" = ${refreshHash}
+      `;
 
-    const newJti = randomUUID();
-    const newAccessToken = signJwt({
-      sub: user.id,
-      email: user.email,
-      organizationId: primaryOrg?.org.id,
-      role: primaryOrg?.role,
-      jti: newJti,
-    }, 900);
+      const userOrgs = await dbStore.getUserOrganizations(user.id, tx);
+      const primaryOrg = userOrgs[0];
 
-    const newRawRefreshToken = generateSecureToken('bsk_ref');
-    const newRefreshHash = hashToken(newRawRefreshToken);
-    dbStore.refreshTokens.set(newRefreshHash, {
-      tokenHash: newRefreshHash,
-      userId: user.id,
-      jti: newJti,
-      expiresAt: new Date(Date.now() + 30 * 86400 * 1000),
+      const newJti = randomUUID();
+      const newAccessToken = signJwt(
+        {
+          sub: user.id,
+          email: user.email,
+          organizationId: primaryOrg?.org.id,
+          role: primaryOrg?.role,
+          jti: newJti,
+        },
+        900,
+      );
+
+      const newRawRefreshToken = generateSecureToken('bsk_ref');
+      const newRefreshHash = hashToken(newRawRefreshToken);
+      const expiresAt = new Date(Date.now() + 30 * 86400 * 1000);
+
+      await tx`
+        INSERT INTO "refresh_tokens" ("token_hash", "user_id", "jti", "expires_at")
+        VALUES (${newRefreshHash}, ${user.id}, ${newJti}, ${expiresAt})
+      `;
+
+      return {
+        accessToken: newAccessToken,
+        refreshToken: newRawRefreshToken,
+        expiresIn: 900,
+      };
     });
-
-    return {
-      accessToken: newAccessToken,
-      refreshToken: newRawRefreshToken,
-      expiresIn: 900,
-    };
   }
 
-  async revokeSession(jti: string): Promise<void> {
+  async revokeSession(jti: string, userId?: string): Promise<void> {
     if (jti) {
       tokenBlacklist.add(jti);
+      const expiresAt = new Date(Date.now() + 86400 * 1000);
+      await sql`
+        INSERT INTO "revoked_sessions" ("jti", "user_id", "expires_at", "revoked_at")
+        VALUES (${jti}, ${userId ?? null}, ${expiresAt}, NOW())
+        ON CONFLICT ("jti") DO NOTHING
+      `;
     }
   }
 
   async verifyEmail(userId: string): Promise<void> {
-    const user = dbStore.findUserById(userId);
-    if (!user) {
+    const rows = await sql`
+      UPDATE "users"
+      SET "is_email_verified" = true, "updated_at" = NOW()
+      WHERE "id" = ${userId}
+      RETURNING "id"
+    `;
+    if (rows.length === 0) {
       throw new HttpException(404, 'USER_NOT_FOUND', 'User not found');
     }
-    user.isEmailVerified = true;
-    user.updatedAt = new Date();
   }
 
   async getMe(userId: string): Promise<{ user: Omit<UserRecord, 'passwordHash'>; organizations: { id: string; name: string; role: string; planTier: string }[] }> {
-    const user = dbStore.findUserById(userId);
+    const user = await dbStore.findUserById(userId);
     if (!user) {
       throw new HttpException(404, 'USER_NOT_FOUND', 'User not found');
     }
-    const userOrgs = dbStore.getUserOrganizations(user.id);
+    const userOrgs = await dbStore.getUserOrganizations(user.id);
     const { passwordHash: _, ...userSafe } = user;
     return {
       user: userSafe,

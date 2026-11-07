@@ -1,35 +1,47 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { ApiKeyScope } from '@brisksms/shared';
-import { dbStore, OrganizationRecord } from '../src/core/store.js';
+import { ApiKeyScope, UserRole } from '@brisksms/shared';
+import { dbStore } from '../src/core/store.js';
 import { OAuthService } from '../src/modules/oauth/oauth.service.js';
 
 describe('OAuth 2.0 PKCE Server (@brisksms/api)', () => {
   let oauthService: OAuthService;
-  const orgId = randomUUID();
-  const userId = randomUUID();
+  let orgId = randomUUID();
+  let userId = randomUUID();
 
-  beforeEach(() => {
-    dbStore.reset();
+  beforeEach(async () => {
+    await dbStore.reset();
     oauthService = new OAuthService();
 
-    const org: OrganizationRecord = {
-      id: orgId,
+    const user = await dbStore.createUser({
+      email: 'oauth-owner@sahara.co.tz',
+      passwordHash: 'scrypt:salt:hash',
+      fullName: 'Sahara Owner',
+    });
+    userId = user.id;
+
+    const org = await dbStore.seedOrganizationDirect({
+      id: randomUUID(),
       name: 'Sahara Trading Hub',
-      slug: 'sahara-trading',
-      countryCode: 'TZ',
+      slug: `sahara-trading-${randomUUID().slice(0, 8)}`,
+      countryCode: 'TZA',
       timezone: 'Africa/Dar_es_Salaam',
       planTier: 'ENTERPRISE',
       isActive: true,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-    dbStore.organizations.set(orgId, org);
+    });
+    orgId = org.id;
+
+    await dbStore.addMember({
+      organizationId: orgId,
+      userId,
+      role: UserRole.OWNER,
+      actorId: userId,
+    });
   });
 
-  it('registers an OAuth client application with redirect URIs', () => {
-    const client = oauthService.registerClient({
+  it('registers an OAuth client application with redirect URIs', async () => {
+    const client = await oauthService.registerClient({
       organizationId: orgId,
       name: 'Zapier Community CLI App',
       redirectUris: ['https://zapier.com/dashboard/auth/oauth/return/App12345/'],
@@ -39,26 +51,23 @@ describe('OAuth 2.0 PKCE Server (@brisksms/api)', () => {
     assert.equal(client.name, 'Zapier Community CLI App');
     assert.equal(client.redirectUris[0], 'https://zapier.com/dashboard/auth/oauth/return/App12345/');
     assert.equal(client.isPublic, true);
-    assert.equal(dbStore.oauthClients.has(client.id), true);
   });
 
-  it('executes full RFC 7636 PKCE authorization code exchange flow', () => {
+  it('executes full RFC 7636 PKCE authorization code exchange flow', async () => {
     const redirectUri = 'https://zapier.com/dashboard/auth/oauth/return/App12345/';
-    const client = oauthService.registerClient({
+    const client = await oauthService.registerClient({
       organizationId: orgId,
       name: 'BriskSMS Zapier App',
       redirectUris: [redirectUri],
       isPublic: true,
     });
 
-    // 1. Client generates PKCE code_verifier and code_challenge (S256)
     const codeVerifier = randomBytes(32).toString('base64url');
     const codeChallenge = createHash('sha256')
       .update(codeVerifier, 'ascii')
       .digest('base64url');
 
-    // 2. Authorization request
-    const authCode = oauthService.generateAuthorizationCode({
+    const authCode = await oauthService.generateAuthorizationCode({
       clientId: client.id,
       userId,
       organizationId: orgId,
@@ -70,8 +79,7 @@ describe('OAuth 2.0 PKCE Server (@brisksms/api)', () => {
 
     assert.equal(authCode.startsWith('code_'), true);
 
-    // 3. Token exchange request with code_verifier
-    const tokenResponse = oauthService.exchangeCodeForTokens({
+    const tokenResponse = await oauthService.exchangeCodeForTokens({
       clientId: client.id,
       code: authCode,
       codeVerifier,
@@ -84,19 +92,17 @@ describe('OAuth 2.0 PKCE Server (@brisksms/api)', () => {
     assert.equal(tokenResponse.expires_in, 3600);
     assert.equal(tokenResponse.organization_id, orgId);
 
-    // 4. Verify access token authorization
-    const verified = oauthService.verifyAccessToken(tokenResponse.access_token, ApiKeyScope.SMS_SEND);
+    const verified = await oauthService.verifyAccessToken(tokenResponse.access_token, ApiKeyScope.SMS_SEND);
     assert.notEqual(verified, null);
     assert.equal(verified?.organizationId, orgId);
 
-    // Missing scope rejected
-    const ungranted = oauthService.verifyAccessToken(tokenResponse.access_token, ApiKeyScope.INVOICES_WRITE);
+    const ungranted = await oauthService.verifyAccessToken(tokenResponse.access_token, ApiKeyScope.INVOICES_WRITE);
     assert.equal(ungranted, null);
   });
 
-  it('rejects invalid PKCE code_verifier', () => {
+  it('rejects invalid PKCE code_verifier', async () => {
     const redirectUri = 'https://zapier.com/dashboard/auth/oauth/return/App12345/';
-    const client = oauthService.registerClient({
+    const client = await oauthService.registerClient({
       organizationId: orgId,
       name: 'BriskSMS Zapier App',
       redirectUris: [redirectUri],
@@ -107,7 +113,7 @@ describe('OAuth 2.0 PKCE Server (@brisksms/api)', () => {
       .update(codeVerifier, 'ascii')
       .digest('base64url');
 
-    const authCode = oauthService.generateAuthorizationCode({
+    const authCode = await oauthService.generateAuthorizationCode({
       clientId: client.id,
       userId,
       organizationId: orgId,
@@ -117,8 +123,7 @@ describe('OAuth 2.0 PKCE Server (@brisksms/api)', () => {
       codeChallengeMethod: 'S256',
     });
 
-    // Attempt token exchange with wrong code_verifier
-    assert.throws(
+    await assert.rejects(
       () =>
         oauthService.exchangeCodeForTokens({
           clientId: client.id,
@@ -130,9 +135,9 @@ describe('OAuth 2.0 PKCE Server (@brisksms/api)', () => {
     );
   });
 
-  it('prevents authorization code replay (single-use invariant)', () => {
+  it('prevents authorization code replay (single-use invariant)', async () => {
     const redirectUri = 'https://zapier.com/callback';
-    const client = oauthService.registerClient({
+    const client = await oauthService.registerClient({
       organizationId: orgId,
       name: 'BriskSMS Client',
       redirectUris: [redirectUri],
@@ -143,7 +148,7 @@ describe('OAuth 2.0 PKCE Server (@brisksms/api)', () => {
       .update(codeVerifier, 'ascii')
       .digest('base64url');
 
-    const authCode = oauthService.generateAuthorizationCode({
+    const authCode = await oauthService.generateAuthorizationCode({
       clientId: client.id,
       userId,
       organizationId: orgId,
@@ -152,16 +157,14 @@ describe('OAuth 2.0 PKCE Server (@brisksms/api)', () => {
       codeChallenge,
     });
 
-    // First exchange succeeds
-    oauthService.exchangeCodeForTokens({
+    await oauthService.exchangeCodeForTokens({
       clientId: client.id,
       code: authCode,
       codeVerifier,
       redirectUri,
     });
 
-    // Second replay attempt must be rejected
-    assert.throws(
+    await assert.rejects(
       () =>
         oauthService.exchangeCodeForTokens({
           clientId: client.id,
@@ -173,9 +176,9 @@ describe('OAuth 2.0 PKCE Server (@brisksms/api)', () => {
     );
   });
 
-  it('refreshes expired access tokens using valid refresh tokens', () => {
+  it('refreshes expired access tokens using valid refresh tokens', async () => {
     const redirectUri = 'https://zapier.com/callback';
-    const client = oauthService.registerClient({
+    const client = await oauthService.registerClient({
       organizationId: orgId,
       name: 'BriskSMS Client',
       redirectUris: [redirectUri],
@@ -186,7 +189,7 @@ describe('OAuth 2.0 PKCE Server (@brisksms/api)', () => {
       .update(codeVerifier, 'ascii')
       .digest('base64url');
 
-    const authCode = oauthService.generateAuthorizationCode({
+    const authCode = await oauthService.generateAuthorizationCode({
       clientId: client.id,
       userId,
       organizationId: orgId,
@@ -195,15 +198,14 @@ describe('OAuth 2.0 PKCE Server (@brisksms/api)', () => {
       codeChallenge,
     });
 
-    const tokens = oauthService.exchangeCodeForTokens({
+    const tokens = await oauthService.exchangeCodeForTokens({
       clientId: client.id,
       code: authCode,
       codeVerifier,
       redirectUri,
     });
 
-    // Refresh
-    const newTokens = oauthService.refreshTokens({
+    const newTokens = await oauthService.refreshTokens({
       clientId: client.id,
       refreshToken: tokens.refresh_token,
     });
@@ -211,18 +213,16 @@ describe('OAuth 2.0 PKCE Server (@brisksms/api)', () => {
     assert.notEqual(newTokens.access_token, tokens.access_token);
     assert.equal(newTokens.token_type, 'Bearer');
 
-    // Old access token should now be invalid
-    const oldVerified = oauthService.verifyAccessToken(tokens.access_token);
+    const oldVerified = await oauthService.verifyAccessToken(tokens.access_token);
     assert.equal(oldVerified, null);
 
-    // New access token is active
-    const newVerified = oauthService.verifyAccessToken(newTokens.access_token, ApiKeyScope.PAYMENTS_READ);
+    const newVerified = await oauthService.verifyAccessToken(newTokens.access_token, ApiKeyScope.PAYMENTS_READ);
     assert.notEqual(newVerified, null);
   });
 
-  it('revokes active access tokens and refresh tokens upon request', () => {
+  it('revokes active access tokens and refresh tokens upon request', async () => {
     const redirectUri = 'https://zapier.com/callback';
-    const client = oauthService.registerClient({
+    const client = await oauthService.registerClient({
       organizationId: orgId,
       name: 'BriskSMS Client',
       redirectUris: [redirectUri],
@@ -233,7 +233,7 @@ describe('OAuth 2.0 PKCE Server (@brisksms/api)', () => {
       .update(codeVerifier, 'ascii')
       .digest('base64url');
 
-    const authCode = oauthService.generateAuthorizationCode({
+    const authCode = await oauthService.generateAuthorizationCode({
       clientId: client.id,
       userId,
       organizationId: orgId,
@@ -242,19 +242,17 @@ describe('OAuth 2.0 PKCE Server (@brisksms/api)', () => {
       codeChallenge,
     });
 
-    const tokens = oauthService.exchangeCodeForTokens({
+    const tokens = await oauthService.exchangeCodeForTokens({
       clientId: client.id,
       code: authCode,
       codeVerifier,
       redirectUri,
     });
 
-    // Revoke
-    const revoked = oauthService.revokeToken(tokens.access_token);
+    const revoked = await oauthService.revokeToken(tokens.access_token);
     assert.equal(revoked, true);
 
-    const verified = oauthService.verifyAccessToken(tokens.access_token);
+    const verified = await oauthService.verifyAccessToken(tokens.access_token);
     assert.equal(verified, null);
   });
 });
-
