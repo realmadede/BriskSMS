@@ -76,11 +76,12 @@ export function resolveDbConnectionConfig(customDatabaseUrl?: string): ResolvedD
   const rawUrl =
     customDatabaseUrl ??
     process.env.DATABASE_URL ??
-    'postgresql://brisksms:brisksms_dev_secret@localhost:5432/brisksms_dev?schema=public';
+    'postgresql://brisksms:brisksms_dev_secret@localhost:5432/brisksms_dev';
 
   let parsed: URL;
   try {
     parsed = new URL(rawUrl);
+    parsed.searchParams.delete('schema');
   } catch {
     throw new DatabaseUnavailableError(`Invalid DATABASE_URL format: ${rawUrl}`);
   }

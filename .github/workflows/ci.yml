@@ -19,26 +19,27 @@ jobs:
           POSTGRES_PASSWORD: brisksms_dev_secret
           POSTGRES_DB: brisksms_dev
         ports:
-          - 5432:5432
+          - 5433:5432
         options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
+          --health-cmd "pg_isready -U brisksms -d brisksms_dev"
+          --health-interval 5s
           --health-timeout 5s
-          --health-retries 5
+          --health-retries 10
 
       redis:
         image: redis:7-alpine
         ports:
-          - 6379:6379
+          - 6380:6379
         options: >-
           --health-cmd "redis-cli ping"
-          --health-interval 10s
+          --health-interval 5s
           --health-timeout 5s
-          --health-retries 5
+          --health-retries 10
 
     env:
-      DATABASE_URL: postgresql://brisksms:brisksms_dev_secret@localhost:5432/brisksms_dev?schema=public
-      REDIS_URL: redis://localhost:6379
+      DATABASE_URL: postgresql://brisksms:brisksms_dev_secret@127.0.0.1:5433/brisksms_dev
+      REDIS_URL: redis://127.0.0.1:6380
+      FORCE_TCP_POSTGRES: 'true'
       FORCE_TCP_REDIS: 'true'
 
     steps:
@@ -64,9 +65,21 @@ jobs:
       - name: Build Workspace Packages
         run: npm run build
 
+      - name: Verify Service Connectivity
+        run: |
+          for i in {1..30}; do
+            if nc -z 127.0.0.1 5433 && nc -z 127.0.0.1 6380; then
+              echo "PostgreSQL (port 5433) and Redis (port 6380) are reachable."
+              exit 0
+            fi
+            echo "Waiting for services... ($i/30)"
+            sleep 1
+          done
+          echo "Services unreachable after 30 seconds"
+          exit 1
+
       - name: Apply Database Migrations
         run: npm run db:migrate
 
       - name: Execute Automated Test Corpus
         run: npm test
-
