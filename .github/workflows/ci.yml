@@ -11,6 +11,36 @@ jobs:
     name: Build & Verify Monorepo
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: brisksms
+          POSTGRES_PASSWORD: brisksms_dev_secret
+          POSTGRES_DB: brisksms_dev
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://brisksms:brisksms_dev_secret@localhost:5432/brisksms_dev?schema=public
+      REDIS_URL: redis://localhost:6379
+      FORCE_TCP_REDIS: 'true'
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -28,8 +58,14 @@ jobs:
       - name: Install Workspace Dependencies
         run: npm install
 
+      - name: Typecheck Workspace
+        run: npm run typecheck
+
       - name: Build Workspace Packages
         run: npm run build
+
+      - name: Apply Database Migrations
+        run: npm run db:migrate
 
       - name: Execute Automated Test Corpus
         run: npm test
