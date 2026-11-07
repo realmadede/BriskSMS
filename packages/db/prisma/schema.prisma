@@ -207,6 +207,8 @@ model Organization {
   subscriptionHistory   SubscriptionHistory[]
   subscriptionInvoices  SubscriptionBillingInvoice[]
   outboxEvents          OutboxEvent[]
+  smsGateSigningKeys    SmsGateSigningKey[]
+  smsGateWebhookEvents  SmsGateWebhookEvent[]
 
   @@map("organizations")
 }
@@ -1047,4 +1049,38 @@ model SubscriptionBillingInvoice {
 
   @@index([organizationId, isPaid])
   @@map("subscription_billing_invoices")
+}
+
+model SmsGateSigningKey {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId   String    @map("organization_id") @db.Uuid
+  deviceId         String?   @map("device_id") @db.VarChar(100)
+  encryptedKey     String    @map("encrypted_key") @db.Text
+  encryptedPrevKey String?   @map("encrypted_prev_key") @db.Text
+  rotatedAt        DateTime? @map("rotated_at") @db.Timestamptz(6)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@map("smsgate_signing_keys")
+}
+
+model SmsGateWebhookEvent {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId    String   @map("organization_id") @db.Uuid
+  deviceId          String?  @map("device_id") @db.VarChar(100)
+  eventFingerprint  String   @unique @map("event_fingerprint") @db.VarChar(128)
+  providerMessageId String   @map("provider_message_id") @db.VarChar(100)
+  eventType         String   @map("event_type") @db.VarChar(50)
+  signature         String   @map("signature") @db.VarChar(128)
+  timestamp         BigInt   @map("timestamp")
+  status            String   @default("PROCESSED") @map("status") @db.VarChar(50)
+  firstSeenAt       DateTime @default(now()) @map("first_seen_at") @db.Timestamptz(6)
+  processedAt       DateTime @default(now()) @map("processed_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, providerMessageId])
+  @@map("smsgate_webhook_events")
 }

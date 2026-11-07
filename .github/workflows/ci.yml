@@ -41,6 +41,7 @@ jobs:
       REDIS_URL: redis://127.0.0.1:6380
       FORCE_TCP_POSTGRES: 'true'
       FORCE_TCP_REDIS: 'true'
+      ENCRYPTION_MASTER_KEY: brisksms_ci_encryption_master_key_32_bytes_min!
 
     steps:
       - name: Checkout Repository

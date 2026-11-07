@@ -156,7 +156,7 @@ export class SmsGateProvider implements MessagingProvider {
     signatureHeader: string,
     timestampHeader: string,
     signingSecret: string | string[],
-    options?: { toleranceSeconds?: number; clockSkewTolerance?: number },
+    options?: { toleranceSeconds?: number; clockSkewTolerance?: number; skipReplayCache?: boolean },
   ): WebhookVerificationResult {
     // 1. Signature header existence & format
     if (!signatureHeader || typeof signatureHeader !== 'string') {
@@ -192,12 +192,14 @@ export class SmsGateProvider implements MessagingProvider {
       return { isValid: false, error: 'FUTURE_TIMESTAMP' };
     }
 
-    // 4. Replay Attack Prevention
+    // 4. In-process Replay Attack Prevention (skipped when distributed DB deduplication is active)
     const replayKey = `${cleanSig}:${cleanTimestamp}`;
     const nowMs = Date.now();
-    const cachedExpiry = this.replayCache.get(replayKey);
-    if (cachedExpiry && cachedExpiry > nowMs) {
-      return { isValid: false, error: 'REPLAY_ATTACK' };
+    if (!options?.skipReplayCache) {
+      const cachedExpiry = this.replayCache.get(replayKey);
+      if (cachedExpiry && cachedExpiry > nowMs) {
+        return { isValid: false, error: 'REPLAY_ATTACK' };
+      }
     }
 
     // 5. Signing Secret Availability
@@ -236,9 +238,11 @@ export class SmsGateProvider implements MessagingProvider {
       return { isValid: false, error: 'INVALID_SIGNATURE' };
     }
 
-    // 7. Store in replay cache until window expires
-    this.replayCache.set(replayKey, nowMs + tolerance * 1000);
-    this.pruneReplayCache(nowMs);
+    // 7. Store in replay cache until window expires (if in-process cache enabled)
+    if (!options?.skipReplayCache) {
+      this.replayCache.set(replayKey, nowMs + tolerance * 1000);
+      this.pruneReplayCache(nowMs);
+    }
 
     return { isValid: true };
   }
@@ -319,7 +323,17 @@ export class SmsGateProvider implements MessagingProvider {
 
     let authHeader: string;
     try {
-      authHeader = this.buildAuthHeader(credentials.auth ?? credentials.apiToken!);
+      const authInput =
+        credentials.auth ??
+        (credentials.apiToken
+          ? credentials.apiToken.startsWith('Bearer ') || credentials.apiToken.startsWith('Basic ')
+            ? credentials.apiToken
+            : { type: 'BEARER' as const, token: credentials.apiToken }
+          : undefined);
+      if (!authInput) {
+        throw new Error('Authentication credentials must be provided');
+      }
+      authHeader = this.buildAuthHeader(authInput as any);
     } catch (err: unknown) {
       return {
         providerMessageId: `failed_${Date.now()}`,
@@ -350,6 +364,7 @@ export class SmsGateProvider implements MessagingProvider {
           'X-Idempotency-Key': payload.idempotencyKey,
         },
         body: JSON.stringify(requestBody),
+        redirect: 'error',
       });
 
       if (!response.ok) {

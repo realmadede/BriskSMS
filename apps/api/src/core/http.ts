@@ -40,6 +40,7 @@ export interface RouteRequest {
   query: Record<string, string>;
   headers: Record<string, string | string[] | undefined>;
   body: Record<string, unknown>;
+  rawBody: string;
   context: RequestContext;
   rawReq: IncomingMessage;
 }
@@ -136,9 +137,10 @@ export class Router {
     }
 
     let body: Record<string, unknown> = {};
+    let rawBody = '';
     if (['POST', 'PATCH', 'PUT'].includes(method)) {
       try {
-        const rawBody = await readBody(req);
+        rawBody = await readBody(req);
         if (rawBody.trim()) {
           body = JSON.parse(rawBody);
         }
@@ -170,6 +172,7 @@ export class Router {
       query,
       headers: req.headers,
       body,
+      rawBody,
       context: {},
       rawReq: req,
     };

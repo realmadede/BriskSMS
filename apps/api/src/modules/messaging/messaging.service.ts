@@ -483,6 +483,14 @@ export class MessagingService {
   }
 
   /**
+   * Retrieves the current available credit balance for an organization
+   */
+  async getBalance(organizationId: string): Promise<number> {
+    const account = await this.getOrCreateAccount(organizationId);
+    return account.creditBalance;
+  }
+
+  /**
    * Creates a persisted SMS campaign with recipients and reserves credits atomically
    */
   async createCampaign(

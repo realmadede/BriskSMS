@@ -523,27 +523,27 @@ describe('Milestone 2.4: SMSGate Protocol Verification, Webhook Security & Crede
     const devAKey = 'secret_key_for_device_a_org_a_99999';
     const devBKey = 'secret_key_for_device_b_org_b_88888';
 
-    it('should provision, rotate, and resolve device-scoped signing keys', () => {
-      smsGateKeyService.setDeviceSigningKey(orgAId, devAId, devAKey);
-      const resolved = smsGateKeyService.resolveCandidateKeys(orgAId, devAId);
+    it('should provision, rotate, and resolve device-scoped signing keys', async () => {
+      await smsGateKeyService.setDeviceSigningKey(orgAId, devAId, devAKey);
+      const resolved = await smsGateKeyService.resolveCandidateKeys(orgAId, devAId);
       assert.deepEqual(resolved, [devAKey]);
 
       // Rotate device key
       const newDevAKey = 'new_rotated_key_device_a_77777777777';
-      smsGateKeyService.rotateDeviceSigningKey(orgAId, devAId, newDevAKey);
-      const afterRotation = smsGateKeyService.resolveCandidateKeys(orgAId, devAId);
+      await smsGateKeyService.rotateDeviceSigningKey(orgAId, devAId, newDevAKey);
+      const afterRotation = await smsGateKeyService.resolveCandidateKeys(orgAId, devAId);
       assert.deepEqual(afterRotation, [newDevAKey, devAKey]);
     });
 
-    it('should strictly isolate device keys across tenants (Org A cannot access Org B keys)', () => {
-      smsGateKeyService.setDeviceSigningKey(orgAId, devAId, devAKey);
-      smsGateKeyService.setDeviceSigningKey(orgBId, devBId, devBKey);
+    it('should strictly isolate device keys across tenants (Org A cannot access Org B keys)', async () => {
+      await smsGateKeyService.setDeviceSigningKey(orgAId, devAId, devAKey);
+      await smsGateKeyService.setDeviceSigningKey(orgBId, devBId, devBKey);
 
       // Org B querying Dev A's ID gets empty candidates
-      assert.deepEqual(smsGateKeyService.resolveCandidateKeys(orgBId, devAId), []);
+      assert.deepEqual(await smsGateKeyService.resolveCandidateKeys(orgBId, devAId), []);
 
       // Org A querying Dev B's ID gets empty candidates
-      assert.deepEqual(smsGateKeyService.resolveCandidateKeys(orgAId, devBId), []);
+      assert.deepEqual(await smsGateKeyService.resolveCandidateKeys(orgAId, devBId), []);
 
       // Cross-organization signature verification fails
       const raw = JSON.stringify({ deviceId: devAId, event: 'sms:delivered' });
@@ -551,18 +551,18 @@ describe('Milestone 2.4: SMSGate Protocol Verification, Webhook Security & Crede
       const sigFromDevA = createHmac('sha256', devAKey).update(raw + ts, 'utf8').digest('hex');
 
       // Org B attempting to verify signature from Org A's device key fails
-      const orgBCandidates = smsGateKeyService.resolveCandidateKeys(orgBId, devAId);
+      const orgBCandidates = await smsGateKeyService.resolveCandidateKeys(orgBId, devAId);
       const verifyResult = provider.verifyWebhookSignatureDetailed(raw, sigFromDevA, ts, orgBCandidates);
       assert.equal(verifyResult.isValid, false);
       assert.equal(verifyResult.error, 'MISSING_SIGNING_KEY');
     });
 
-    it('should fallback to organization gateway key when device-specific key is not set', () => {
+    it('should fallback to organization gateway key when device-specific key is not set', async () => {
       const orgGatewayKey = 'org_vps_gateway_master_secret_55555';
-      smsGateKeyService.setGatewaySigningKey(orgAId, orgGatewayKey);
+      await smsGateKeyService.setGatewaySigningKey(orgAId, orgGatewayKey);
 
       // Device without dedicated key falls back to organization gateway key
-      const candidates = smsGateKeyService.resolveCandidateKeys(orgAId, 'unregistered_device_99');
+      const candidates = await smsGateKeyService.resolveCandidateKeys(orgAId, 'unregistered_device_99');
       assert.deepEqual(candidates, [orgGatewayKey]);
     });
   });

@@ -9,6 +9,7 @@ import { registerOrganizationRoutes } from './modules/organization/organization.
 import { registerDeviceRoutes } from './modules/device/device.controller.js';
 import { registerSubscriptionRoutes } from './modules/subscription/subscription.controller.js';
 import { registerIngestionRoutes } from './modules/ingestion/ingestion.controller.js';
+import { registerMessagingRoutes } from './modules/messaging/messaging.controller.js';
 
 export function createApp(): Router {
   const router = new Router();
@@ -53,6 +54,7 @@ export function createApp(): Router {
   registerDeviceRoutes(router);
   registerSubscriptionRoutes(router);
   registerIngestionRoutes(router);
+  registerMessagingRoutes(router);
 
   return router;
 }

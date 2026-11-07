@@ -1,4 +1,12 @@
-import { createHmac, randomBytes, timingSafeEqual, scryptSync, createHash } from 'node:crypto';
+import {
+  createHmac,
+  randomBytes,
+  timingSafeEqual,
+  scryptSync,
+  createHash,
+  createCipheriv,
+  createDecipheriv,
+} from 'node:crypto';
 
 export interface JwtPayload {
   sub: string;
@@ -133,4 +141,68 @@ export function generateSecureToken(prefix: string, lengthBytes: number = 32): s
  */
 export function hashToken(token: string): string {
   return createHash('sha256').update(token, 'utf-8').digest('hex');
+}
+
+/**
+ * Resolves 32-byte key buffer for AES-256-GCM from ENCRYPTION_MASTER_KEY.
+ * Fails closed if the master key is missing, empty, or unconfigured.
+ */
+function getMasterKeyBuffer(customKey?: string): Buffer {
+  const rawKey = customKey || process.env.ENCRYPTION_MASTER_KEY;
+  if (!rawKey || typeof rawKey !== 'string' || rawKey.trim().length === 0) {
+    throw new Error('Encryption failed: ENCRYPTION_MASTER_KEY is not configured or empty');
+  }
+  const trimmed = rawKey.trim();
+  if (/^[0-9a-fA-F]{64}$/.test(trimmed)) {
+    return Buffer.from(trimmed, 'hex');
+  }
+  return createHash('sha256').update(trimmed, 'utf8').digest();
+}
+
+/**
+ * Encrypts a secret at rest using AES-256-GCM.
+ * Output format: "aes-256-gcm:ivHex:tagHex:cipherHex"
+ */
+export function encryptSecret(plaintext: string, masterKey?: string): string {
+  if (plaintext === undefined || plaintext === null) {
+    throw new Error('Plaintext secret cannot be null or undefined');
+  }
+  const key = getMasterKeyBuffer(masterKey);
+  const iv = randomBytes(12); // Standard 96-bit IV for GCM
+  const cipher = createCipheriv('aes-256-gcm', key, iv);
+  const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `aes-256-gcm:${iv.toString('hex')}:${tag.toString('hex')}:${encrypted.toString('hex')}`;
+}
+
+/**
+ * Decrypts an AES-256-GCM encrypted secret.
+ * Throws if tampering is detected, format is invalid, or master key is incorrect.
+ */
+export function decryptSecret(ciphertext: string, masterKey?: string): string {
+  if (!ciphertext || typeof ciphertext !== 'string') {
+    throw new Error('Ciphertext is required for decryption');
+  }
+  const key = getMasterKeyBuffer(masterKey);
+  const parts = ciphertext.split(':');
+  if (parts.length !== 4 || parts[0] !== 'aes-256-gcm') {
+    throw new Error('Invalid ciphertext format for AES-256-GCM');
+  }
+  const iv = Buffer.from(parts[1]!, 'hex');
+  const tag = Buffer.from(parts[2]!, 'hex');
+  const encrypted = Buffer.from(parts[3]!, 'hex');
+
+  const decipher = createDecipheriv('aes-256-gcm', key, iv);
+  decipher.setAuthTag(tag);
+  const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
+  return decrypted.toString('utf8');
+}
+
+/**
+ * Checks whether a given string is formatted as an AES-256-GCM encrypted secret.
+ */
+export function isEncryptedSecret(value: unknown): boolean {
+  if (typeof value !== 'string') return false;
+  const parts = value.split(':');
+  return parts.length === 4 && parts[0] === 'aes-256-gcm' && parts[1]!.length === 24 && parts[2]!.length === 32;
 }

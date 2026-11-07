@@ -435,3 +435,40 @@ To preserve engineering integrity and avoid unwarranted claims of verified hardw
 | **HaloPesa** | `com.halopesa.eu` | **PROVISIONAL** (schema defined) | **UNTESTED** on hardware |
 | **NMB Mkononi** | `com.nmb.mkononi` | **PROVISIONAL** (schema defined) | **UNTESTED** on hardware |
 | **Legacy / Secondary Aliases** | `com.vodafone.vodapay`, `com.yas.mixx`, etc. | Filtered through whitelist | Dropped unless matching verified canonical format |
+
+---
+
+## 15. Milestone 2.5: Persistent Key Management, Webhook Reliability & Database Proof
+
+### 15.1 Persistent Signing Key Management & Encryption at Rest
+- **Table:** `smsgate_signing_keys` in PostgreSQL.
+- **Encryption Scheme:** AES-256-GCM authenticated cipher with 96-bit randomized IV and 128-bit authentication tag.
+- **Fail-Closed Governance:** Decryption requires `ENCRYPTION_MASTER_KEY` (32 bytes). Missing, invalid, or tampered keys reject immediately without falling back to plaintext or null.
+- **Tenant & Device Scoping:** Keys are strictly isolated by `organization_id` and optional `device_id` with a database unique index `(organization_id, COALESCE(device_id, '__ORG_DEFAULT__'))`.
+- **Key Rotation Grace Period:** Stores `encrypted_key` and `encrypted_prev_key` with a 24-hour overlap grace window, allowing both old and new keys to verify in-flight delivery reports.
+- **Audit Logging:** Provisions, rotations, and revocations write immutable audit records to `audit_logs` (`SMSGATE_KEY_PROVISIONED`, `SMSGATE_KEY_ROTATED`, `SMSGATE_KEY_REVOKED`).
+
+### 15.2 Distributed Webhook Replay Protection & Idempotency
+- **Table:** `smsgate_webhook_events` in PostgreSQL.
+- **Event Fingerprint:** `sha256(organizationId + ':' + providerMessageId + ':' + eventType + ':' + signature)`.
+- **Deduplication Invariant:** Retried delivery reports from SMSGate or network hiccups return HTTP `200` with `{ "duplicate": true }` and do **not** re-trigger credit mutations or ledger changes.
+- **Transactional State Locking:** Status updates execute within ACID transactions using `SELECT ... FOR UPDATE` row locks, ensuring that out-of-order `FAILED` reports never revert a `DELIVERED` message or trigger double refunds.
+
+### 15.3 HTTP Raw-Body Verification Route
+- **Route:** `POST /v1/messaging/webhooks/smsgate` registered in `apps/api/src/app.ts`.
+- **Middleware:** `RouteRequest.rawBody` preserves the unparsed request string directly from the HTTP socket.
+- **Signing Input:** Conforms strictly to official SMSGate specification: `rawBody + timestamp` (exact bytes concatenated).
+- **Diagnostics:** Distinct error codes for expired timestamps (`TIMESTAMP_EXPIRED`), future clock skew (`FUTURE_TIMESTAMP`), missing signing keys (`MISSING_SIGNING_KEY`), and invalid signatures (`INVALID_SIGNATURE`).
+
+### 15.4 Opaque Bearer Token Semantics
+- SMSGate API tokens (e.g. `smsgate_pat_...`) and pre-formatted headers are treated as opaque bearer credentials.
+- JWT expiration checks (`exp`) serve solely as non-authoritative client-side operational guards and do not attempt unsupported cryptographic issuer verification without public keys.
+
+### 15.5 Monorepo Automated Test Corpus
+- **Monorepo Suite:** 153 tests across 20 files executing in 19.33s against real PostgreSQL (port 5433) and Redis (port 6380) with 0 failures and 0 mocks in financial persistence paths.
+- **Milestone 2.5 Test Corpus:**
+  - `apps/api/test/smsgate-webhook-and-keys.test.ts`: 8/8 passed.
+  - `apps/api/test/smsgate-contract.test.ts`: 30/30 passed.
+  - `apps/api/test/messaging.test.ts`: 21/21 passed.
+  - `apps/api/test/device-auth-and-ingestion.test.ts`: 11/11 passed.
+
