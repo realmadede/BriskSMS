@@ -1,8 +1,3 @@
--- ==============================================================================
--- Migration: 20261107010000_smsgate_keys_and_webhook_events
--- Adds durable storage for SMSGate webhook signing keys and delivery events
--- ==============================================================================
-
 -- CreateTable
 CREATE TABLE "smsgate_signing_keys" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
@@ -15,10 +10,10 @@ CREATE TABLE "smsgate_signing_keys" (
     "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "smsgate_signing_keys_pkey" PRIMARY KEY ("id"),
-    CONSTRAINT "fk_smsgate_signing_keys_org" FOREIGN KEY ("organization_id") REFERENCES "organizations"("id") ON DELETE CASCADE ON UPDATE CASCADE
+    CONSTRAINT "smsgate_signing_keys_organization_id_fkey" FOREIGN KEY ("organization_id") REFERENCES "organizations"("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
--- Unique index ensuring single active key per device or single default key per organization
+-- CreateIndex
 CREATE UNIQUE INDEX "idx_smsgate_signing_keys_org_device" ON "smsgate_signing_keys" ("organization_id", (COALESCE("device_id", '__ORG_DEFAULT__')));
 CREATE INDEX "idx_smsgate_signing_keys_org_lookup" ON "smsgate_signing_keys" ("organization_id");
 
@@ -37,8 +32,9 @@ CREATE TABLE "smsgate_webhook_events" (
     "processed_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "smsgate_webhook_events_pkey" PRIMARY KEY ("id"),
-    CONSTRAINT "fk_smsgate_webhook_events_org" FOREIGN KEY ("organization_id") REFERENCES "organizations"("id") ON DELETE CASCADE ON UPDATE CASCADE
+    CONSTRAINT "smsgate_webhook_events_organization_id_fkey" FOREIGN KEY ("organization_id") REFERENCES "organizations"("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
+-- CreateIndex
 CREATE UNIQUE INDEX "smsgate_webhook_events_event_fingerprint_key" ON "smsgate_webhook_events"("event_fingerprint");
-CREATE INDEX "smsgate_webhook_events_org_msg_idx" ON "smsgate_webhook_events"("organization_id", "provider_message_id");
+CREATE INDEX "smsgate_webhook_events_organization_id_provider_message_id_idx" ON "smsgate_webhook_events"("organization_id", "provider_message_id");

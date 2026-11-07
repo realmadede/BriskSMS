@@ -8,6 +8,10 @@
   "sql-language-server.dialect": "postgres",
   "database-client.dialect": "PostgreSQL",
   "sql.lint.enable": false,
+  "mssql.intelliSense.enableErrorChecking": false,
+  "mssql.intelliSense.enableSuggestions": false,
+  "mssql.intelliSense.enableQuickInfo": false,
+  "mssql.autoDisableNonTSqlLanguageService": false,
   "cSpell.enabledLanguageIds": [
     "typescript",
     "javascript",
