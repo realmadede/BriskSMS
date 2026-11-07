@@ -715,7 +715,10 @@ export class MessagingService {
   }
 
   /**
-   * Processes gateway delivery webhook report (Handles automated refund on permanent failure)
+   * Processes gateway delivery webhook report with strict idempotency and terminal state protection.
+   * - Never moves a DELIVERED message backwards to FAILED.
+   * - Never triggers duplicate refunds.
+   * - Distinguishes SENT from DELIVERED.
    */
   async handleDeliveryEvent(
     event: NormalizedDeliveryEvent,
@@ -730,6 +733,11 @@ export class MessagingService {
     const targetMessage = this.mapMessageRow(rows[0]!);
     const now = new Date();
 
+    // 1. Terminal State Protection: A delivered message cannot be reverted to failed or re-refunded
+    if (targetMessage.status === SmsStatus.DELIVERED) {
+      return targetMessage; // Idempotent no-op
+    }
+
     if (event.eventType === 'DELIVERED') {
       const updated = await sql<Record<string, any>>`
         UPDATE sms_messages
@@ -741,10 +749,12 @@ export class MessagingService {
       `;
       return this.mapMessageRow(updated[0]!);
     } else if (event.eventType === 'FAILED') {
+      // 2. Failure State Protection: Never refund more than once
       if (targetMessage.status !== SmsStatus.FAILED) {
         const updated = await sql<Record<string, any>>`
           UPDATE sms_messages
           SET status = ${SmsStatus.FAILED},
+              last_error = ${event.failureReason ?? 'Carrier transmission failed'},
               updated_at = ${now}
           WHERE id = ${targetMessage.id}
           RETURNING *
@@ -754,6 +764,17 @@ export class MessagingService {
           targetMessage.costCredits,
           `refund_${targetMessage.id}`,
         );
+        return this.mapMessageRow(updated[0]!);
+      }
+    } else if (event.eventType === 'SENT') {
+      if (targetMessage.status === SmsStatus.QUEUED) {
+        const updated = await sql<Record<string, any>>`
+          UPDATE sms_messages
+          SET status = ${SmsStatus.SUBMITTED},
+              updated_at = ${now}
+          WHERE id = ${targetMessage.id}
+          RETURNING *
+        `;
         return this.mapMessageRow(updated[0]!);
       }
     }

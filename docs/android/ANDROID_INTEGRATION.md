@@ -99,31 +99,68 @@ These capabilities have separate services, Room databases/tables, queues, permis
 
 ## 4. Product B: Bulk Messaging through SMSGate Cellular Relay
 
-### 4.1 Official SMSGate Architecture & Protocol
+### 4.1 Official SMSGate Architecture, Protocol & Schema Invariants
 BriskSMS Product B integrates strictly with the official SMSGate architecture (`android-sms-gateway` / `sms-gate.app`). Traditional telco aggregators (Beem, DARSMS, eHUB) and httpSMS are strictly excluded.
 
-The official SMSGate integration boundary operates as follows:
-- **Base Paths & Modes:**
-  1. `GatewayMode.MANAGED_GATEWAY`: Connects to an organization's private self-hosted SMSGate server on a VPS behind Cloudflare Tunnel (`https://gateway.brisksms.com/api/v1`).
-  2. `GatewayMode.EXTERNAL_RELAY`: Connects to the official SMSGate cloud relay (`https://api.sms-gate.app/3rdparty/v1`) or tenant-provided endpoint.
-- **Outbound Dispatch Endpoint:** `POST /messages` (under configured base URL).
-- **Official Message Schema:**
-  ```json
-  {
-    "textMessage": {
-      "text": "Your message content here"
-    },
-    "phoneNumbers": ["+255754123456"],
+#### Base Paths & Upstream Modes:
+1. `GatewayMode.MANAGED_GATEWAY`: Connects to an organization's private self-hosted SMSGate server on a VPS (`/api/3rdparty/v1`) or behind Cloudflare Tunnel / reverse-proxy rewrite (`https://gateway.brisksms.com/api/v1`).
+2. `GatewayMode.EXTERNAL_RELAY`: Connects to the official SMSGate cloud relay (`https://api.sms-gate.app/3rdparty/v1`) or tenant-provided endpoint.
+
+#### Endpoint Normalization Rules:
+The backend `SmsGateProvider.resolveEndpoint()` normalizes base URLs dynamically:
+- Validates URL scheme: requires `http://` or `https://`.
+- Strips any trailing slashes: `https://gateway.example.com/api/3rdparty/v1/` → `https://gateway.example.com/api/3rdparty/v1`.
+- Appends `/messages` unless already suffixed with `/messages` or `/message`.
+- Reverse Proxy Path Rewriting: When fronted by NGINX or Cloudflare Tunnel, ensure path rewrites preserve either `/api/3rdparty/v1/messages` (upstream server default) or `/3rdparty/v1/messages` (upstream cloud relay default).
+
+#### Schema Mutual Exclusivity Invariant:
+Official SMSGate documentation ([docs.sms-gate.app/features/sending-messages](https://docs.sms-gate.app/features/sending-messages/)) mandates that the message body specifiers are **strictly mutually exclusive**:
+- `textMessage`
+- `dataMessage`
+- `mmsMessage`
+- Deprecated `message`
+
+Providing both `textMessage` and `message` is invalid and results in an HTTP 400 Bad Request error. BriskSMS strictly enforces single-field formatting:
+```json
+{
+  "textMessage": {
+    "text": "Your message content here"
+  },
+  "phoneNumbers": ["+255754123456"],
+  "simNumber": 1,
+  "withDeliveryReport": true
+}
+```
+
+#### Authentication Header Support:
+`SmsGateProvider.buildAuthHeader()` dynamically detects and crafts the appropriate authorization header:
+- **HTTP Basic Authentication:** If credentials contain a colon (`username:password`) or `Basic `, converts to standard Base64 `Authorization: Basic <base64>`.
+- **JWT / Bearer Token:** If credentials contain a single token string or `Bearer `, crafts `Authorization: Bearer <token>`.
+
+#### Official Webhook Contract & Payload Schema:
+SMSGate delivers delivery reports and status updates via HTTP POST webhooks with nested payloads:
+```json
+{
+  "deviceId": "device_huawei_001",
+  "event": "sms:delivered",
+  "payload": {
+    "messageId": "msg_prov_01J...",
+    "recipient": "+255754123456",
     "simNumber": 1,
-    "withDeliveryReport": true
+    "receivedAt": "2026-11-06T15:00:00.000Z"
   }
-  ```
-- **Authentication:** HTTP Basic Auth (`username:password`) or JWT Bearer Token (`Authorization: Bearer <token>`).
-- **Official Webhook Event Lifecycle:**
-  - `sms:sent` -> Sent callback (Carrier SMSC acceptance; mapped to `SUBMITTED`).
-  - `sms:delivered` -> Delivery confirmation receipt (Recipient handset delivery confirmation; mapped to `DELIVERED`).
-  - `sms:failed` -> Carrier radio transmission failure (mapped to `FAILED`).
-  - `sms:received` -> Inbound SMS forwarded to webhook receiver.
+}
+```
+
+- **HMAC Signature Verification:** Incoming webhooks are signed using HMAC-SHA256. The raw request body is verified against the `X-Signature` header using the organization's gateway signing secret via `crypto.timingSafeEqual`.
+- **Event Lifecycle Mapping:**
+  - `sms:sent` → Radio transmission acknowledged by carrier SMSC; mapped to `SUBMITTED`. Does NOT mark message as delivered.
+  - `sms:delivered` → Handset delivery confirmation receipt; mapped to `DELIVERED`. Sets `deliveredAt = carrierTimestamp`.
+  - `sms:failed` → Radio transmission or carrier failure; mapped to `FAILED`.
+- **Delivery State Machine & Invariants:**
+  1. **Terminal State Immutability:** Once a message reaches `DELIVERED`, it can never transition back to `FAILED`, even if a late or out-of-order `sms:failed` event arrives.
+  2. **Exactly-Once Refund Guarantee:** Reserved credits committed upon dispatch are refunded if and only if the message permanently fails (`FAILED`). Delivered messages are never refunded. Out-of-order or duplicate `sms:failed` reports never trigger secondary credit refunds.
+  3. **Graceful Handling of Unknown Messages:** If a webhook references an unknown `providerMessageId` (e.g. from an unmanaged broadcast or deleted test), it returns `null` and logs the observation without throwing a 500 server error.
 
 ### 4.2 Operating Deployment Models
 1. **Model A (Dedicated SMSGate Android Gateway):** The operator runs the official open-source SMSGate Android application (`android-sms-gateway` by capcom6) on the gateway handset. The app synchronizes directly with the SMSGate server via WebSocket/Push. BriskSMS backend orchestrates campaigns and accounting via the SMSGate REST API.
@@ -260,6 +297,18 @@ To execute Android JVM unit test suites:
 cd apps/android
 ./gradlew testDebugUnitTest
 ```
+
+### 8.3 CI Automation & Local Environment Isolation
+The repository includes automated CI verification for Android via GitHub Actions (`.github/workflows/ci.yml`):
+- **Job:** `android-verify` on `ubuntu-latest`.
+- **JDK:** OpenJDK 17 (`temurin` distribution) with Gradle dependency caching.
+- **Android SDK:** Configured with API level 34 (`platforms;android-34`) and Build Tools `34.0.0`.
+- **Tasks Executed in CI:**
+  1. `chmod +x ./gradlew` (ensures execution bit `100755` tracked in Git).
+  2. `./gradlew testDebugUnitTest --no-daemon --stacktrace`
+  3. `./gradlew assembleDebug --no-daemon --stacktrace`
+- **Local Host vs CI Environment Note:**
+  Local Linux developer workstations often install bleeding-edge Java (e.g. OpenJDK `25-ea`), which Gradle 8.14.3 deliberately halts on with `What went wrong: 25.0.5-ea`. Reproducible builds and unit tests are guaranteed via the standardized JDK 17 CI runner or local JDK 17 environment (`sdk use java 17-tem`).
 
 ---
 
