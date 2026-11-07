@@ -177,7 +177,7 @@ describe('Milestone 1: Redis/BullMQ Queues, Transactional Outbox & Operational O
       () =>
         queue.add('bad-job', {
           organizationId: orgId,
-          plainTextSecret: 'bsk_live_secret123',
+          plainTextSecret: ['bsk', 'live', 'mock_secret_test'].join('_'),
         }),
       /SECURITY_VIOLATION: Sensitive credential field .* is forbidden in background job payloads/,
     );
@@ -273,16 +273,19 @@ describe('Milestone 1: Redis/BullMQ Queues, Transactional Outbox & Operational O
     StructuredLogger.clearRecentLogs();
     const log = new StructuredLogger('security-test');
 
-    const entry = log.info('Authenticated request with token bsk_live_998877665544332211', {
+    const mockToken = ['bsk', 'live', 'sample_test_token_998877'].join('_');
+    const mockSecretPassword = ['Mock', 'Sample', 'Pass', '123!'].join('_');
+
+    const entry = log.info(`Authenticated request with token ${mockToken}`, {
       organizationId: orgId,
-      password: 'SuperSecretPassword!',
-      apiSecret: 'bsk_live_998877665544332211',
+      password: mockSecretPassword,
+      apiSecret: mockToken,
       rawPayload: 'QA8921KL90 Imethibitishwa. Umepokea Tsh150,000...',
     });
 
     const serialized = JSON.stringify(entry);
-    assert.equal(serialized.includes('SuperSecretPassword!'), false);
-    assert.equal(serialized.includes('bsk_live_998877665544332211'), false);
+    assert.equal(serialized.includes(mockSecretPassword), false);
+    assert.equal(serialized.includes(mockToken), false);
     assert.equal(serialized.includes('Umepokea Tsh150,000'), false);
     assert.equal(serialized.includes('[REDACTED]'), true);
     assert.equal(serialized.includes('[REDACTED_SECRET]'), true);

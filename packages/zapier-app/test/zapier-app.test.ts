@@ -78,14 +78,14 @@ describe('BriskSMS Zapier Integration (@brisksms/zapier-app)', () => {
     const mockBundle: ZapierBundle = {
       authData: { access_token: 'bsk_at_test_token' },
       inputData: {},
-      targetUrl: 'https://hooks.zapier.com/hooks/catch/123/abc/',
+      targetUrl: 'https://hooks.example.com/catch/mock_hook_123',
     };
 
     const result = await App.triggers.payment_matched.operation.performSubscribe(mockZ, mockBundle);
 
     assert.equal(capturedUrl, 'https://api.brisksms.com/v1/webhooks/endpoints');
     assert.deepEqual(capturedBody, {
-      targetUrl: 'https://hooks.zapier.com/hooks/catch/123/abc/',
+      targetUrl: 'https://hooks.example.com/catch/mock_hook_123',
       subscribedEvents: ['payment.matched'],
     });
     assert.equal((result as { id: string }).id, 'webhook_ep_123');

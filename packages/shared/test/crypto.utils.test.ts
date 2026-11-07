@@ -38,7 +38,7 @@ describe('Crypto Utils', () => {
   });
 
   it('should sign and verify webhook payload accurately', () => {
-    const secret = 'whsec_test_secret_key_12345';
+    const secret = 'test_mock_hmac_secret_key';
     const timestamp = 1730822400;
     const body = JSON.stringify({ event: 'payment.verified', amount: 50000 });
 

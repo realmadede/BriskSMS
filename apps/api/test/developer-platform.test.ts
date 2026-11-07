@@ -106,7 +106,7 @@ describe('Developer Platform & Zapier Webhook Automation', () => {
 
   describe('Webhook Outbox Dispatcher & HMAC Signatures (WebhookService)', () => {
     it('generates verifiable HMAC-SHA256 signature for Catch Hook consumers', () => {
-      const secret = 'whsec_test_secret_key_12345';
+      const secret = 'mock_webhook_hmac_test_key';
       const timestamp = 1793912000;
       const payload = JSON.stringify({ event: 'payment.matched', amount: 150000 });
 
@@ -116,9 +116,9 @@ describe('Developer Platform & Zapier Webhook Automation', () => {
 
     it('registers endpoint and delivers outbox events with HMAC signature', async () => {
       const endpoint = await webhookService.registerEndpoint(orgId, {
-        url: 'https://hooks.zapier.com/hooks/catch/123456/abcdef/',
+        url: 'https://hooks.example.com/catch/mock_hook_123/',
         subscribedEvents: [BusinessEventType.PAYMENT_MATCHED],
-        secret: 'whsec_zapier_secret_key',
+        secret: 'mock_zapier_endpoint_secret',
       });
 
       assert.equal(endpoint.isActive, true);
