@@ -191,3 +191,45 @@ Every status indicator must display **both** an explicit symbol/icon and text:
 3. **Reduced Transparency:** When `prefers-reduced-transparency` is active, glass opacity increases to 95% solid tone.
 4. **Visual Regression Gate:** Pull requests modifying UI components must pass automated Playwright visual screenshot comparisons across all 9 documented breakpoints.
 
+---
+
+## 10. Anti-AI-Slop Governance & The 9-Pass Quality Rubric
+
+To prevent user interfaces from degrading into generic, "vibecoded" AI aesthetics, all UI components must project the dignity, restraint, and tactile precision of an institutional financial platform.
+
+### 10.1. Prohibited AI Clichés (The Negative Constraints Catalog)
+When generating or modifying UI code, automated agents must strictly avoid the following patterns:
+
+1. **No Generic Purple/Neon Mesh Gradients:**
+   - ❌ Banned: `bg-gradient-to-r from-purple-500 via-indigo-500 to-pink-500`, radial glow washes, or saturated dark-mode violet backgrounds.
+   - ✅ Required: Anchor all canvases strictly in Stitch Bone (`#EAE6DF`), Sand (`#DCD6CB`), or Deep Obsidian (`#141416`).
+2. **No Glowing Shadows or High-Contrast Neon Borders:**
+   - ❌ Banned: `box-shadow: 0 0 20px rgba(168,85,247,0.5)`, colored halos, or fluorescent outlines.
+   - ✅ Required: Restrained 0.5px hairline strokes (`border-hairline`: `rgba(18, 18, 18, 0.08)`) and ambient diffuse shadows.
+3. **No Emoji UI Labels or Badges:**
+   - ❌ Banned: `New ✨`, `Pro 🚀`, `Dashboard 📊`, `Settings ⚙️`, or emoji in buttons/tabs.
+   - ✅ Required: Clean typographic badges and monochrome, contextual vector line icons (stroke-width 1.5).
+4. **No Hyperbolic / Robotic Marketing Copy:**
+   - ❌ Banned: *"Supercharge your business with next-gen automated AI magic!"*
+   - ✅ Required: Clear, institutional financial language: *"Reconciled 1,420 M-Pesa transactions in the last 24 hours."*
+5. **No Constant Looping Animations or Disorienting Keyframes:**
+   - ❌ Banned: `animate-pulse`, continuous border rotation, or bouncing elements on static cards.
+   - ✅ Required: Functional micro-transitions ($\le 200\text{ms}$, ease-out) that strictly respect `prefers-reduced-motion`.
+6. **No Abstract AI Art Tropes:**
+   - ❌ Banned: Stock 3D glass robots, floating AI brains, circuit board textures, or generic futuristic blobs.
+   - ✅ Required: Authentic financial data tables, device telemetry feeds, and provider badges (Vodacom, Mixx, Airtel, HaloPesa, CRDB, NMB).
+
+### 10.2. The 9-Pass Ordered Refactoring Rubric
+When designing, refactoring, or auditing any UI screen (Angular Web or Jetpack Compose), the engineer or agent must evaluate and refine the interface sequentially through these nine ordered passes:
+
+1. **Pass 1 — Spacing:** Establish rhythmic, mathematical distribution using the 4px baseline grid (`4, 8, 12, 16, 24, 32, 48px`). Eliminate uneven margins and padding before touching any styling.
+2. **Pass 2 — Color:** Verify all colors map to official tokens (`color-canvas-base`, `color-accent-primary`, etc.). Strip ungrounded dark neutrals and unapproved hex values.
+3. **Pass 3 — Icons:** Ensure icons are uniform, sized to 20px/24px with 1.5px stroke width. Eliminate purely decorative or mismatched icon sets.
+4. **Pass 4 — Copy:** Audit text for clarity and tone. Eliminate marketing fluff. Format financial currency strictly as `TZS` or `Tsh` with comma grouping (e.g., `TZS 50,000`).
+5. **Pass 5 — Typography:** Enforce the Plus Jakarta Sans / Inter Display type scale. Restrict font weights to 400 (body), 500 (metadata/captions), and 600 (headers). Enable `font-variant-numeric: tabular-nums` on all amounts.
+6. **Pass 6 — Layout:** Validate alignment, responsive viewport stacking across breakpoints, and container max-widths. Ensure dense tables remain scannable without excessive whitespace.
+7. **Pass 7 — Details:** Refine micro-geometry: 0.5px hairline borders, pill radii (`9999px`) on action buttons, card radii (`18px`), and accessible high-contrast focus rings.
+8. **Pass 8 — Visuals:** Ensure focal elements (Liquid Glass cards, device health pills) have purpose. Check that Glisse glass is applied only to floating/focal elements and never to dense data tables.
+9. **Pass 9 — Motion:** Verify transitions are purposeful, concise ($\le 200\text{ms}$), and completely disabled under `prefers-reduced-motion`.
+
+
