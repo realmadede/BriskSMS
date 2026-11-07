@@ -1,6 +1,7 @@
 {
   "files.associations": {
-    "*.sql": "sql",
+    "*.sql": "sql-postgres",
+    "**/migrations/**/*.sql": "sql-postgres",
     "schema.prisma": "prisma",
     "*.prisma": "prisma"
   },
@@ -15,6 +16,9 @@
   "sqltools.format": false,
   "sqltools.useNodeRuntime": false,
   "[sql]": {
+    "editor.formatOnSave": false
+  },
+  "[sql-postgres]": {
     "editor.formatOnSave": false
   },
   "cSpell.enabledLanguageIds": [
