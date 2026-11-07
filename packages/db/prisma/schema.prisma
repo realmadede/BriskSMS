@@ -1063,6 +1063,7 @@ model SmsGateSigningKey {
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
+  @@index([organizationId])
   @@map("smsgate_signing_keys")
 }
 

@@ -11,7 +11,12 @@
   "mssql.intelliSense.enableErrorChecking": false,
   "mssql.intelliSense.enableSuggestions": false,
   "mssql.intelliSense.enableQuickInfo": false,
-  "mssql.autoDisableNonTSqlLanguageService": false,
+  "mssql.autoDisableNonTSqlLanguageService": true,
+  "sqltools.format": false,
+  "sqltools.useNodeRuntime": false,
+  "[sql]": {
+    "editor.formatOnSave": false
+  },
   "cSpell.enabledLanguageIds": [
     "typescript",
     "javascript",

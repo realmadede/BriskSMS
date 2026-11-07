@@ -64,7 +64,7 @@ export class SmsGateKeyService {
         ) VALUES (
           ${randomUUID()}, ${organizationId}, ${deviceId.trim()}, ${encryptedKey}, NULL, NULL, ${now}, ${now}
         )
-        ON CONFLICT ("organization_id", COALESCE("device_id", '__ORG_DEFAULT__'))
+        ON CONFLICT ("organization_id", "device_id") WHERE "device_id" IS NOT NULL
         DO UPDATE SET
           encrypted_key = EXCLUDED.encrypted_key,
           encrypted_prev_key = NULL,
@@ -128,7 +128,7 @@ export class SmsGateKeyService {
         ) VALUES (
           ${randomUUID()}, ${organizationId}, ${deviceId.trim()}, ${encryptedNewKey}, NULL, ${now}, ${now}, ${now}
         )
-        ON CONFLICT ("organization_id", COALESCE("device_id", '__ORG_DEFAULT__'))
+        ON CONFLICT ("organization_id", "device_id") WHERE "device_id" IS NOT NULL
         DO UPDATE SET
           encrypted_prev_key = smsgate_signing_keys.encrypted_key,
           encrypted_key = EXCLUDED.encrypted_key,
@@ -213,7 +213,7 @@ export class SmsGateKeyService {
         ) VALUES (
           ${randomUUID()}, ${organizationId}, NULL, ${encryptedKey}, NULL, NULL, ${now}, ${now}
         )
-        ON CONFLICT ("organization_id", COALESCE("device_id", '__ORG_DEFAULT__'))
+        ON CONFLICT ("organization_id") WHERE "device_id" IS NULL
         DO UPDATE SET
           encrypted_key = EXCLUDED.encrypted_key,
           encrypted_prev_key = NULL,
@@ -271,7 +271,7 @@ export class SmsGateKeyService {
         ) VALUES (
           ${randomUUID()}, ${organizationId}, NULL, ${encryptedNewKey}, NULL, ${now}, ${now}, ${now}
         )
-        ON CONFLICT ("organization_id", COALESCE("device_id", '__ORG_DEFAULT__'))
+        ON CONFLICT ("organization_id") WHERE "device_id" IS NULL
         DO UPDATE SET
           encrypted_prev_key = smsgate_signing_keys.encrypted_key,
           encrypted_key = EXCLUDED.encrypted_key,

@@ -14,8 +14,9 @@ CREATE TABLE "smsgate_signing_keys" (
 );
 
 -- CreateIndex
-CREATE UNIQUE INDEX "idx_smsgate_signing_keys_org_device" ON "smsgate_signing_keys" ("organization_id", (COALESCE("device_id", '__ORG_DEFAULT__')));
-CREATE INDEX "idx_smsgate_signing_keys_org_lookup" ON "smsgate_signing_keys" ("organization_id");
+CREATE UNIQUE INDEX "smsgate_signing_keys_organization_id_device_id_key" ON "smsgate_signing_keys"("organization_id", "device_id") WHERE "device_id" IS NOT NULL;
+CREATE UNIQUE INDEX "smsgate_signing_keys_organization_id_default_key" ON "smsgate_signing_keys"("organization_id") WHERE "device_id" IS NULL;
+CREATE INDEX "smsgate_signing_keys_organization_id_idx" ON "smsgate_signing_keys"("organization_id");
 
 -- CreateTable
 CREATE TABLE "smsgate_webhook_events" (

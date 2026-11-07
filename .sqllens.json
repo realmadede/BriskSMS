@@ -1,0 +1,13 @@
+{
+  "default": "postgres",
+  "defaultDialect": "postgres",
+  "dialects": [
+    {
+      "files": "**/*.sql",
+      "dialect": "postgres"
+    }
+  ],
+  "rules": {
+    "**/*.sql": "postgres"
+  }
+}
