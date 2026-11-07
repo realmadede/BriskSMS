@@ -9,12 +9,12 @@ export const App = {
   platformVersion: '15.0.0',
   authentication,
   triggers: {
-    [paymentMatchedTrigger.key]: paymentMatchedTrigger,
-    [paymentNeedsReviewTrigger.key]: paymentNeedsReviewTrigger,
+    payment_matched: paymentMatchedTrigger,
+    payment_needs_review: paymentNeedsReviewTrigger,
   },
   creates: {
-    [sendSmsAction.key]: sendSmsAction,
-    [createInvoiceAction.key]: createInvoiceAction,
+    send_sms: sendSmsAction,
+    create_invoice: createInvoiceAction,
   },
 };
 

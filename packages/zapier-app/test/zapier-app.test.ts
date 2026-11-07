@@ -2,6 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import App from '../src/index.js';
 import { ZapierZ, ZapierBundle } from '../src/authentication.js';
+import { SendSmsInput } from '../src/actions/send-sms.action.js';
 
 describe('BriskSMS Zapier Integration (@brisksms/zapier-app)', () => {
   it('exports valid Zapier platform application configuration', () => {
@@ -38,7 +39,7 @@ describe('BriskSMS Zapier Integration (@brisksms/zapier-app)', () => {
       },
     };
 
-    const mockBundle: ZapierBundle<{ recipientPhone: string; message: string; simSlot: number }> = {
+    const mockBundle: ZapierBundle<SendSmsInput> = {
       authData: { access_token: 'bsk_at_test_token' },
       inputData: {
         recipientPhone: '+255754000111',
