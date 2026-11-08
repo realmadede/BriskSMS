@@ -135,14 +135,16 @@ export function serializeCookie(name: string, value: string, options: CookieOpti
 export function getAllowedOrigins(): Set<string> {
   const isProd = process.env.NODE_ENV === 'production';
 
-  const envOrigins = (process.env.ALLOWED_ORIGINS || '')
-    .split(',')
+  const rawEnvOrigins = [
+    ...(process.env.ALLOWED_ORIGINS || '').split(','),
+    ...(process.env.CORS_ORIGIN || '').split(','),
+    process.env.FRONTEND_URL || '',
+  ]
     .map((s) => s.trim())
     .filter(Boolean);
 
-  if (process.env.FRONTEND_URL) {
-    envOrigins.push(process.env.FRONTEND_URL.trim());
-  }
+  // Reject wildcard '*' - wildcard cannot be used with credentials or as an authorized origin
+  const envOrigins = rawEnvOrigins.filter((origin) => origin !== '*' && origin !== 'null');
 
   // In production, require explicit configuration of allowed origins
   if (isProd) {
@@ -165,25 +167,34 @@ export function getAllowedOrigins(): Set<string> {
  * Validates whether an incoming Origin is an authorized frontend origin
  */
 export function isAllowedOrigin(origin?: string): boolean {
-  if (!origin) return false;
+  if (!origin || typeof origin !== 'string') return false;
+  const trimmed = origin.trim();
+  if (trimmed === '*' || trimmed === 'null' || trimmed.length === 0) return false;
   const allowed = getAllowedOrigins();
-  return allowed.has(origin);
+  return allowed.has(trimmed);
 }
 
 /**
- * Resolves CSRF secret, failing closed in production if insecure or missing.
+ * Resolves CSRF secret, failing closed in production if insecure, missing, or reusing other secrets.
  */
 export function getCsrfSecret(): string {
   const isProd = process.env.NODE_ENV === 'production';
-  const rawSecret = process.env.CSRF_SECRET || process.env.ENCRYPTION_MASTER_KEY;
+  const rawSecret = process.env.CSRF_SECRET;
 
   if (isProd) {
     if (!rawSecret || rawSecret.trim().length === 0) {
-      throw new Error('FATAL: CSRF_SECRET or ENCRYPTION_MASTER_KEY is required in production.');
+      throw new Error('FATAL: CSRF_SECRET is required in production environment.');
     }
     const trimmed = rawSecret.trim();
     if (INSECURE_DEFAULT_KEYS.has(trimmed) || trimmed.length < 32) {
-      throw new Error('FATAL: Insecure CSRF secret detected in production environment.');
+      throw new Error('FATAL: Insecure or insufficient-entropy CSRF_SECRET detected in production environment.');
+    }
+    // Independent key requirement: must not reuse access secret or encryption master key
+    if (process.env.JWT_ACCESS_SECRET && trimmed === process.env.JWT_ACCESS_SECRET.trim()) {
+      throw new Error('FATAL: CSRF_SECRET must be independently configured and not reuse JWT_ACCESS_SECRET.');
+    }
+    if (process.env.ENCRYPTION_MASTER_KEY && trimmed === process.env.ENCRYPTION_MASTER_KEY.trim()) {
+      throw new Error('FATAL: CSRF_SECRET must be independently configured and not reuse ENCRYPTION_MASTER_KEY.');
     }
     return trimmed;
   }
@@ -215,6 +226,13 @@ export function verifyCsrfToken(
   if (!cookieToken || !headerToken) {
     return false;
   }
+  if (typeof cookieToken !== 'string' || typeof headerToken !== 'string') {
+    return false;
+  }
+  // Enforce size bounds to prevent parsing/comparison DoS
+  if (cookieToken.length > 512 || headerToken.length > 512 || cookieToken.length < 32) {
+    return false;
+  }
 
   // Tokens must match in constant time
   const cookieBuf = Buffer.from(cookieToken, 'utf-8');
@@ -233,9 +251,19 @@ export function verifyCsrfToken(
     return false;
   }
 
+  // Validate nonce: exactly 48 hex characters (24 bytes)
+  if (!/^[0-9a-f]{48}$/i.test(nonce)) {
+    return false;
+  }
+
+  // Validate signature: exactly 64 hex characters (32 bytes HMAC-SHA256)
+  if (!/^[0-9a-f]{64}$/i.test(signature)) {
+    return false;
+  }
+
   const expiresAt = Number(expiresAtStr);
-  if (isNaN(expiresAt) || Date.now() > expiresAt) {
-    return false; // Expired
+  if (!Number.isFinite(expiresAt) || expiresAt <= 0 || Date.now() > expiresAt) {
+    return false; // Expired or invalid timestamp
   }
 
   const activeSecret = secret || getCsrfSecret();

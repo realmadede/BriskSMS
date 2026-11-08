@@ -34,10 +34,28 @@ export function validateCsrf(req: RouteRequest): void {
     return;
   }
 
+  // Fetch Metadata defense: reject explicit cross-site mutating requests from browsers
+  const fetchSite = typeof req.headers['sec-fetch-site'] === 'string' ? req.headers['sec-fetch-site'] : undefined;
+  if (fetchSite === 'cross-site') {
+    throw new HttpException(403, 'CSRF_CROSS_SITE_FORBIDDEN', 'Cross-site request blocked by Fetch Metadata policy');
+  }
+
   // Verify Origin / Referer if present
   const origin = typeof req.headers.origin === 'string' ? req.headers.origin : undefined;
   if (origin && !isAllowedOrigin(origin)) {
     throw new HttpException(403, 'CSRF_ORIGIN_MISMATCH', `Request origin '${origin}' is not authorized`);
+  }
+
+  const referer = typeof req.headers.referer === 'string' ? req.headers.referer : undefined;
+  if (!origin && referer) {
+    try {
+      const refOrigin = new URL(referer).origin;
+      if (!isAllowedOrigin(refOrigin)) {
+        throw new HttpException(403, 'CSRF_ORIGIN_MISMATCH', `Referer origin '${refOrigin}' is not authorized`);
+      }
+    } catch {
+      throw new HttpException(403, 'CSRF_ORIGIN_MISMATCH', 'Malformed Referer header');
+    }
   }
 
   const cookieToken = req.cookies?.[CSRF_COOKIE_NAME];
@@ -62,6 +80,17 @@ export function validateCsrf(req: RouteRequest): void {
  * Extracts and verifies JWT from Authorization header or HttpOnly session cookie
  */
 export function authenticate(req: RouteRequest): void {
+  // If an Origin header is provided by a browser, verify that the origin is authorized
+  const origin = typeof req.headers.origin === 'string' ? req.headers.origin : undefined;
+  if (origin && !isAllowedOrigin(origin)) {
+    throw new HttpException(403, 'CSRF_ORIGIN_MISMATCH', `Request origin '${origin}' is not authorized`);
+  }
+
+  const fetchSite = typeof req.headers['sec-fetch-site'] === 'string' ? req.headers['sec-fetch-site'] : undefined;
+  if (fetchSite === 'cross-site') {
+    throw new HttpException(403, 'CSRF_CROSS_SITE_FORBIDDEN', 'Cross-site request blocked by Fetch Metadata policy');
+  }
+
   let token: string | undefined;
   let authType: 'bearer' | 'cookie' | undefined;
 

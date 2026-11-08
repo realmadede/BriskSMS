@@ -108,10 +108,10 @@ export class Router {
     const origin = req.headers.origin;
 
     if (origin) {
-      if (!isProd || isAllowedOrigin(origin)) {
+      res.setHeader('Vary', 'Origin');
+      if (isAllowedOrigin(origin)) {
         res.setHeader('Access-Control-Allow-Origin', origin);
         res.setHeader('Access-Control-Allow-Credentials', 'true');
-        res.setHeader('Vary', 'Origin');
       }
     } else if (!isProd) {
       res.setHeader('Access-Control-Allow-Origin', '*');
@@ -124,16 +124,23 @@ export class Router {
     );
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
 
+    const host = req.headers.host || 'localhost:3000';
+    const parsedUrl = new URL(req.url || '/', `http://${host}`);
+    const pathname = parsedUrl.pathname;
+    const method = (req.method || 'GET').toUpperCase();
+
+    // Prevent caching of sensitive authentication and session payloads
+    if (pathname.startsWith('/v1/auth')) {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+    }
+
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
       res.end();
       return;
     }
-
-    const host = req.headers.host || 'localhost:3000';
-    const parsedUrl = new URL(req.url || '/', `http://${host}`);
-    const pathname = parsedUrl.pathname;
-    const method = (req.method || 'GET').toUpperCase();
 
     let matchedRoute: RouteDefinition | undefined;
     const params: Record<string, string> = {};

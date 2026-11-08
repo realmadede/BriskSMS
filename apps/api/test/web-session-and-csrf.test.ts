@@ -9,6 +9,11 @@ import {
   SESSION_COOKIE_NAME,
   REFRESH_COOKIE_NAME,
   CSRF_COOKIE_NAME,
+  generateCsrfToken,
+  verifyCsrfToken,
+  getCsrfSecret,
+  isAllowedOrigin,
+  getAllowedOrigins,
 } from '../src/core/cookies.js';
 import { signJwt } from '../src/core/crypto.js';
 
@@ -460,6 +465,513 @@ describe('Web Console Session Security & CSRF Protection', () => {
 
       assert.equal(res.statusCode, 201);
       assert.equal(res.json.data.invoice.referenceNumber, 'INV-BEARER-TEST-1');
+    });
+  });
+
+  describe('5. Login & Registration Cross-Site & Origin Protection', () => {
+    it('rejects cross-site login when Origin is from an untrusted domain with 403 CSRF_ORIGIN_MISMATCH', async () => {
+      const res = await makeRequest(
+        'POST',
+        '/v1/auth/login',
+        {
+          origin: 'https://evil-attacker.com',
+        },
+        {
+          email: 'merchant@brisksms.co.tz',
+          password: 'SecurePassword123!',
+        },
+      );
+
+      assert.equal(res.statusCode, 403);
+      assert.equal(res.json.error.code, 'CSRF_ORIGIN_MISMATCH');
+    });
+
+    it('rejects cross-site login when Sec-Fetch-Site is cross-site with 403 CSRF_CROSS_SITE_FORBIDDEN', async () => {
+      const res = await makeRequest(
+        'POST',
+        '/v1/auth/login',
+        {
+          'sec-fetch-site': 'cross-site',
+        },
+        {
+          email: 'merchant@brisksms.co.tz',
+          password: 'SecurePassword123!',
+        },
+      );
+
+      assert.equal(res.statusCode, 403);
+      assert.equal(res.json.error.code, 'CSRF_CROSS_SITE_FORBIDDEN');
+    });
+
+    it('rejects cross-site registration when Origin is from an untrusted domain with 403 CSRF_ORIGIN_MISMATCH', async () => {
+      const res = await makeRequest(
+        'POST',
+        '/v1/auth/register',
+        {
+          origin: 'https://attacker-origin.com',
+        },
+        {
+          email: 'attacker_user@example.com',
+          password: 'Password123!',
+          fullName: 'Attacker User',
+        },
+      );
+
+      assert.equal(res.statusCode, 403);
+      assert.equal(res.json.error.code, 'CSRF_ORIGIN_MISMATCH');
+    });
+
+    it('rejects cross-site registration when Sec-Fetch-Site is cross-site with 403 CSRF_CROSS_SITE_FORBIDDEN', async () => {
+      const res = await makeRequest(
+        'POST',
+        '/v1/auth/register',
+        {
+          'sec-fetch-site': 'cross-site',
+        },
+        {
+          email: 'attacker_user2@example.com',
+          password: 'Password123!',
+          fullName: 'Attacker User',
+        },
+      );
+
+      assert.equal(res.statusCode, 403);
+      assert.equal(res.json.error.code, 'CSRF_CROSS_SITE_FORBIDDEN');
+    });
+
+    it('accepts login from authorized origin when valid CSRF token is provided', async () => {
+      const csrfRes = await makeRequest('GET', '/v1/auth/csrf');
+      const csrfCookie = extractCookie(csrfRes.setCookies, CSRF_COOKIE_NAME)!;
+
+      const res = await makeRequest(
+        'POST',
+        '/v1/auth/login',
+        {
+          origin: 'http://localhost:4200',
+          cookie: `${CSRF_COOKIE_NAME}=${csrfCookie}`,
+          'x-csrf-token': csrfCookie,
+        },
+        {
+          email: 'merchant@brisksms.co.tz',
+          password: 'SecurePassword123!',
+        },
+      );
+
+      assert.equal(res.statusCode, 200);
+      assert.ok(extractCookie(res.setCookies, SESSION_COOKIE_NAME));
+      assert.ok(extractCookie(res.setCookies, REFRESH_COOKIE_NAME));
+    });
+  });
+
+  describe('6. Refresh Endpoint CSRF, Rotation & Concurrency Safety', () => {
+    it('rejects cross-site refresh when Origin is from an untrusted domain with 403 CSRF_ORIGIN_MISMATCH', async () => {
+      const loginRes = await makeRequest('POST', '/v1/auth/login', {}, {
+        email: 'merchant@brisksms.co.tz',
+        password: 'SecurePassword123!',
+      });
+      const refreshCookie = extractCookie(loginRes.setCookies, REFRESH_COOKIE_NAME)!;
+      const csrfCookie = extractCookie(loginRes.setCookies, CSRF_COOKIE_NAME)!;
+
+      const res = await makeRequest(
+        'POST',
+        '/v1/auth/refresh',
+        {
+          origin: 'https://evil-refresh-attacker.com',
+          cookie: `${REFRESH_COOKIE_NAME}=${refreshCookie}; ${CSRF_COOKIE_NAME}=${csrfCookie}`,
+          'x-csrf-token': csrfCookie,
+        },
+        {},
+      );
+
+      assert.equal(res.statusCode, 403);
+      assert.equal(res.json.error.code, 'CSRF_ORIGIN_MISMATCH');
+    });
+
+    it('rejects cross-site refresh when Sec-Fetch-Site is cross-site with 403 CSRF_CROSS_SITE_FORBIDDEN', async () => {
+      const loginRes = await makeRequest('POST', '/v1/auth/login', {}, {
+        email: 'merchant@brisksms.co.tz',
+        password: 'SecurePassword123!',
+      });
+      const refreshCookie = extractCookie(loginRes.setCookies, REFRESH_COOKIE_NAME)!;
+      const csrfCookie = extractCookie(loginRes.setCookies, CSRF_COOKIE_NAME)!;
+
+      const res = await makeRequest(
+        'POST',
+        '/v1/auth/refresh',
+        {
+          'sec-fetch-site': 'cross-site',
+          cookie: `${REFRESH_COOKIE_NAME}=${refreshCookie}; ${CSRF_COOKIE_NAME}=${csrfCookie}`,
+          'x-csrf-token': csrfCookie,
+        },
+        {},
+      );
+
+      assert.equal(res.statusCode, 403);
+      assert.equal(res.json.error.code, 'CSRF_CROSS_SITE_FORBIDDEN');
+    });
+
+    it('rejects cookie refresh when X-CSRF-Token header is missing', async () => {
+      const loginRes = await makeRequest('POST', '/v1/auth/login', {}, {
+        email: 'merchant@brisksms.co.tz',
+        password: 'SecurePassword123!',
+      });
+      const refreshCookie = extractCookie(loginRes.setCookies, REFRESH_COOKIE_NAME)!;
+      const csrfCookie = extractCookie(loginRes.setCookies, CSRF_COOKIE_NAME)!;
+
+      const res = await makeRequest(
+        'POST',
+        '/v1/auth/refresh',
+        {
+          cookie: `${REFRESH_COOKIE_NAME}=${refreshCookie}; ${CSRF_COOKIE_NAME}=${csrfCookie}`,
+          origin: 'http://localhost:4200',
+        },
+        {},
+      );
+
+      assert.equal(res.statusCode, 403);
+      assert.equal(res.json.error.code, 'CSRF_TOKEN_MISSING');
+    });
+
+    it('rejects cookie refresh when X-CSRF-Token is invalid or mismatched', async () => {
+      const loginRes = await makeRequest('POST', '/v1/auth/login', {}, {
+        email: 'merchant@brisksms.co.tz',
+        password: 'SecurePassword123!',
+      });
+      const refreshCookie = extractCookie(loginRes.setCookies, REFRESH_COOKIE_NAME)!;
+      const csrfCookie = extractCookie(loginRes.setCookies, CSRF_COOKIE_NAME)!;
+
+      const res = await makeRequest(
+        'POST',
+        '/v1/auth/refresh',
+        {
+          cookie: `${REFRESH_COOKIE_NAME}=${refreshCookie}; ${CSRF_COOKIE_NAME}=${csrfCookie}`,
+          'x-csrf-token': 'wrong-or-tampered-csrf-token-value',
+          origin: 'http://localhost:4200',
+        },
+        {},
+      );
+
+      assert.equal(res.statusCode, 403);
+      assert.equal(res.json.error.code, 'CSRF_TOKEN_INVALID');
+    });
+
+    it('rotates refresh token and invalidates old token upon successful refresh', async () => {
+      const loginRes = await makeRequest('POST', '/v1/auth/login', {}, {
+        email: 'merchant@brisksms.co.tz',
+        password: 'SecurePassword123!',
+      });
+      const oldRefreshCookie = extractCookie(loginRes.setCookies, REFRESH_COOKIE_NAME)!;
+      const csrfCookie = extractCookie(loginRes.setCookies, CSRF_COOKIE_NAME)!;
+
+      const refreshRes = await makeRequest(
+        'POST',
+        '/v1/auth/refresh',
+        {
+          cookie: `${REFRESH_COOKIE_NAME}=${oldRefreshCookie}; ${CSRF_COOKIE_NAME}=${csrfCookie}`,
+          'x-csrf-token': csrfCookie,
+          origin: 'http://localhost:4200',
+        },
+        {},
+      );
+
+      assert.equal(refreshRes.statusCode, 200);
+      const newRefreshCookie = extractCookie(refreshRes.setCookies, REFRESH_COOKIE_NAME)!;
+      assert.ok(newRefreshCookie);
+      assert.notEqual(newRefreshCookie, oldRefreshCookie);
+    });
+
+    it('strictly rejects reuse/replay of old revoked refresh token with 401 INVALID_TOKEN', async () => {
+      const loginRes = await makeRequest('POST', '/v1/auth/login', {}, {
+        email: 'merchant@brisksms.co.tz',
+        password: 'SecurePassword123!',
+      });
+      const oldRefreshCookie = extractCookie(loginRes.setCookies, REFRESH_COOKIE_NAME)!;
+      const csrfCookie = extractCookie(loginRes.setCookies, CSRF_COOKIE_NAME)!;
+
+      // 1. First refresh consumes the token
+      const res1 = await makeRequest(
+        'POST',
+        '/v1/auth/refresh',
+        {
+          cookie: `${REFRESH_COOKIE_NAME}=${oldRefreshCookie}; ${CSRF_COOKIE_NAME}=${csrfCookie}`,
+          'x-csrf-token': csrfCookie,
+          origin: 'http://localhost:4200',
+        },
+        {},
+      );
+      assert.equal(res1.statusCode, 200);
+
+      // 2. Replay attempt using the consumed old token must fail
+      const res2 = await makeRequest(
+        'POST',
+        '/v1/auth/refresh',
+        {
+          cookie: `${REFRESH_COOKIE_NAME}=${oldRefreshCookie}; ${CSRF_COOKIE_NAME}=${csrfCookie}`,
+          'x-csrf-token': csrfCookie,
+          origin: 'http://localhost:4200',
+        },
+        {},
+      );
+      assert.equal(res2.statusCode, 401);
+      assert.equal(res2.json.error.code, 'INVALID_TOKEN');
+    });
+
+    it('prevents race condition: concurrent refresh requests cannot create multiple valid refresh branches', async () => {
+      const loginRes = await makeRequest('POST', '/v1/auth/login', {}, {
+        email: 'merchant@brisksms.co.tz',
+        password: 'SecurePassword123!',
+      });
+      const refreshCookie = extractCookie(loginRes.setCookies, REFRESH_COOKIE_NAME)!;
+      const csrfCookie = extractCookie(loginRes.setCookies, CSRF_COOKIE_NAME)!;
+
+      const req1 = makeRequest('POST', '/v1/auth/refresh', {
+        cookie: `${REFRESH_COOKIE_NAME}=${refreshCookie}; ${CSRF_COOKIE_NAME}=${csrfCookie}`,
+        'x-csrf-token': csrfCookie,
+        origin: 'http://localhost:4200',
+      }, {});
+
+      const req2 = makeRequest('POST', '/v1/auth/refresh', {
+        cookie: `${REFRESH_COOKIE_NAME}=${refreshCookie}; ${CSRF_COOKIE_NAME}=${csrfCookie}`,
+        'x-csrf-token': csrfCookie,
+        origin: 'http://localhost:4200',
+      }, {});
+
+      const [res1, res2] = await Promise.all([req1, req2]);
+      const codes = [res1.statusCode, res2.statusCode].sort();
+
+      // Exactly one succeeds and one is rejected due to transaction lock
+      assert.deepEqual(codes, [200, 401]);
+    });
+  });
+
+  describe('7. CSRF Cryptographic Security & Malformed Token Defense', () => {
+    it('rejects expired CSRF token', () => {
+      const nonce = 'a'.repeat(48);
+      const expiredTime = Date.now() - 10000; // 10s in the past
+      const payload = `${nonce}.${expiredTime}`;
+      const sig = require('node:crypto').createHmac('sha256', getCsrfSecret()).update(payload).digest('hex');
+      const expiredToken = `${payload}.${sig}`;
+
+      assert.equal(verifyCsrfToken(expiredToken, expiredToken), false);
+    });
+
+    it('rejects tampered CSRF token where signature does not match payload', () => {
+      const validToken = generateCsrfToken();
+      const parts = validToken.split('.');
+      const sigPart = parts[2]!;
+      // Tamper signature by changing last character
+      const tamperedSig = sigPart.slice(0, -1) + (sigPart.endsWith('0') ? '1' : '0');
+      const tamperedToken = `${parts[0]}.${parts[1]}.${tamperedSig}`;
+
+      assert.equal(verifyCsrfToken(tamperedToken, tamperedToken), false);
+    });
+
+    it('rejects malformed CSRF token with invalid separators, non-hex nonce, or invalid timestamp', () => {
+      assert.equal(verifyCsrfToken('malformed-token-without-dots', 'malformed-token-without-dots'), false);
+      assert.equal(verifyCsrfToken('a.b', 'a.b'), false);
+      assert.equal(verifyCsrfToken('a.b.c.d', 'a.b.c.d'), false);
+      assert.equal(verifyCsrfToken('nonhexnonce.12345.sig', 'nonhexnonce.12345.sig'), false);
+      assert.equal(verifyCsrfToken(`${'a'.repeat(48)}.notanumber.${'b'.repeat(64)}`, `${'a'.repeat(48)}.notanumber.${'b'.repeat(64)}`), false);
+      assert.equal(verifyCsrfToken(`${'a'.repeat(48)}.-500.${'b'.repeat(64)}`, `${'a'.repeat(48)}.-500.${'b'.repeat(64)}`), false);
+    });
+
+    it('rejects oversized CSRF tokens exceeding 512 bytes', () => {
+      const hugeToken = 'a'.repeat(1000);
+      assert.equal(verifyCsrfToken(hugeToken, hugeToken), false);
+    });
+
+    it('enforces independent CSRF_SECRET in production and refuses to reuse JWT or encryption keys', () => {
+      const prevEnv = process.env.NODE_ENV;
+      const prevCsrf = process.env.CSRF_SECRET;
+      const prevJwt = process.env.JWT_ACCESS_SECRET;
+      const prevEnc = process.env.ENCRYPTION_MASTER_KEY;
+
+      try {
+        process.env.NODE_ENV = 'production';
+        process.env.JWT_ACCESS_SECRET = 'shared_jwt_secret_must_not_be_reused_32chars!';
+        process.env.ENCRYPTION_MASTER_KEY = 'master_key_encryption_key_min_32_characters!';
+
+        // 1. Missing CSRF_SECRET fails closed
+        delete process.env.CSRF_SECRET;
+        assert.throws(() => getCsrfSecret(), /FATAL: CSRF_SECRET is required/);
+
+        // 2. Short CSRF_SECRET fails closed
+        process.env.CSRF_SECRET = 'too_short';
+        assert.throws(() => getCsrfSecret(), /FATAL: Insecure or insufficient-entropy CSRF_SECRET/);
+
+        // 3. Reusing JWT_ACCESS_SECRET fails closed
+        process.env.CSRF_SECRET = process.env.JWT_ACCESS_SECRET;
+        assert.throws(() => getCsrfSecret(), /FATAL: CSRF_SECRET must be independently configured and not reuse JWT_ACCESS_SECRET/);
+
+        // 4. Reusing ENCRYPTION_MASTER_KEY fails closed
+        process.env.CSRF_SECRET = process.env.ENCRYPTION_MASTER_KEY;
+        assert.throws(() => getCsrfSecret(), /FATAL: CSRF_SECRET must be independently configured and not reuse ENCRYPTION_MASTER_KEY/);
+
+        // 5. Independently configured secure key passes
+        process.env.CSRF_SECRET = 'independent_production_csrf_secret_min_32_chars!';
+        assert.equal(getCsrfSecret(), 'independent_production_csrf_secret_min_32_chars!');
+      } finally {
+        process.env.NODE_ENV = prevEnv;
+        if (prevCsrf !== undefined) process.env.CSRF_SECRET = prevCsrf; else delete process.env.CSRF_SECRET;
+        if (prevJwt !== undefined) process.env.JWT_ACCESS_SECRET = prevJwt; else delete process.env.JWT_ACCESS_SECRET;
+        if (prevEnc !== undefined) process.env.ENCRYPTION_MASTER_KEY = prevEnc; else delete process.env.ENCRYPTION_MASTER_KEY;
+      }
+    });
+  });
+
+  describe('8. Production Origin, Deceptive Hostnames & CORS Security', () => {
+    it('rejects deceptive origin suffix attacks (e.g. localhost:4200.evil.com)', async () => {
+      const res = await makeRequest(
+        'POST',
+        '/v1/auth/login',
+        {
+          origin: 'http://localhost:4200.evil.com',
+        },
+        {
+          email: 'merchant@brisksms.co.tz',
+          password: 'SecurePassword123!',
+        },
+      );
+
+      assert.equal(res.statusCode, 403);
+      assert.equal(res.json.error.code, 'CSRF_ORIGIN_MISMATCH');
+    });
+
+    it('rejects deceptive origin subdomain attacks (e.g. evil-console.brisksms.co.tz)', () => {
+      const prevEnv = process.env.FRONTEND_URL;
+      try {
+        process.env.FRONTEND_URL = 'https://console.brisksms.co.tz';
+        assert.equal(isAllowedOrigin('https://evil-console.brisksms.co.tz'), false);
+        assert.equal(isAllowedOrigin('https://console.brisksms.co.tz.attacker.org'), false);
+        assert.equal(isAllowedOrigin('https://console.brisksms.co.tz'), true);
+      } finally {
+        if (prevEnv) process.env.FRONTEND_URL = prevEnv; else delete process.env.FRONTEND_URL;
+      }
+    });
+
+    it('rejects null origin from sandboxed iframes or local files', async () => {
+      const res = await makeRequest(
+        'POST',
+        '/v1/auth/login',
+        {
+          origin: 'null',
+        },
+        {
+          email: 'merchant@brisksms.co.tz',
+          password: 'SecurePassword123!',
+        },
+      );
+
+      assert.equal(res.statusCode, 403);
+      assert.equal(res.json.error.code, 'CSRF_ORIGIN_MISMATCH');
+    });
+
+    it('rejects localhost/127.0.0.1 in production mode unless explicitly configured in ALLOWED_ORIGINS', () => {
+      const prevEnv = process.env.NODE_ENV;
+      const prevAllowed = process.env.ALLOWED_ORIGINS;
+      try {
+        process.env.NODE_ENV = 'production';
+        delete process.env.ALLOWED_ORIGINS;
+        delete process.env.FRONTEND_URL;
+        delete process.env.CORS_ORIGIN;
+
+        assert.equal(isAllowedOrigin('http://localhost:4200'), false);
+        assert.equal(isAllowedOrigin('http://127.0.0.1:4200'), false);
+
+        process.env.ALLOWED_ORIGINS = 'https://console.brisksms.co.tz';
+        assert.equal(isAllowedOrigin('https://console.brisksms.co.tz'), true);
+        assert.equal(isAllowedOrigin('http://localhost:4200'), false);
+      } finally {
+        process.env.NODE_ENV = prevEnv;
+        if (prevAllowed) process.env.ALLOWED_ORIGINS = prevAllowed; else delete process.env.ALLOWED_ORIGINS;
+      }
+    });
+
+    it('rejects wildcard "*" in CORS_ORIGIN from being accepted as an authorized origin', () => {
+      const prevCors = process.env.CORS_ORIGIN;
+      try {
+        process.env.CORS_ORIGIN = '*';
+        const allowed = getAllowedOrigins();
+        assert.equal(allowed.has('*'), false);
+        assert.equal(isAllowedOrigin('*'), false);
+      } finally {
+        if (prevCors) process.env.CORS_ORIGIN = prevCors; else delete process.env.CORS_ORIGIN;
+      }
+    });
+
+    it('preflight OPTIONS with untrusted origin does NOT set Access-Control-Allow-Origin or Credentials', async () => {
+      const res = await makeRequest('OPTIONS', '/v1/auth/login', {
+        origin: 'https://evil-untrusted-site.com',
+      });
+
+      assert.equal(res.statusCode, 204);
+      assert.equal(res.headers['access-control-allow-origin'], undefined);
+      assert.equal(res.headers['access-control-allow-credentials'], undefined);
+      assert.equal(res.headers['vary'], 'Origin');
+    });
+
+    it('preflight OPTIONS with authorized origin sets Allow-Origin, Allow-Credentials, and Vary: Origin', async () => {
+      const res = await makeRequest('OPTIONS', '/v1/auth/login', {
+        origin: 'http://localhost:4200',
+      });
+
+      assert.equal(res.statusCode, 204);
+      assert.equal(res.headers['access-control-allow-origin'], 'http://localhost:4200');
+      assert.equal(res.headers['access-control-allow-credentials'], 'true');
+      assert.equal(res.headers['vary'], 'Origin');
+    });
+  });
+
+  describe('9. Cache-Control Security Headers on Sensitive Endpoints', () => {
+    it('sets Cache-Control: no-store and related headers on GET /v1/auth/csrf', async () => {
+      const res = await makeRequest('GET', '/v1/auth/csrf');
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.headers['cache-control'], 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      assert.equal(res.headers['pragma'], 'no-cache');
+      assert.equal(res.headers['expires'], '0');
+    });
+
+    it('sets Cache-Control: no-store on POST /v1/auth/login', async () => {
+      const res = await makeRequest('POST', '/v1/auth/login', {}, {
+        email: 'merchant@brisksms.co.tz',
+        password: 'SecurePassword123!',
+      });
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.headers['cache-control'], 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      assert.equal(res.headers['pragma'], 'no-cache');
+      assert.equal(res.headers['expires'], '0');
+    });
+
+    it('sets Cache-Control: no-store on GET /v1/auth/session', async () => {
+      const loginRes = await makeRequest('POST', '/v1/auth/login', {}, {
+        email: 'merchant@brisksms.co.tz',
+        password: 'SecurePassword123!',
+      });
+      const sessionCookie = extractCookie(loginRes.setCookies, SESSION_COOKIE_NAME)!;
+
+      const res = await makeRequest('GET', '/v1/auth/session', {
+        cookie: `${SESSION_COOKIE_NAME}=${sessionCookie}`,
+      });
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.headers['cache-control'], 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    });
+
+    it('sets Cache-Control: no-store on POST /v1/auth/refresh', async () => {
+      const loginRes = await makeRequest('POST', '/v1/auth/login', {}, {
+        email: 'merchant@brisksms.co.tz',
+        password: 'SecurePassword123!',
+      });
+      const refreshCookie = extractCookie(loginRes.setCookies, REFRESH_COOKIE_NAME)!;
+      const csrfCookie = extractCookie(loginRes.setCookies, CSRF_COOKIE_NAME)!;
+
+      const res = await makeRequest('POST', '/v1/auth/refresh', {
+        cookie: `${REFRESH_COOKIE_NAME}=${refreshCookie}; ${CSRF_COOKIE_NAME}=${csrfCookie}`,
+        'x-csrf-token': csrfCookie,
+        origin: 'http://localhost:4200',
+      }, {});
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.headers['cache-control'], 'no-store, no-cache, must-revalidate, proxy-revalidate');
     });
   });
 });

@@ -13,6 +13,7 @@ import {
   getCsrfCookieOptions,
   getClearedCookieOptions,
   generateCsrfToken,
+  isAllowedOrigin,
 } from '../../core/cookies.js';
 
 export function registerAuthRoutes(router: Router): void {
@@ -27,6 +28,14 @@ export function registerAuthRoutes(router: Router): void {
   });
 
   router.post('/v1/auth/register', async (req: RouteRequest): Promise<ApiResponse> => {
+    // Origin & Fetch Metadata defense against cross-site registration
+    if (req.headers.origin && !isAllowedOrigin(req.headers.origin as string)) {
+      throw new HttpException(403, 'CSRF_ORIGIN_MISMATCH', `Request origin '${req.headers.origin}' is not authorized`);
+    }
+    if (req.headers['sec-fetch-site'] === 'cross-site') {
+      throw new HttpException(403, 'CSRF_CROSS_SITE_FORBIDDEN', 'Cross-site registration blocked by Fetch Metadata policy');
+    }
+
     // If browser sent CSRF cookie or token, validate it
     if (req.cookies[CSRF_COOKIE_NAME] || req.headers['x-csrf-token']) {
       validateCsrf(req);
@@ -54,6 +63,14 @@ export function registerAuthRoutes(router: Router): void {
   });
 
   router.post('/v1/auth/login', async (req: RouteRequest): Promise<ApiResponse> => {
+    // Origin & Fetch Metadata defense against Login CSRF
+    if (req.headers.origin && !isAllowedOrigin(req.headers.origin as string)) {
+      throw new HttpException(403, 'CSRF_ORIGIN_MISMATCH', `Request origin '${req.headers.origin}' is not authorized`);
+    }
+    if (req.headers['sec-fetch-site'] === 'cross-site') {
+      throw new HttpException(403, 'CSRF_CROSS_SITE_FORBIDDEN', 'Cross-site login blocked by Fetch Metadata policy');
+    }
+
     // If browser sent CSRF cookie or token, validate it
     if (req.cookies[CSRF_COOKIE_NAME] || req.headers['x-csrf-token']) {
       validateCsrf(req);
@@ -80,11 +97,21 @@ export function registerAuthRoutes(router: Router): void {
   });
 
   router.post('/v1/auth/refresh', async (req: RouteRequest): Promise<ApiResponse> => {
+    // Origin & Fetch Metadata defense against Cross-Site Refresh
+    if (req.headers.origin && !isAllowedOrigin(req.headers.origin as string)) {
+      throw new HttpException(403, 'CSRF_ORIGIN_MISMATCH', `Request origin '${req.headers.origin}' is not authorized`);
+    }
+    if (req.headers['sec-fetch-site'] === 'cross-site') {
+      throw new HttpException(403, 'CSRF_CROSS_SITE_FORBIDDEN', 'Cross-site refresh blocked by Fetch Metadata policy');
+    }
+
     let token = (req.body.refreshToken as string) || '';
     const isCookieRefresh = !token && Boolean(req.cookies[REFRESH_COOKIE_NAME]);
 
     if (!token && isCookieRefresh) {
       token = req.cookies[REFRESH_COOKIE_NAME]!;
+      validateCsrf(req);
+    } else if (req.cookies[CSRF_COOKIE_NAME] || req.headers['x-csrf-token']) {
       validateCsrf(req);
     }
 
@@ -112,6 +139,16 @@ export function registerAuthRoutes(router: Router): void {
   });
 
   router.post('/v1/auth/logout', async (req: RouteRequest): Promise<ApiResponse> => {
+    if (req.headers.origin && !isAllowedOrigin(req.headers.origin as string)) {
+      throw new HttpException(403, 'CSRF_ORIGIN_MISMATCH', `Request origin '${req.headers.origin}' is not authorized`);
+    }
+    if (req.headers['sec-fetch-site'] === 'cross-site') {
+      throw new HttpException(403, 'CSRF_CROSS_SITE_FORBIDDEN', 'Cross-site logout blocked by Fetch Metadata policy');
+    }
+    if (req.cookies[CSRF_COOKIE_NAME] || req.headers['x-csrf-token']) {
+      validateCsrf(req);
+    }
+
     try {
       authenticate(req);
       if (req.context.jti) {
@@ -170,6 +207,12 @@ export function registerAuthRoutes(router: Router): void {
   });
 
   router.post('/v1/auth/verify-email', async (req: RouteRequest): Promise<ApiResponse> => {
+    if (req.headers.origin && !isAllowedOrigin(req.headers.origin as string)) {
+      throw new HttpException(403, 'CSRF_ORIGIN_MISMATCH', `Request origin '${req.headers.origin}' is not authorized`);
+    }
+    if (req.headers['sec-fetch-site'] === 'cross-site') {
+      throw new HttpException(403, 'CSRF_CROSS_SITE_FORBIDDEN', 'Cross-site request blocked by Fetch Metadata policy');
+    }
     const userId = (req.body.userId as string) || '';
     if (!userId) {
       throw new HttpException(400, 'INVALID_PAYLOAD', 'userId is required');
