@@ -3,7 +3,7 @@
  * Handles incoming delivery status reports from SMSGate gateways and devices.
  */
 
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { Router, RouteRequest, ApiResponse, HttpException } from '../../core/http.js';
 import { sql } from '@brisksms/db';
 import { SmsGateProvider } from './providers/smsgate.provider.js';
@@ -20,6 +20,15 @@ export function registerMessagingRoutes(router: Router): void {
    * - Replay protection backed by durable smsgate_webhook_events table
    * - Idempotent delivery report processing (returns HTTP 200 { duplicate: true } without financial re-mutation)
    * - ACID row-locked state transitions preventing out-of-order terminal state corruption
+   */
+  /**
+   * Official SMSGate Webhook Receiver Endpoint
+   * Conforms strictly to docs.sms-gate.app specification:
+   * - Authoritative Tenant & Device Binding (rejects untrusted headers/query overrides)
+   * - Signature verification against exact raw HTTP request body bytes concatenated with timestamp
+   * - Durable, stable event identity (SHA-256 excluding ephemeral transport signatures/timestamps)
+   * - Atomic single-transaction state machine and credit consistency
+   * - Idempotent delivery report processing (returns HTTP 200 { duplicate: true } on retries)
    */
   router.post('/v1/messaging/webhooks/smsgate', async (req: RouteRequest): Promise<ApiResponse> => {
     // 1. Signature & Timestamp Header Validation
@@ -44,50 +53,87 @@ export function registerMessagingRoutes(router: Router): void {
     }
 
     const rawPayload = req.body || {};
-    const rawBody = req.rawBody || '';
+    const rawBodyBuffer = req.rawBodyBuffer || Buffer.from(req.rawBody || '', 'utf8');
 
     // 2. Normalize incoming SMSGate delivery report
     const normalizedEvent = smsgateProvider.normalizeWebhookPayload(rawPayload);
 
-    // 3. Resolve Tenant Context
-    let organizationId =
+    // 3. Authoritative Tenant & Device Identity Resolution
+    const suppliedOrgHint = (
       (req.query.org as string) ||
       (req.query.organizationId as string) ||
       (req.headers['x-organization-id'] as string) ||
-      (rawPayload.organizationId as string);
+      (rawPayload.organizationId as string) ||
+      ''
+    ).trim() || undefined;
 
-    // If organization is not explicitly attached to webhook query/headers, look up via providerMessageId
-    if (!organizationId && normalizedEvent.providerMessageId && normalizedEvent.providerMessageId !== 'unknown') {
+    const candidateDeviceId = (
+      normalizedEvent.deviceId ||
+      (req.headers['x-device-id'] as string) ||
+      (rawPayload.deviceId as string) ||
+      ''
+    ).trim() || undefined;
+
+    let trustedOrgId: string;
+    let trustedDeviceId: string | undefined = undefined;
+
+    if (candidateDeviceId) {
+      // Authoritatively resolve organization from persisted device association
+      const authoritativeOrgId = await smsGateKeyService.resolveAuthoritativeDeviceOrganization(candidateDeviceId);
+      if (!authoritativeOrgId) {
+        throw new HttpException(
+          404,
+          'UNKNOWN_DEVICE',
+          `Device "${candidateDeviceId}" is not registered to any organization`,
+        );
+      }
+
+      // Untrusted routing hint verification: Must match authoritative device binding
+      if (suppliedOrgHint && suppliedOrgHint !== authoritativeOrgId) {
+        throw new HttpException(
+          403,
+          'TENANT_DEVICE_MISMATCH',
+          'Request-supplied organization does not match the authoritative organization registered for this device',
+        );
+      }
+
+      trustedOrgId = authoritativeOrgId;
+      trustedDeviceId = candidateDeviceId;
+    } else {
+      // Mode B VPS Gateway (no physical Android device ID attached)
+      if (!suppliedOrgHint) {
+        throw new HttpException(
+          400,
+          'MISSING_ORGANIZATION_CONTEXT',
+          'Unable to determine organizationId for incoming webhook. Provide ?org=<orgId> or register device.',
+        );
+      }
+      trustedOrgId = suppliedOrgHint;
+      trustedDeviceId = undefined;
+    }
+
+    // Validate that provider message ID (if present) belongs to the trusted organization
+    if (normalizedEvent.providerMessageId && normalizedEvent.providerMessageId !== 'unknown') {
       try {
         const msgRows = await sql<Record<string, any>>`
           SELECT organization_id FROM sms_messages
           WHERE provider_message_id = ${normalizedEvent.providerMessageId}
           LIMIT 1
         `;
-        if (msgRows.length > 0) {
-          organizationId = msgRows[0]!.organization_id;
+        if (msgRows.length > 0 && msgRows[0]!.organization_id !== trustedOrgId) {
+          throw new HttpException(
+            403,
+            'TENANT_MESSAGE_MISMATCH',
+            'Target provider message ID belongs to a different organization than the verified device/gateway',
+          );
         }
-      } catch {
-        // Fallback handled below
+      } catch (err: unknown) {
+        if (err instanceof HttpException) throw err;
       }
     }
 
-    if (!organizationId) {
-      throw new HttpException(
-        400,
-        'MISSING_ORGANIZATION_CONTEXT',
-        'Unable to determine organizationId for incoming webhook. Provide ?org=<orgId> or ensure message exists.',
-      );
-    }
-
-    const deviceId =
-      normalizedEvent.deviceId ||
-      (req.headers['x-device-id'] as string) ||
-      (rawPayload.deviceId as string) ||
-      undefined;
-
     // 4. Resolve Candidate Signing Keys & Verify Cryptographic Signature
-    const candidateKeys = await smsGateKeyService.resolveCandidateKeys(organizationId, deviceId);
+    const candidateKeys = await smsGateKeyService.resolveCandidateKeys(trustedOrgId, trustedDeviceId);
     if (!candidateKeys || candidateKeys.length === 0) {
       throw new HttpException(
         401,
@@ -97,7 +143,7 @@ export function registerMessagingRoutes(router: Router): void {
     }
 
     const verifyResult = smsgateProvider.verifyWebhookSignatureDetailed(
-      rawBody,
+      rawBodyBuffer,
       signature,
       timestamp,
       candidateKeys,
@@ -118,69 +164,36 @@ export function registerMessagingRoutes(router: Router): void {
       }
     }
 
-    // 5. Distributed Replay Protection & Idempotent Event Identity
+    // 5. Compute Durable & Stable Event Identity
+    // Stable fingerprint: excludes X-Signature and X-Timestamp (which change across retries)
+    const stableKey = normalizedEvent.upstreamEventId
+      ? `evt:${normalizedEvent.upstreamEventId}`
+      : `${normalizedEvent.providerMessageId}:${normalizedEvent.eventType}:${normalizedEvent.rawTimestamp ?? ''}:${normalizedEvent.simNumber ?? 1}`;
+
     const eventFingerprint = createHash('sha256')
-      .update(`${organizationId}:${normalizedEvent.providerMessageId}:${normalizedEvent.eventType}:${signature}`)
+      .update(`${trustedOrgId}:${trustedDeviceId ?? 'GATEWAY'}:${stableKey}`)
       .digest('hex');
 
-    try {
-      const existingEvents = await sql<Record<string, any>>`
-        SELECT id, event_fingerprint, status, processed_at
-        FROM smsgate_webhook_events
-        WHERE event_fingerprint = ${eventFingerprint}
-      `;
-
-      if (existingEvents.length > 0) {
-        // Legitimate retry: return HTTP 200 without second financial mutation
-        return {
-          success: true,
-          data: {
-            duplicate: true,
-            providerMessageId: normalizedEvent.providerMessageId,
-            status: normalizedEvent.eventType,
-            message: 'Delivery event already processed (idempotent duplicate retry)',
-          },
-        };
-      }
-
-      // Record durable event identity
-      await sql`
-        INSERT INTO smsgate_webhook_events (
-          id, organization_id, device_id, event_fingerprint, provider_message_id,
-          event_type, signature, timestamp, status, first_seen_at, processed_at
-        ) VALUES (
-          ${randomUUID()}, ${organizationId}, ${deviceId ?? null}, ${eventFingerprint},
-          ${normalizedEvent.providerMessageId}, ${normalizedEvent.eventType}, ${signature},
-          ${BigInt(timestamp)}, 'PROCESSED', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-        )
-      `;
-    } catch (err: unknown) {
-      // In case of unique constraint race condition from concurrent identical requests
-      const message = err instanceof Error ? err.message : String(err);
-      if (message.includes('unique') || message.includes('event_fingerprint')) {
-        return {
-          success: true,
-          data: {
-            duplicate: true,
-            providerMessageId: normalizedEvent.providerMessageId,
-            status: normalizedEvent.eventType,
-            message: 'Delivery event already processed (concurrent duplicate)',
-          },
-        };
-      }
-      // If running without database, proceed to memory handling
-    }
-
-    // 6. Transactional State Machine & Credit Consistency
-    const updatedMessage = await messagingService.handleDeliveryEvent(normalizedEvent);
+    // 6. Concurrency-Safe Transactional State Machine & Credit Consistency
+    const result = await messagingService.processSmsGateWebhookDelivery({
+      organizationId: trustedOrgId,
+      deviceId: trustedDeviceId,
+      eventFingerprint,
+      event: normalizedEvent,
+      signature,
+      timestamp,
+    });
 
     return {
       success: true,
       data: {
-        duplicate: false,
+        duplicate: result.duplicate,
         providerMessageId: normalizedEvent.providerMessageId,
         status: normalizedEvent.eventType,
-        messageRecord: updatedMessage,
+        messageRecord: result.messageRecord,
+        message: result.duplicate
+          ? 'Delivery event already processed (idempotent duplicate retry)'
+          : undefined,
       },
     };
   });

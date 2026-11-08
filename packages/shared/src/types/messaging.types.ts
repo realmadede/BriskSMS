@@ -49,7 +49,12 @@ export interface NormalizedDeliveryEvent {
   eventType: 'SENT' | 'DELIVERED' | 'FAILED';
   failureReason?: string;
   carrierTimestamp: Date;
+  rawTimestamp?: string;
   deviceId?: string;
+  upstreamEventId?: string;
+  simNumber?: number;
+  recipient?: string;
+  rawEvent?: string;
 }
 
 /**

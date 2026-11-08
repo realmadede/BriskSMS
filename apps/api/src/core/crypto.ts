@@ -144,15 +144,70 @@ export function hashToken(token: string): string {
 }
 
 /**
+ * Known insecure, development, and CI default keys that must NEVER be used in production.
+ */
+export const INSECURE_DEFAULT_KEYS = new Set([
+  'brisksms_ci_encryption_master_key_32_bytes_min!',
+  'brisksms_dev_encryption_master_key_32_bytes_min!',
+  'dev_master_key_for_testing_only_1234567890',
+  'test_encryption_master_key_32_bytes_long!!',
+]);
+
+/**
+ * Validates encryption configuration at startup or operation time.
+ * In production (NODE_ENV=production):
+ * - Refuses to start if ENCRYPTION_MASTER_KEY is missing or empty.
+ * - Refuses to start if ENCRYPTION_MASTER_KEY matches any known dev or CI test key.
+ * - Requires at least 32 characters (or 64 hex characters) of entropy.
+ */
+export function validateProductionEncryptionConfig(): void {
+  const isProd = process.env.NODE_ENV === 'production';
+  const rawKey = process.env.ENCRYPTION_MASTER_KEY;
+
+  if (isProd) {
+    if (!rawKey || typeof rawKey !== 'string' || rawKey.trim().length === 0) {
+      throw new Error('FATAL: ENCRYPTION_MASTER_KEY is not configured in production environment. Refusing to start.');
+    }
+    const trimmed = rawKey.trim();
+    if (
+      INSECURE_DEFAULT_KEYS.has(trimmed) ||
+      trimmed.toLowerCase().includes('ci_encryption') ||
+      trimmed.toLowerCase().includes('dev_encryption')
+    ) {
+      throw new Error('FATAL: Insecure or test ENCRYPTION_MASTER_KEY detected in production environment. Refusing to start.');
+    }
+    if (trimmed.length < 32) {
+      throw new Error('FATAL: ENCRYPTION_MASTER_KEY must be at least 32 characters in production. Refusing to start.');
+    }
+  }
+}
+
+/**
  * Resolves 32-byte key buffer for AES-256-GCM from ENCRYPTION_MASTER_KEY.
  * Fails closed if the master key is missing, empty, or unconfigured.
+ * In production, strictly rejects any dev/CI default test key.
  */
 function getMasterKeyBuffer(customKey?: string): Buffer {
+  const isProd = process.env.NODE_ENV === 'production';
   const rawKey = customKey || process.env.ENCRYPTION_MASTER_KEY;
   if (!rawKey || typeof rawKey !== 'string' || rawKey.trim().length === 0) {
     throw new Error('Encryption failed: ENCRYPTION_MASTER_KEY is not configured or empty');
   }
   const trimmed = rawKey.trim();
+
+  if (isProd) {
+    if (
+      INSECURE_DEFAULT_KEYS.has(trimmed) ||
+      trimmed.toLowerCase().includes('ci_encryption') ||
+      trimmed.toLowerCase().includes('dev_encryption')
+    ) {
+      throw new Error('Encryption failed: Insecure or test ENCRYPTION_MASTER_KEY detected in production');
+    }
+    if (trimmed.length < 32) {
+      throw new Error('Encryption failed: ENCRYPTION_MASTER_KEY must be at least 32 characters in production');
+    }
+  }
+
   if (/^[0-9a-fA-F]{64}$/.test(trimmed)) {
     return Buffer.from(trimmed, 'hex');
   }

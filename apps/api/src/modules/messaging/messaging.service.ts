@@ -24,6 +24,7 @@ import { entitlementService } from '../subscription/entitlement.service.js';
 import { MessagingProvider } from './interfaces/messaging-provider.interface.js';
 import { smsGateProvider } from './providers/smsgate.provider.js';
 import { recipientParserService } from './recipient-parser.service.js';
+import { HttpException } from '../../core/http.js';
 
 export interface CreateCampaignDto {
   name: string;
@@ -817,6 +818,165 @@ export class MessagingService {
       }
 
       return targetMessage;
+    });
+  }
+
+  /**
+   * Concurrency-safe atomic processing of an incoming SMSGate delivery webhook.
+   *
+   * Transaction Boundaries:
+   * 1. Checks or locks smsgate_webhook_events with row-level locks.
+   *    - If event with eventFingerprint already exists and status is 'PROCESSED': returns { duplicate: true }.
+   * 2. Locks target sms_messages row FOR UPDATE strictly scoped to organizationId.
+   *    - Cross-tenant validation: if provider_message_id belongs to another organization, throws 403 CROSS_TENANT_FORBIDDEN.
+   * 3. Performs terminal state mutations (DELIVERED/FAILED/SUBMITTED).
+   *    - If FAILED and previously un-refunded: atomically increments messaging_accounts and appends messaging_credit_ledger REFUND.
+   * 4. Persists smsgate_webhook_events record with status = 'PROCESSED' in the SAME transaction.
+   * 5. If any step fails, entire transaction rolls back; no event is saved as PROCESSED, remaining safely retryable.
+   */
+  async processSmsGateWebhookDelivery(params: {
+    organizationId: string;
+    deviceId?: string;
+    eventFingerprint: string;
+    event: NormalizedDeliveryEvent;
+    signature: string;
+    timestamp: string;
+  }): Promise<{ duplicate: boolean; messageRecord: SmsMessageRecord | null }> {
+    return withTransaction(async (tx) => {
+      const now = new Date();
+
+      // 1. Concurrency-safe event identity reservation using PostgreSQL unique constraint
+      const insertResult = await tx<Record<string, any>>`
+        INSERT INTO smsgate_webhook_events (
+          id, organization_id, device_id, event_fingerprint, provider_message_id,
+          event_type, signature, timestamp, status, first_seen_at, processed_at
+        ) VALUES (
+          ${randomUUID()}, ${params.organizationId}, ${params.deviceId ?? null},
+          ${params.eventFingerprint}, ${params.event.providerMessageId}, ${params.event.eventType},
+          ${params.signature}, ${BigInt(params.timestamp)}, 'PROCESSED',
+          ${now}, ${now}
+        )
+        ON CONFLICT ("event_fingerprint") DO NOTHING
+        RETURNING id, status
+      `;
+
+      if (insertResult.length === 0) {
+        // Event already exists (concurrent duplicate or retried duplicate)
+        const msgRows = await tx<Record<string, any>>`
+          SELECT * FROM sms_messages
+          WHERE provider_message_id = ${params.event.providerMessageId}
+            AND organization_id = ${params.organizationId}
+          LIMIT 1
+        `;
+        const currentMsg = msgRows.length > 0 ? this.mapMessageRow(msgRows[0]!) : null;
+        return {
+          duplicate: true,
+          messageRecord: currentMsg,
+        };
+      }
+
+      // 2. Cross-tenant check: Verify message belongs to the authoritative organization
+      const anyMsgRows = await tx<Record<string, any>>`
+        SELECT id, organization_id FROM sms_messages
+        WHERE provider_message_id = ${params.event.providerMessageId}
+        LIMIT 1
+      `;
+
+      if (anyMsgRows.length > 0 && anyMsgRows[0]!.organization_id !== params.organizationId) {
+        throw new HttpException(
+          403,
+          'CROSS_TENANT_FORBIDDEN',
+          'Target provider message ID belongs to a different organization',
+        );
+      }
+
+      // 3. Lock target message row FOR UPDATE
+      const rows = await tx<Record<string, any>>`
+        SELECT * FROM sms_messages
+        WHERE provider_message_id = ${params.event.providerMessageId}
+          AND organization_id = ${params.organizationId}
+        FOR UPDATE
+      `;
+
+      let updatedRecord: SmsMessageRecord | null = null;
+
+      if (rows.length > 0) {
+        const targetMessage = this.mapMessageRow(rows[0]!);
+
+        if (targetMessage.status === SmsStatus.DELIVERED) {
+          // Terminal State Protection: Delivered messages are never demoted or refunded
+          updatedRecord = targetMessage;
+        } else if (params.event.eventType === 'DELIVERED') {
+          const updated = await tx<Record<string, any>>`
+            UPDATE sms_messages
+            SET status = ${SmsStatus.DELIVERED},
+                delivered_at = ${params.event.carrierTimestamp},
+                updated_at = ${now}
+            WHERE id = ${targetMessage.id}
+            RETURNING *
+          `;
+          updatedRecord = this.mapMessageRow(updated[0]!);
+        } else if (params.event.eventType === 'FAILED') {
+          if (targetMessage.status !== SmsStatus.FAILED) {
+            const updated = await tx<Record<string, any>>`
+              UPDATE sms_messages
+              SET status = ${SmsStatus.FAILED},
+                  last_error = ${params.event.failureReason ?? 'Carrier transmission failed'},
+                  updated_at = ${now}
+              WHERE id = ${targetMessage.id}
+              RETURNING *
+            `;
+
+            // Atomic credit refund
+            const accRows = await tx<Record<string, any>>`
+              SELECT * FROM messaging_accounts
+              WHERE organization_id = ${targetMessage.organizationId}
+              FOR UPDATE
+            `;
+            if (accRows.length > 0) {
+              const currentBalance = Number(accRows[0]!.credit_balance);
+              const newBalance = currentBalance + targetMessage.costCredits;
+              await tx`
+                UPDATE messaging_accounts
+                SET credit_balance = ${newBalance}, updated_at = ${now}
+                WHERE organization_id = ${targetMessage.organizationId}
+              `;
+              await tx`
+                INSERT INTO messaging_credit_ledger (
+                  id, organization_id, entry_type, amount_credits, balance_after, reference_id, created_at
+                ) VALUES (
+                  ${randomUUID()}, ${targetMessage.organizationId}, ${CreditLedgerEntryType.REFUND},
+                  ${targetMessage.costCredits}, ${newBalance}, ${`refund_${targetMessage.id}`}, ${now}
+                )
+              `;
+            }
+
+            updatedRecord = this.mapMessageRow(updated[0]!);
+          } else {
+            updatedRecord = targetMessage;
+          }
+        } else if (params.event.eventType === 'SENT') {
+          if (targetMessage.status === SmsStatus.QUEUED) {
+            const updated = await tx<Record<string, any>>`
+              UPDATE sms_messages
+              SET status = ${SmsStatus.SUBMITTED},
+                  updated_at = ${now}
+              WHERE id = ${targetMessage.id}
+              RETURNING *
+            `;
+            updatedRecord = this.mapMessageRow(updated[0]!);
+          } else {
+            updatedRecord = targetMessage;
+          }
+        } else {
+          updatedRecord = targetMessage;
+        }
+      }
+
+      return {
+        duplicate: false,
+        messageRecord: updatedRecord,
+      };
     });
   }
 }

@@ -41,6 +41,7 @@ export interface RouteRequest {
   headers: Record<string, string | string[] | undefined>;
   body: Record<string, unknown>;
   rawBody: string;
+  rawBodyBuffer: Buffer<ArrayBufferLike>;
   context: RequestContext;
   rawReq: IncomingMessage;
 }
@@ -138,9 +139,11 @@ export class Router {
 
     let body: Record<string, unknown> = {};
     let rawBody = '';
+    let rawBodyBuffer: Buffer<ArrayBufferLike> = Buffer.alloc(0);
     if (['POST', 'PATCH', 'PUT'].includes(method)) {
       try {
-        rawBody = await readBody(req);
+        rawBodyBuffer = await readBodyBuffer(req);
+        rawBody = rawBodyBuffer.toString('utf-8');
         if (rawBody.trim()) {
           body = JSON.parse(rawBody);
         }
@@ -173,6 +176,7 @@ export class Router {
       headers: req.headers,
       body,
       rawBody,
+      rawBodyBuffer,
       context: {},
       rawReq: req,
     };
@@ -230,11 +234,15 @@ export class Router {
   }
 }
 
-function readBody(req: IncomingMessage): Promise<string> {
+export function readBodyBuffer(req: IncomingMessage): Promise<Buffer<ArrayBufferLike>> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    req.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')));
+    req.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+    req.on('end', () => resolve(Buffer.concat(chunks)));
     req.on('error', (err) => reject(err));
   });
+}
+
+export function readBody(req: IncomingMessage): Promise<string> {
+  return readBodyBuffer(req).then((buf) => buf.toString('utf-8'));
 }

@@ -1,6 +1,10 @@
 /// <reference types="node" />
 import { createServer } from 'node:http';
 import { createApp } from './app.js';
+import { validateProductionEncryptionConfig } from './core/crypto.js';
+
+// Enforce fail-closed production encryption configuration on boot
+validateProductionEncryptionConfig();
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const router = createApp();

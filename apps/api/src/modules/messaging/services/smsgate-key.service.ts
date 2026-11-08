@@ -18,6 +18,7 @@
 import { randomUUID } from 'node:crypto';
 import { sql } from '@brisksms/db';
 import { encryptSecret, decryptSecret } from '../../../core/crypto.js';
+import { HttpException } from '../../../core/http.js';
 
 export interface KeyRecord {
   currentKey: string;
@@ -31,6 +32,84 @@ export class SmsGateKeyService {
 
   private buildDeviceKeyScope(organizationId: string, deviceId: string): string {
     return `${organizationId.trim()}:${deviceId.trim()}`;
+  }
+
+  /**
+   * Authoritatively resolves the single organizationId bound to a deviceId.
+   *
+   * Security Invariants:
+   * 1. Persistence Binding: Queries authoritative database records (smsgate_signing_keys & devices).
+   * 2. Revocation Enforcement: Fails closed with 403 DEVICE_REVOKED if the device is revoked.
+   * 3. Disambiguation: Fails closed with 409 AMBIGUOUS_DEVICE_IDENTITY if the device is registered
+   *    under multiple organizations, preventing cross-tenant leakage.
+   * 4. Unknown Detection: Returns null if no record exists for this device.
+   */
+  async resolveAuthoritativeDeviceOrganization(deviceId: string): Promise<string | null> {
+    const cleanDeviceId = deviceId?.trim();
+    if (!cleanDeviceId) return null;
+
+    try {
+      // 1. Check if device exists in devices table and is revoked
+      const devRows = await sql<Record<string, any>>`
+        SELECT organization_id, status FROM devices
+        WHERE id::text = ${cleanDeviceId} OR device_model = ${cleanDeviceId}
+      `;
+      for (const d of devRows) {
+        if (d.status === 'REVOKED') {
+          throw new HttpException(
+            403,
+            'DEVICE_REVOKED',
+            `Device "${cleanDeviceId}" has been revoked and cannot submit delivery reports`,
+          );
+        }
+      }
+
+      // 2. Query distinct organizations from smsgate_signing_keys
+      const keyRows = await sql<Record<string, any>>`
+        SELECT DISTINCT organization_id FROM smsgate_signing_keys
+        WHERE device_id = ${cleanDeviceId}
+      `;
+
+      if (keyRows.length > 1) {
+        throw new HttpException(
+          409,
+          'AMBIGUOUS_DEVICE_IDENTITY',
+          `Device "${cleanDeviceId}" is ambiguously bound to multiple organizations`,
+        );
+      }
+
+      if (keyRows.length === 1) {
+        return keyRows[0]!.organization_id;
+      }
+
+      if (devRows.length === 1 && devRows[0]!.organization_id) {
+        return devRows[0]!.organization_id;
+      }
+    } catch (err: unknown) {
+      if (err instanceof HttpException) throw err;
+      // Database unavailable or memory mode fallback
+    }
+
+    // In-memory fallback
+    const matchedOrgs: string[] = [];
+    for (const scopeKey of this.deviceKeys.keys()) {
+      const [orgId, devId] = scopeKey.split(':');
+      if (devId === cleanDeviceId && orgId) {
+        if (!matchedOrgs.includes(orgId)) {
+          matchedOrgs.push(orgId);
+        }
+      }
+    }
+
+    if (matchedOrgs.length > 1) {
+      throw new HttpException(
+        409,
+        'AMBIGUOUS_DEVICE_IDENTITY',
+        `Device "${cleanDeviceId}" is ambiguously bound to multiple organizations in memory`,
+      );
+    }
+
+    return matchedOrgs[0] ?? null;
   }
 
   /**

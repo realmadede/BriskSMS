@@ -152,7 +152,7 @@ export class SmsGateProvider implements MessagingProvider {
    * - Key rotation support: verifies against currentKey or previousKey
    */
   verifyWebhookSignatureDetailed(
-    rawBody: string,
+    rawBody: string | Buffer,
     signatureHeader: string,
     timestampHeader: string,
     signingSecret: string | string[],
@@ -213,15 +213,17 @@ export class SmsGateProvider implements MessagingProvider {
       return { isValid: false, error: 'MISSING_SIGNING_KEY' };
     }
 
-    // 6. Signature Computation: Exact raw HTTP request body concatenated with timestamp string
-    const signingInput = rawBody + cleanTimestamp;
+    // 6. Signature Computation: Exact raw HTTP request body bytes concatenated with timestamp string bytes
+    const bodyBuf = Buffer.isBuffer(rawBody) ? rawBody : Buffer.from(rawBody, 'utf8');
+    const tsBuf = Buffer.from(cleanTimestamp, 'utf8');
+    const signingInput = Buffer.concat([bodyBuf, tsBuf]);
     const sigBuf = Buffer.from(cleanSig, 'hex');
 
     let matched = false;
     for (const secret of candidateSecrets) {
       try {
         const expectedSignature = createHmac('sha256', secret)
-          .update(signingInput, 'utf8')
+          .update(signingInput)
           .digest('hex');
         const expectedBuf = Buffer.from(expectedSignature, 'hex');
 
@@ -251,7 +253,7 @@ export class SmsGateProvider implements MessagingProvider {
    * Cryptographically verifies delivery webhook signature returning a boolean.
    */
   verifyWebhookSignature(
-    rawBody: string,
+    rawBody: string | Buffer,
     signatureHeader: string,
     timestampHeader: string,
     signingSecret: string | string[],
@@ -439,17 +441,40 @@ export class SmsGateProvider implements MessagingProvider {
       (rawPayload.reason as string) ||
       undefined;
 
-    const timestampVal = payloadObj.receivedAt || payloadObj.timestamp || rawPayload.timestamp;
+    const timestampVal = payloadObj.receivedAt || payloadObj.timestamp || rawPayload.timestamp || payloadObj.deliveredAt || payloadObj.sentAt || payloadObj.failedAt;
     const carrierTimestamp = timestampVal
       ? new Date(timestampVal as string)
       : new Date();
+
+    const upstreamEventId =
+      (rawPayload.id as string) ||
+      (rawPayload.eventId as string) ||
+      (payloadObj.id as string) ||
+      undefined;
+
+    const simNumber =
+      typeof payloadObj.simNumber === 'number'
+        ? payloadObj.simNumber
+        : typeof rawPayload.simNumber === 'number'
+          ? rawPayload.simNumber
+          : undefined;
+
+    const recipient =
+      (payloadObj.recipient as string) ||
+      (rawPayload.recipient as string) ||
+      undefined;
 
     return {
       providerMessageId,
       eventType,
       failureReason,
       carrierTimestamp,
+      rawTimestamp: timestampVal ? String(timestampVal) : undefined,
       deviceId,
+      upstreamEventId,
+      simNumber,
+      recipient,
+      rawEvent,
     };
   }
 }
