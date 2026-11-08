@@ -1,11 +1,21 @@
 import { IncomingMessage, ServerResponse } from 'node:http';
 import { DatabaseUnavailableError, RedisUnavailableError } from '@brisksms/db';
+import {
+  CookieToSet,
+  parseCookies,
+  serializeCookie,
+  isAllowedOrigin,
+} from './cookies.js';
+
+export type { CookieToSet };
+export { parseCookies, serializeCookie, isAllowedOrigin };
 
 export interface ApiResponse<T = unknown> {
   success: boolean;
   statusCode?: number;
   data?: T;
   meta?: Record<string, unknown>;
+  cookies?: CookieToSet[];
   error?: {
     code: string;
     message: string;
@@ -30,6 +40,8 @@ export interface RequestContext {
   organizationId?: string;
   role?: string;
   deviceId?: string;
+  authType?: 'bearer' | 'cookie';
+  jti?: string;
 }
 
 export interface RouteRequest {
@@ -39,6 +51,8 @@ export interface RouteRequest {
   params: Record<string, string>;
   query: Record<string, string>;
   headers: Record<string, string | string[] | undefined>;
+  cookies: Record<string, string>;
+  pendingCookies: CookieToSet[];
   body: Record<string, unknown>;
   rawBody: string;
   rawBodyBuffer: Buffer<ArrayBufferLike>;
@@ -90,14 +104,24 @@ export class Router {
   }
 
   async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const origin = req.headers.origin || '*';
-    res.setHeader('Access-Control-Allow-Origin', origin);
+    const isProd = process.env.NODE_ENV === 'production';
+    const origin = req.headers.origin;
+
+    if (origin) {
+      if (!isProd || isAllowedOrigin(origin)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+        res.setHeader('Vary', 'Origin');
+      }
+    } else if (!isProd) {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
     res.setHeader(
       'Access-Control-Allow-Headers',
-      'Content-Type, Authorization, X-Requested-With, Idempotency-Key, X-Signature, X-Timestamp, X-Organization-Id',
+      'Content-Type, Authorization, X-Requested-With, Idempotency-Key, X-Signature, X-Timestamp, X-Organization-Id, X-CSRF-Token, X-XSRF-Token',
     );
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
 
     if (req.method === 'OPTIONS') {
@@ -170,6 +194,9 @@ export class Router {
       query[key] = val;
     });
 
+    const cookies = parseCookies(typeof req.headers.cookie === 'string' ? req.headers.cookie : undefined);
+    const pendingCookies: CookieToSet[] = [];
+
     const routeReq: RouteRequest = {
       method,
       url: parsedUrl,
@@ -177,6 +204,8 @@ export class Router {
       params,
       query,
       headers: req.headers,
+      cookies,
+      pendingCookies,
       body,
       rawBody,
       rawBodyBuffer,
@@ -186,10 +215,19 @@ export class Router {
 
     try {
       const response = await matchedRoute.handler(routeReq);
+      const allCookies = [
+        ...pendingCookies,
+        ...(response && response.cookies ? response.cookies : []),
+      ];
+      if (allCookies.length > 0) {
+        const serialized = allCookies.map((c) => serializeCookie(c.name, c.value, c.options));
+        res.setHeader('Set-Cookie', serialized);
+      }
+
       if (response) {
         const defaultStatus = method === 'POST' && pathname.endsWith('/register') ? 201 : 200;
         const status = response.statusCode ?? defaultStatus;
-        const { statusCode: _omit, ...payload } = response;
+        const { statusCode: _omit, cookies: _omitCookies, ...payload } = response;
         res.writeHead(status);
         res.end(
           JSON.stringify(payload, (_key, value) =>
@@ -201,6 +239,10 @@ export class Router {
         res.end();
       }
     } catch (err: unknown) {
+      if (pendingCookies.length > 0) {
+        const serialized = pendingCookies.map((c) => serializeCookie(c.name, c.value, c.options));
+        res.setHeader('Set-Cookie', serialized);
+      }
       if (err instanceof HttpException) {
         res.writeHead(err.statusCode);
         res.end(

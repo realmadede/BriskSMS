@@ -4,6 +4,12 @@ import { DeviceStatus, UserRole } from '@brisksms/shared';
 import { sql } from '@brisksms/db';
 import { DeviceRecord, mapDeviceRow } from './store.js';
 import { timingSafeEqual } from 'node:crypto';
+import {
+  SESSION_COOKIE_NAME,
+  CSRF_COOKIE_NAME,
+  verifyCsrfToken,
+  isAllowedOrigin,
+} from './cookies.js';
 
 // Fast in-process cache synchronized with PostgreSQL `revoked_sessions` table
 export const tokenBlacklist = new Set<string>();
@@ -21,17 +27,64 @@ export async function isTokenRevoked(jti: string): Promise<boolean> {
 }
 
 /**
- * Extracts and verifies JWT from Authorization header
+ * Enforces CSRF validation for state-changing browser cookie requests.
  */
-export function authenticate(req: RouteRequest): void {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || typeof authHeader !== 'string') {
-    throw new HttpException(401, 'UNAUTHORIZED', 'Missing Authorization header');
+export function validateCsrf(req: RouteRequest): void {
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+    return;
   }
 
-  const [scheme, token] = authHeader.split(' ');
-  if (scheme !== 'Bearer' || !token) {
-    throw new HttpException(401, 'UNAUTHORIZED', 'Invalid authorization format. Expected Bearer <token>');
+  // Verify Origin / Referer if present
+  const origin = typeof req.headers.origin === 'string' ? req.headers.origin : undefined;
+  if (origin && !isAllowedOrigin(origin)) {
+    throw new HttpException(403, 'CSRF_ORIGIN_MISMATCH', `Request origin '${origin}' is not authorized`);
+  }
+
+  const cookieToken = req.cookies?.[CSRF_COOKIE_NAME];
+  const headerToken =
+    (typeof req.headers['x-csrf-token'] === 'string' ? req.headers['x-csrf-token'] : undefined) ||
+    (typeof req.headers['x-xsrf-token'] === 'string' ? req.headers['x-xsrf-token'] : undefined);
+
+  if (!headerToken) {
+    throw new HttpException(403, 'CSRF_TOKEN_MISSING', 'Missing required X-CSRF-Token header on state-changing request');
+  }
+
+  if (!cookieToken) {
+    throw new HttpException(403, 'CSRF_COOKIE_MISSING', 'Missing required bsk_csrf cookie');
+  }
+
+  if (!verifyCsrfToken(cookieToken, headerToken)) {
+    throw new HttpException(403, 'CSRF_TOKEN_INVALID', 'Invalid or expired CSRF token');
+  }
+}
+
+/**
+ * Extracts and verifies JWT from Authorization header or HttpOnly session cookie
+ */
+export function authenticate(req: RouteRequest): void {
+  let token: string | undefined;
+  let authType: 'bearer' | 'cookie' | undefined;
+
+  const authHeader = req.headers.authorization;
+  if (authHeader && typeof authHeader === 'string') {
+    const [scheme, bearerToken] = authHeader.split(' ');
+    if (scheme === 'Bearer' && bearerToken) {
+      token = bearerToken;
+      authType = 'bearer';
+    } else {
+      throw new HttpException(401, 'UNAUTHORIZED', 'Invalid authorization format. Expected Bearer <token>');
+    }
+  } else if (req.cookies && req.cookies[SESSION_COOKIE_NAME]) {
+    token = req.cookies[SESSION_COOKIE_NAME];
+    authType = 'cookie';
+  }
+
+  if (!token || !authType) {
+    throw new HttpException(
+      401,
+      'UNAUTHORIZED',
+      'Missing authentication credentials (Authorization header or session cookie)',
+    );
   }
 
   const payload = verifyJwt(token);
@@ -46,6 +99,13 @@ export function authenticate(req: RouteRequest): void {
   req.context.userId = payload.sub;
   req.context.organizationId = payload.organizationId;
   req.context.role = payload.role;
+  req.context.authType = authType;
+  req.context.jti = payload.jti;
+
+  // Enforce CSRF protection for cookie-authenticated browser requests
+  if (authType === 'cookie') {
+    validateCsrf(req);
+  }
 }
 
 /**

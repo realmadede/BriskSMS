@@ -285,4 +285,5 @@ However, honest commercial readiness requires acknowledging external dependencie
 1. **Physical Device Fleet Verification:** Physical testing of `apps/android` on actual Android hardware with local Tanzanian SIM cards (Vodacom, Mixx by Yas, Airtel, Halotel) is required to verify real cellular tower dispatch and incoming SMS notification listener stability under OS battery optimization.
 2. **Remote Android CI Execution:** Execution of `.github/workflows/ci.yml` in an environment with JDK 17 and Android SDK to generate signed release APKs and run Android instrumented tests once remote push is authorized.
 3. **Statutory TCRA Regulatory Legal Review:** Authoritative legal review of Tanzania Communications Regulatory Authority (TCRA) anti-spam regulations and carrier agreements to determine statutory curfew requirements versus BriskSMS's configurable product anti-spam curfew policy.
-4. **Web Console Cookie Hardening:** Transition of browser session token storage in `apps/web/src/console.html` from `localStorage` to `HttpOnly, Secure, SameSite` cookies to protect enterprise merchant sessions against XSS vectors.
+
+*(Note: Web Console Cookie Hardening has been completed and verified with 14 automated tests; see `docs/reports/WEB_CONSOLE_SESSION_SECURITY.md` for full implementation details).*

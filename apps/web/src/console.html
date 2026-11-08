@@ -715,6 +715,10 @@
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
           Pair Android Device
         </button>
+        <button class="btn btn-outline" onclick="handleLogout()" title="End authenticated browser session">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+          Sign Out
+        </button>
         <a href="/" class="btn btn-outline">Public Website</a>
       </div>
     </div>
@@ -1205,96 +1209,211 @@
       document.getElementById('tabHeaderTitle').textContent = titles[tabId] || 'Merchant Console';
     }
 
-    // Dynamic Organization Profile & Backend API Integration
+    // Secure Cookie-Based Session & CSRF Architecture
     const API_BASE = window.location.port === '4200' ? 'http://localhost:3000' : window.location.origin;
     let currentSession = null;
+    let memoryCsrfToken = null;
+
+    function getCookie(name) {
+      const match = document.cookie.match(new RegExp('(^|;\\s*)(' + name + ')=([^;]*)'));
+      return match ? decodeURIComponent(match[3]) : null;
+    }
+
+    async function ensureCsrfToken() {
+      const cookieVal = getCookie('bsk_csrf');
+      if (cookieVal) {
+        memoryCsrfToken = cookieVal;
+        return memoryCsrfToken;
+      }
+      try {
+        const url = `${API_BASE}/v1/auth/csrf`;
+        const res = await fetch(url, { credentials: 'include' });
+        const json = await res.json().catch(() => null);
+        if (json?.data?.csrfToken) {
+          memoryCsrfToken = json.data.csrfToken;
+          return memoryCsrfToken;
+        }
+      } catch (err) {
+        console.warn('Unable to pre-fetch CSRF token:', err);
+      }
+      return memoryCsrfToken;
+    }
 
     async function apiFetch(path, options = {}) {
+      const method = (options.method || 'GET').toUpperCase();
+      const isMutating = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
+
+      if (isMutating && !memoryCsrfToken) {
+        await ensureCsrfToken();
+      }
+
       const headers = {
         'Content-Type': 'application/json',
         ...(options.headers || {})
       };
-      if (currentSession && currentSession.accessToken) {
-        headers['Authorization'] = `Bearer ${currentSession.accessToken}`;
+
+      if (isMutating && memoryCsrfToken) {
+        headers['X-CSRF-Token'] = memoryCsrfToken;
       }
+
       const url = path.startsWith('http') ? path : `${API_BASE}${path}`;
-      const res = await fetch(url, { ...options, headers });
+      const res = await fetch(url, {
+        ...options,
+        headers,
+        credentials: 'include' // Transmits HttpOnly session cookies automatically
+      });
+
       const json = await res.json().catch(() => null);
+
       if (!res.ok || (json && json.success === false)) {
+        if (res.status === 401 && path !== '/v1/auth/session' && path !== '/v1/auth/refresh' && path !== '/v1/auth/login') {
+          handleSessionExpired();
+        }
         const errorMsg = json?.error?.message || `HTTP ${res.status}: ${res.statusText}`;
         throw new Error(errorMsg);
       }
+
+      // Update CSRF token if returned in response data
+      if (json?.data?.csrfToken) {
+        memoryCsrfToken = json.data.csrfToken;
+      }
+
       return json?.data;
     }
 
-    async function bootstrapMerchantSession() {
+    function handleSessionExpired() {
+      currentSession = null;
+      memoryCsrfToken = null;
+      updateOrgDisplay();
+      showToast('Your session has expired. Please sign in again.', 'warning');
+      resetDashboardToBlank();
+    }
+
+    function resetDashboardToBlank() {
+      // Clear sensitive financial metrics from visible DOM
+      const kpis = document.querySelectorAll('.kpi-value');
+      if (kpis.length >= 4) {
+        kpis[0].textContent = 'TZS 0';
+        kpis[1].textContent = 'TZS 0';
+        kpis[2].textContent = '0';
+        kpis[3].textContent = '0 Active';
+      }
+      const feedBody = document.getElementById('paymentFeedBody');
+      if (feedBody) {
+        feedBody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 2rem;">Authentication required. Please sign in.</td></tr>';
+      }
+      const reviewBody = document.getElementById('reviewQueueBody');
+      if (reviewBody) {
+        reviewBody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 2rem;">Authentication required. Please sign in.</td></tr>';
+      }
+    }
+
+    async function handleLogout() {
       try {
-        const saved = localStorage.getItem('brisksms_merchant_session');
-        if (saved) {
-          currentSession = JSON.parse(saved);
-          try {
-            const orgs = await apiFetch('/v1/organizations');
-            if (orgs && orgs.length > 0) {
-              if (!currentSession.org || !orgs.find(o => o.id === currentSession.org.id)) {
-                currentSession.org = orgs[0];
-              }
-              currentSession.organizations = orgs;
-              localStorage.setItem('brisksms_merchant_session', JSON.stringify(currentSession));
-              return currentSession;
-            }
-          } catch (err) {
-            // Token expired or invalid, proceed to re-auth
-          }
-        }
+        await apiFetch('/v1/auth/logout', { method: 'POST' });
+      } catch (err) {
+        console.warn('Logout API error:', err);
+      }
+      currentSession = null;
+      memoryCsrfToken = null;
+      localStorage.removeItem('brisksms_active_org_id');
+      resetDashboardToBlank();
+      updateOrgDisplay();
+      showToast('You have been securely signed out.', 'success');
+    }
 
-        // Auto-login or register merchant session for immediate console interactivity
-        let authData = null;
-        try {
-          authData = await apiFetch('/v1/auth/login', {
-            method: 'POST',
-            body: JSON.stringify({ email: 'merchant-a@brisksms.co.tz', password: 'Password123!' })
-          });
-        } catch {
-          try {
-            const email = `merchant_${Date.now()}@brisksms.co.tz`;
-            authData = await apiFetch('/v1/auth/register', {
-              method: 'POST',
-              body: JSON.stringify({
-                email,
-                password: 'Password123!',
-                fullName: 'Merchant Admin'
-              })
-            });
-            const orgData = await apiFetch('/v1/organizations', {
-              method: 'POST',
-              headers: { Authorization: `Bearer ${authData.accessToken}` },
-              body: JSON.stringify({ name: 'Alpha Traders Ltd', tin: '142-890-554' })
-            });
-            authData.org = orgData;
-          } catch (regErr) {
-            console.warn('Registration fallback notice:', regErr);
-          }
-        }
+    async function bootstrapMerchantSession() {
+      await ensureCsrfToken();
 
-        if (authData && authData.accessToken) {
-          const orgs = await apiFetch('/v1/organizations', {
-            headers: { Authorization: `Bearer ${authData.accessToken}` }
-          }).catch(() => []);
+      // 1. Check if browser already has an active, valid HttpOnly cookie session
+      try {
+        const sessionData = await apiFetch('/v1/auth/session');
+        if (sessionData && sessionData.user) {
+          const orgs = sessionData.organizations || [];
+          const savedOrgId = localStorage.getItem('brisksms_active_org_id');
+          const matchedOrg = orgs.find(o => o.id === savedOrgId) || orgs[0] || { id: 'default', name: 'Alpha Traders Ltd' };
+
           currentSession = {
-            accessToken: authData.accessToken,
-            user: authData.user || { fullName: 'Merchant Admin' },
-            org: orgs && orgs.length > 0 ? orgs[0] : (authData.org || { id: 'default', name: 'Alpha Traders Ltd' }),
-            organizations: orgs || []
+            user: sessionData.user,
+            org: matchedOrg,
+            organizations: orgs
           };
-          localStorage.setItem('brisksms_merchant_session', JSON.stringify(currentSession));
+          if (sessionData.csrfToken) {
+            memoryCsrfToken = sessionData.csrfToken;
+          }
           return currentSession;
         }
-      } catch (err) {
-        console.error('Session bootstrap error:', err);
+      } catch {
+        // Active session cookie expired or absent, attempt silent refresh
+      }
+
+      // 2. Attempt silent token refresh via HttpOnly bsk_refresh cookie
+      try {
+        const refreshData = await apiFetch('/v1/auth/refresh', {
+          method: 'POST',
+          body: JSON.stringify({})
+        });
+        if (refreshData) {
+          const sessionData = await apiFetch('/v1/auth/session');
+          if (sessionData && sessionData.user) {
+            const orgs = sessionData.organizations || [];
+            const savedOrgId = localStorage.getItem('brisksms_active_org_id');
+            const matchedOrg = orgs.find(o => o.id === savedOrgId) || orgs[0] || { id: 'default', name: 'Alpha Traders Ltd' };
+
+            currentSession = {
+              user: sessionData.user,
+              org: matchedOrg,
+              organizations: orgs
+            };
+            return currentSession;
+          }
+        }
+      } catch {
+        // Silent refresh not possible (first-time visitor or logged out)
+      }
+
+      // 3. Fallback: Authenticate demo merchant session in local development
+      let authData = null;
+      try {
+        authData = await apiFetch('/v1/auth/login', {
+          method: 'POST',
+          body: JSON.stringify({ email: 'merchant-a@brisksms.co.tz', password: 'Password123!' })
+        });
+      } catch {
+        try {
+          const email = `merchant_${Date.now()}@brisksms.co.tz`;
+          authData = await apiFetch('/v1/auth/register', {
+            method: 'POST',
+            body: JSON.stringify({
+              email,
+              password: 'Password123!',
+              fullName: 'Merchant Admin'
+            })
+          });
+          const orgData = await apiFetch('/v1/organizations', {
+            method: 'POST',
+            body: JSON.stringify({ name: 'Alpha Traders Ltd', tin: '142-890-554' })
+          });
+          if (authData) authData.org = orgData;
+        } catch (regErr) {
+          console.warn('Registration fallback notice:', regErr);
+        }
+      }
+
+      if (authData && authData.user) {
+        const orgs = await apiFetch('/v1/organizations').catch(() => []);
+        currentSession = {
+          user: authData.user,
+          org: orgs && orgs.length > 0 ? orgs[0] : (authData.org || { id: 'default', name: 'Alpha Traders Ltd' }),
+          organizations: orgs || []
+        };
+        if (authData.csrfToken) {
+          memoryCsrfToken = authData.csrfToken;
+        }
+        return currentSession;
       }
 
       currentSession = {
-        accessToken: '',
         user: { fullName: 'Demo Merchant' },
         org: { id: 'default', name: 'Alpha Traders Ltd', plan: 'STANDARD', deviceQuota: 2, deviceCount: 0 }
       };
@@ -1363,7 +1482,7 @@
       };
       if (currentSession) {
         currentSession.org = updated;
-        localStorage.setItem('brisksms_merchant_session', JSON.stringify(currentSession));
+        localStorage.setItem('brisksms_active_org_id', updated.id || 'default');
       }
       updateOrgDisplay();
       closeOrgProfileModal();
