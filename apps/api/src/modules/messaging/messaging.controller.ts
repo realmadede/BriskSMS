@@ -9,6 +9,8 @@ import { sql } from '@brisksms/db';
 import { SmsGateProvider } from './providers/smsgate.provider.js';
 import { smsGateKeyService } from './services/smsgate-key.service.js';
 import { messagingService } from './messaging.service.js';
+import { authenticate } from '../../core/guards.js';
+import { dbStore } from '../../core/store.js';
 
 const smsgateProvider = new SmsGateProvider();
 
@@ -195,6 +197,112 @@ export function registerMessagingRoutes(router: Router): void {
           ? 'Delivery event already processed (idempotent duplicate retry)'
           : undefined,
       },
+    };
+  });
+
+  // 1. Get Prepaid SMS Credit Balance
+  router.get('/v1/messaging/balance', async (req: RouteRequest): Promise<ApiResponse> => {
+    authenticate(req);
+    const userId = req.context.userId!;
+    const orgId = req.query.organizationId || req.context.organizationId;
+    if (!orgId) {
+      throw new HttpException(400, 'VALIDATION_ERROR', 'organizationId is required');
+    }
+    const membership = await dbStore.getMembership(orgId, userId);
+    if (!membership) {
+      throw new HttpException(403, 'FORBIDDEN', 'You are not a member of this organization');
+    }
+
+    const balances = await messagingService.getAccountBalances(orgId);
+    return {
+      success: true,
+      data: balances,
+    };
+  });
+
+  // 2. Dispatch Single SMS Message
+  router.post('/v1/messaging/send', async (req: RouteRequest): Promise<ApiResponse> => {
+    authenticate(req);
+    const userId = req.context.userId!;
+    const body = req.body as Record<string, any>;
+    const orgId = (body.organizationId as string) || req.context.organizationId;
+    if (!orgId) {
+      throw new HttpException(400, 'VALIDATION_ERROR', 'organizationId is required');
+    }
+    const membership = await dbStore.getMembership(orgId, userId);
+    if (!membership) {
+      throw new HttpException(403, 'FORBIDDEN', 'You are not a member of this organization');
+    }
+
+    if (!body.to || !body.content) {
+      throw new HttpException(400, 'VALIDATION_ERROR', 'to (recipient phone) and content (message text) are required');
+    }
+
+    const messageRecord = await messagingService.sendSingleMessage(orgId, {
+      to: String(body.to),
+      content: String(body.content),
+      simSlot: body.simSlot ? Number(body.simSlot) : 1,
+    });
+
+    return {
+      success: true,
+      statusCode: 201,
+      data: messageRecord,
+    };
+  });
+
+  // 3. Create & Dispatch Bulk SMS Campaign
+  router.post('/v1/messaging/campaigns', async (req: RouteRequest): Promise<ApiResponse> => {
+    authenticate(req);
+    const userId = req.context.userId!;
+    const body = req.body as Record<string, any>;
+    const orgId = (body.organizationId as string) || req.context.organizationId;
+    if (!orgId) {
+      throw new HttpException(400, 'VALIDATION_ERROR', 'organizationId is required');
+    }
+    const membership = await dbStore.getMembership(orgId, userId);
+    if (!membership) {
+      throw new HttpException(403, 'FORBIDDEN', 'You are not a member of this organization');
+    }
+
+    if ((!body.name && !body.title) || (!body.templateText && !body.messageTemplate) || !body.recipients || !Array.isArray(body.recipients)) {
+      throw new HttpException(400, 'VALIDATION_ERROR', 'name, templateText, and recipients array are required');
+    }
+
+    const campaign = await messagingService.createCampaign(orgId, {
+      name: String(body.name || body.title),
+      templateText: String(body.templateText || body.messageTemplate),
+      recipients: body.recipients.map((r: any) => ({
+        phoneNumber: String(r.phoneNumber || r.phone || r.recipientPhone),
+        variables: r.variables && typeof r.variables === 'object' ? r.variables : undefined,
+      })),
+      scheduledAt: body.scheduledAt ? new Date(body.scheduledAt) : undefined,
+    });
+
+    return {
+      success: true,
+      statusCode: 201,
+      data: campaign,
+    };
+  });
+
+  // 4. Query Credit Ledger History
+  router.get('/v1/messaging/ledger', async (req: RouteRequest): Promise<ApiResponse> => {
+    authenticate(req);
+    const userId = req.context.userId!;
+    const orgId = req.query.organizationId || req.context.organizationId;
+    if (!orgId) {
+      throw new HttpException(400, 'VALIDATION_ERROR', 'organizationId is required');
+    }
+    const membership = await dbStore.getMembership(orgId, userId);
+    if (!membership) {
+      throw new HttpException(403, 'FORBIDDEN', 'You are not a member of this organization');
+    }
+
+    const entries = await messagingService.listLedgerEntries(orgId);
+    return {
+      success: true,
+      data: { entries },
     };
   });
 }

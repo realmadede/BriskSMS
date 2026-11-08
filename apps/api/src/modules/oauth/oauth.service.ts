@@ -87,6 +87,16 @@ export class OAuthService {
   }
 
   /**
+   * Retrieves an OAuth client by ID
+   */
+  public async getClient(clientId: string): Promise<OAuthClientRecord | null> {
+    const rows = await sql<Record<string, any>>`
+      SELECT * FROM oauth_clients WHERE id = ${clientId} LIMIT 1
+    `;
+    return rows[0] ? this.mapClientRow(rows[0]) : null;
+  }
+
+  /**
    * Issues a short-lived (10-minute) single-use authorization code with PKCE challenge
    */
   public async generateAuthorizationCode(dto: AuthorizeCodeDto): Promise<string> {

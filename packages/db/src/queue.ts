@@ -630,3 +630,33 @@ export const QUEUE_NAMES = {
   SMS_DELIVERY_RETRY: 'sms-delivery-retry',
   MAINTENANCE_CLEANUP: 'maintenance-cleanup',
 } as const;
+
+export interface QueueHealthStatus {
+  status: 'UP' | 'DOWN';
+  queues: Record<string, QueueJobCounts>;
+  error?: string;
+}
+
+/**
+ * Queries job counts across all 5 production BullMQ queues for observability & readiness checks.
+ */
+export async function checkQueueHealth(): Promise<QueueHealthStatus> {
+  const queuesRecord: Record<string, QueueJobCounts> = {};
+  try {
+    for (const qName of Object.values(QUEUE_NAMES)) {
+      const q = new BullQueue(qName);
+      queuesRecord[qName] = await q.getJobCounts();
+    }
+    return {
+      status: 'UP',
+      queues: queuesRecord,
+    };
+  } catch (err: unknown) {
+    return {
+      status: 'DOWN',
+      queues: queuesRecord,
+      error: err instanceof Error ? err.message : 'Unable to query queue counts',
+    };
+  }
+}
+

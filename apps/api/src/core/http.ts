@@ -93,7 +93,10 @@ export class Router {
     const origin = req.headers.origin || '*';
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Idempotency-Key');
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'Content-Type, Authorization, X-Requested-With, Idempotency-Key, X-Signature, X-Timestamp, X-Organization-Id',
+    );
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
 
@@ -188,7 +191,11 @@ export class Router {
         const status = response.statusCode ?? defaultStatus;
         const { statusCode: _omit, ...payload } = response;
         res.writeHead(status);
-        res.end(JSON.stringify(payload));
+        res.end(
+          JSON.stringify(payload, (_key, value) =>
+            typeof value === 'bigint' ? value.toString() : value,
+          ),
+        );
       } else {
         res.writeHead(204);
         res.end();
@@ -197,14 +204,17 @@ export class Router {
       if (err instanceof HttpException) {
         res.writeHead(err.statusCode);
         res.end(
-          JSON.stringify({
-            success: false,
-            error: {
-              code: err.code,
-              message: err.message,
-              details: err.details,
+          JSON.stringify(
+            {
+              success: false,
+              error: {
+                code: err.code,
+                message: err.message,
+                details: err.details,
+              },
             },
-          }),
+            (_key, value) => (typeof value === 'bigint' ? value.toString() : value),
+          ),
         );
       } else if (err instanceof DatabaseUnavailableError || err instanceof RedisUnavailableError) {
         res.writeHead(err.statusCode);

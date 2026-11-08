@@ -120,6 +120,18 @@ export class WebhookService {
   }
 
   /**
+   * Permanently deletes a webhook endpoint
+   */
+  public async deleteEndpoint(organizationId: string, endpointId: string): Promise<boolean> {
+    const deleted = await sql<Record<string, any>>`
+      DELETE FROM webhook_endpoints
+      WHERE id = ${endpointId} AND organization_id = ${organizationId}
+      RETURNING id
+    `;
+    return deleted.length > 0;
+  }
+
+  /**
    * Computes HMAC-SHA256 signature for payload verification
    * Format: t={timestamp},v1={hexSignature}
    */

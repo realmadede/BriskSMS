@@ -34,6 +34,16 @@ export interface MaintenanceCleanupJobData {
   task: 'PURGE_EXPIRED_TOKENS';
 }
 
+export interface PaymentProcessingJobData {
+  organizationId: string;
+  paymentId: string;
+}
+
+export interface SmsDeliveryRetryJobData {
+  organizationId: string;
+  messageId: string;
+}
+
 export type CustomFetchHandler = (
   url: string,
   init: RequestInit,
@@ -446,6 +456,192 @@ export async function processMaintenanceCleanupJob(
 }
 
 /**
+ * Processes asynchronous payment evaluation and candidate matching from the `payment-processing` queue.
+ * Adheres to critical financial invariant: Notification evidence NEVER automatically marks payment as VERIFIED or invoice as PAID.
+ */
+export async function processPaymentProcessingJob(
+  job: BullJob<PaymentProcessingJobData>,
+): Promise<{ processed: boolean; state: string }> {
+  const { organizationId, paymentId } = job.data;
+
+  const paymentRows = await sql<Record<string, any>>`
+    SELECT * FROM normalized_payments
+    WHERE id = ${paymentId} AND organization_id = ${organizationId}
+    LIMIT 1
+  `;
+
+  if (paymentRows.length === 0) {
+    throw new Error(`Tenant isolation or missing record: Payment ${paymentId} not found for org ${organizationId}`);
+  }
+
+  const payment = paymentRows[0]!;
+  if (payment.state === 'VERIFIED' || payment.state === 'SETTLED' || payment.state === 'REJECTED') {
+    return { processed: true, state: payment.state };
+  }
+
+  // Attempt deterministic invoice matching if currently OBSERVED or UNMATCHED
+  const lookupRef = (payment.customer_memo || payment.reference || '').trim().toUpperCase();
+  const exactInvoices = await sql<Record<string, any>>`
+    SELECT id, balance_cents FROM invoices
+    WHERE organization_id = ${organizationId}
+      AND reference_number = ${lookupRef}
+      AND status IN ('UNPAID', 'PARTIALLY_PAID')
+    LIMIT 1
+  `;
+
+  const now = new Date();
+  if (exactInvoices.length > 0) {
+    const inv = exactInvoices[0]!;
+    await sql`
+      UPDATE normalized_payments
+      SET state = 'MATCHED'::"TransactionState",
+          candidate_invoice_id = ${inv.id},
+          confidence_tier = 'TIER_1_EXACT_REFERENCE'::"MatchConfidenceTier",
+          updated_at = ${now}
+      WHERE id = ${paymentId} AND organization_id = ${organizationId}
+    `;
+    return { processed: true, state: 'MATCHED' };
+  }
+
+  // If no exact reference match, check customer phone heuristic
+  if (payment.sender_phone) {
+    const openInvoices = await sql<Record<string, any>>`
+      SELECT id, balance_cents, customer_phone FROM invoices
+      WHERE organization_id = ${organizationId}
+        AND status IN ('UNPAID', 'PARTIALLY_PAID')
+        AND customer_phone = ${payment.sender_phone}
+    `;
+
+    if (openInvoices.length === 1) {
+      const inv = openInvoices[0]!;
+      if (BigInt(payment.amount_cents) === BigInt(inv.balance_cents)) {
+        await sql`
+          UPDATE normalized_payments
+          SET state = 'MATCHED'::"TransactionState",
+              candidate_invoice_id = ${inv.id},
+              confidence_tier = 'TIER_2_CUSTOMER_IDENTIFIER'::"MatchConfidenceTier",
+              updated_at = ${now}
+          WHERE id = ${paymentId} AND organization_id = ${organizationId}
+        `;
+        return { processed: true, state: 'MATCHED' };
+      }
+      // Amount mismatch -> REVIEW_REQUIRED
+      await sql`
+        UPDATE normalized_payments
+        SET state = 'REVIEW_REQUIRED'::"TransactionState",
+            candidate_invoice_id = ${inv.id},
+            review_reason = 'Amount mismatch on customer identifier heuristic match',
+            updated_at = ${now}
+        WHERE id = ${paymentId} AND organization_id = ${organizationId}
+      `;
+      return { processed: true, state: 'REVIEW_REQUIRED' };
+    } else if (openInvoices.length > 1) {
+      await sql`
+        UPDATE normalized_payments
+        SET state = 'REVIEW_REQUIRED'::"TransactionState",
+            review_reason = 'Ambiguous match: Multiple open invoices found for phone number',
+            updated_at = ${now}
+        WHERE id = ${paymentId} AND organization_id = ${organizationId}
+      `;
+      return { processed: true, state: 'REVIEW_REQUIRED' };
+    }
+  }
+
+  // No candidate found -> UNMATCHED
+  await sql`
+    UPDATE normalized_payments
+    SET state = 'UNMATCHED'::"TransactionState",
+        updated_at = ${now}
+    WHERE id = ${paymentId} AND organization_id = ${organizationId}
+  `;
+  return { processed: true, state: 'UNMATCHED' };
+}
+
+/**
+ * Processes SMS delivery retries and dead-letter queue refund transitions from `sms-delivery-retry`.
+ */
+export async function processSmsDeliveryRetryJob(
+  job: BullJob<SmsDeliveryRetryJobData>,
+): Promise<{ status: string; refunded: boolean }> {
+  const { organizationId, messageId } = job.data;
+
+  const msgRows = await sql<Record<string, any>>`
+    SELECT * FROM sms_messages
+    WHERE id = ${messageId} AND organization_id = ${organizationId}
+    LIMIT 1
+  `;
+
+  if (msgRows.length === 0) {
+    throw new Error(`Tenant isolation or missing record: Message ${messageId} not found for org ${organizationId}`);
+  }
+
+  const msg = msgRows[0]!;
+  if (msg.status === SmsStatus.DELIVERED || msg.status === SmsStatus.FAILED) {
+    return { status: msg.status, refunded: false };
+  }
+
+  const currentAttempts = Number(msg.attempt_count || 1);
+  const maxAttempts = 3;
+  const now = new Date();
+
+  if (currentAttempts >= maxAttempts) {
+    // Terminal failure: mark FAILED and refund reserved/deducted credit atomically
+    return withTransaction(async (tx) => {
+      await tx`
+        UPDATE sms_messages
+        SET status = ${SmsStatus.FAILED}::"SmsStatus",
+            last_error = 'Delivery retry limit exhausted',
+            updated_at = ${now}
+        WHERE id = ${messageId} AND organization_id = ${organizationId}
+      `;
+
+      const acctRows = await tx<Record<string, any>>`
+        SELECT * FROM messaging_accounts
+        WHERE organization_id = ${organizationId}
+        FOR UPDATE
+      `;
+
+      let refunded = false;
+      if (acctRows.length > 0) {
+        const costCredits = Number(msg.cost_credits || 1);
+        const currentBalance = Number(acctRows[0]!.credit_balance);
+        const currentReserved = Number(acctRows[0]!.reserved_credits);
+        const nextBalance = currentBalance + costCredits;
+
+        await tx`
+          UPDATE messaging_accounts
+          SET credit_balance = ${nextBalance},
+              updated_at = ${now}
+          WHERE organization_id = ${organizationId}
+        `;
+
+        await tx`
+          INSERT INTO messaging_credit_ledger (
+            id, organization_id, entry_type, amount_credits, balance_after, reserved_after, reference_id, created_at
+          ) VALUES (
+            ${randomUUID()}, ${organizationId}, ${CreditLedgerEntryType.REFUND}::"CreditLedgerEntryType",
+            ${costCredits}, ${nextBalance}, ${currentReserved}, ${`retry_failed_refund_${messageId}`}, ${now}
+          )
+        `;
+        refunded = true;
+      }
+
+      return { status: SmsStatus.FAILED, refunded };
+    });
+  }
+
+  // Still has retries remaining
+  await sql`
+    UPDATE sms_messages
+    SET attempt_count = ${currentAttempts + 1},
+        updated_at = ${now}
+    WHERE id = ${messageId} AND organization_id = ${organizationId}
+  `;
+
+  return { status: SmsStatus.SUBMITTED, refunded: false };
+}
+
+/**
  * Orchestrates all BriskSMS background workers, outbox polling, and Redis heartbeats.
  */
 export class BriskWorkerRuntime {
@@ -453,6 +649,8 @@ export class BriskWorkerRuntime {
   public readonly webhookWorker: BullWorker<WebhookDeliveryJobData>;
   public readonly campaignWorker: BullWorker<SmsCampaignJobData>;
   public readonly maintenanceWorker: BullWorker<MaintenanceCleanupJobData>;
+  public readonly paymentWorker: BullWorker<PaymentProcessingJobData>;
+  public readonly retryWorker: BullWorker<SmsDeliveryRetryJobData>;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   public readonly workerId = `worker_${process.pid}_${randomUUID().slice(0, 8)}`;
 
@@ -480,19 +678,39 @@ export class BriskWorkerRuntime {
       },
       { concurrency: 1, pollIntervalMs: 100 },
     );
+
+    this.paymentWorker = new BullWorker<PaymentProcessingJobData>(
+      QUEUE_NAMES.PAYMENT_PROCESSING,
+      async (job) => {
+        await processPaymentProcessingJob(job);
+      },
+      { concurrency: 2, pollIntervalMs: 50 },
+    );
+
+    this.retryWorker = new BullWorker<SmsDeliveryRetryJobData>(
+      QUEUE_NAMES.SMS_DELIVERY_RETRY,
+      async (job) => {
+        await processSmsDeliveryRetryJob(job);
+      },
+      { concurrency: 2, pollIntervalMs: 50 },
+    );
   }
 
   public async start(): Promise<void> {
     await recordWorkerHeartbeat(this.workerId, [
       QUEUE_NAMES.WEBHOOK_DELIVERY,
+      QUEUE_NAMES.PAYMENT_PROCESSING,
       QUEUE_NAMES.SMS_CAMPAIGN,
+      QUEUE_NAMES.SMS_DELIVERY_RETRY,
       QUEUE_NAMES.MAINTENANCE_CLEANUP,
     ]);
 
     this.heartbeatTimer = setInterval(() => {
       recordWorkerHeartbeat(this.workerId, [
         QUEUE_NAMES.WEBHOOK_DELIVERY,
+        QUEUE_NAMES.PAYMENT_PROCESSING,
         QUEUE_NAMES.SMS_CAMPAIGN,
+        QUEUE_NAMES.SMS_DELIVERY_RETRY,
         QUEUE_NAMES.MAINTENANCE_CLEANUP,
       ]).catch((err) => {
         logger.warn('Worker heartbeat update failed', {
@@ -505,8 +723,10 @@ export class BriskWorkerRuntime {
     this.webhookWorker.start();
     this.campaignWorker.start();
     this.maintenanceWorker.start();
+    this.paymentWorker.start();
+    this.retryWorker.start();
 
-    logger.info('BriskSMS background worker runtime started', {
+    logger.info('BriskSMS background worker runtime started (all 5 queues active)', {
       workerId: this.workerId,
     });
   }
@@ -521,6 +741,8 @@ export class BriskWorkerRuntime {
       this.webhookWorker.stop(),
       this.campaignWorker.stop(),
       this.maintenanceWorker.stop(),
+      this.paymentWorker.stop(),
+      this.retryWorker.stop(),
     ]);
     logger.info('BriskSMS background worker runtime stopped gracefully', {
       workerId: this.workerId,

@@ -842,6 +842,68 @@ export class ReconciliationService {
     }));
   }
 
+  /**
+   * Lists normalized payments for a tenant with optional filtering.
+   */
+  async listPayments(
+    organizationId: string,
+    filters?: { state?: TransactionState; provider?: string },
+    tx: SqlExecutor = sql,
+  ): Promise<NormalizedPaymentRecord[]> {
+    assertTenantContext({ organizationId });
+    if (filters?.state && filters?.provider) {
+      const rows = await tx`
+        SELECT * FROM "normalized_payments"
+        WHERE "organization_id" = ${organizationId}
+          AND "state" = ${filters.state}::"TransactionState"
+          AND "provider" = ${filters.provider}::"PaymentProvider"
+        ORDER BY "created_at" DESC
+      `;
+      return rows.map(mapNormalizedPaymentRow);
+    }
+    if (filters?.state) {
+      const rows = await tx`
+        SELECT * FROM "normalized_payments"
+        WHERE "organization_id" = ${organizationId}
+          AND "state" = ${filters.state}::"TransactionState"
+        ORDER BY "created_at" DESC
+      `;
+      return rows.map(mapNormalizedPaymentRow);
+    }
+    if (filters?.provider) {
+      const rows = await tx`
+        SELECT * FROM "normalized_payments"
+        WHERE "organization_id" = ${organizationId}
+          AND "provider" = ${filters.provider}::"PaymentProvider"
+        ORDER BY "created_at" DESC
+      `;
+      return rows.map(mapNormalizedPaymentRow);
+    }
+    const rows = await tx`
+      SELECT * FROM "normalized_payments"
+      WHERE "organization_id" = ${organizationId}
+      ORDER BY "created_at" DESC
+    `;
+    return rows.map(mapNormalizedPaymentRow);
+  }
+
+  /**
+   * Finds a normalized payment by ID strictly scoped to the tenant organization.
+   */
+  async findPaymentById(
+    organizationId: string,
+    paymentId: string,
+    tx: SqlExecutor = sql,
+  ): Promise<NormalizedPaymentRecord | null> {
+    assertTenantContext({ organizationId });
+    const rows = await tx`
+      SELECT * FROM "normalized_payments"
+      WHERE "id" = ${paymentId} AND "organization_id" = ${organizationId}
+      LIMIT 1
+    `;
+    return rows[0] ? mapNormalizedPaymentRow(rows[0]) : null;
+  }
+
   private normalizePhone(phone: string): string {
     const digits = phone.replace(/\D/g, '');
     if (digits.startsWith('0') && digits.length === 10) {
