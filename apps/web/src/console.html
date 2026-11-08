@@ -846,7 +846,7 @@
           <div class="card-header-row">
             <div>
               <div class="card-title">Cellular Gateway &amp; Spreadsheet Bulk Campaign</div>
-              <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.2rem;">Dispatch via connected carrier relay with TCRA curfew lock (20:00 - 07:00 EAT)</div>
+              <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.2rem;">Dispatch via connected carrier relay with nighttime anti-spam curfew lock (20:00 - 07:00 EAT)</div>
             </div>
           </div>
 
@@ -1020,7 +1020,7 @@
       <!-- Step 1: Real Scannable SVG QR Code -->
       <div id="pairingStep1">
         <div class="modal-title">Pair Android Relay Phone</div>
-        <div class="modal-desc">Scan this QR code with the BriskSMS Android relay app on your business device to initiate ECDSA key exchange.</div>
+        <div class="modal-desc">Scan this QR code with the BriskSMS Android relay app on your business device to initiate ECDSA key exchange (single-use token expires in 5 minutes).</div>
 
         <div class="qr-container">
           <div class="qr-svg-wrap scan-beam-wrapper">
@@ -1865,10 +1865,11 @@
           method: 'POST',
           body: JSON.stringify({ organizationId: currentSession.org.id })
         });
-        if (tokenData && tokenData.token) {
+        const rawToken = tokenData?.pairingToken || tokenData?.token;
+        if (rawToken) {
           const displayEl = document.getElementById('modalTokenDisplay');
           if (displayEl) {
-            displayEl.textContent = tokenData.token;
+            displayEl.textContent = rawToken;
           }
         }
       } catch (err) {

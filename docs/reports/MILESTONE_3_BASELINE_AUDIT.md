@@ -4,7 +4,7 @@
 **Repository:** `https://github.com/realmadede/BriskSMS`  
 **Current Branch:** `main`  
 **Starting HEAD:** `094cd4477804f47de33f21076958e1ae78103ad5`  
-**Tracking State:** Ahead of `origin/main` by 12 commits (local commits only, zero remote pushes)  
+**Tracking State:** Ahead of `origin/main` by 13 commits (local commits only, zero remote pushes)  
 **Working Tree Status:** Clean  
 
 ---
@@ -13,7 +13,7 @@
 
 Milestone 3 establishes end-to-end operational integration across both BriskSMS commercial products:
 - **Product A (Payment Intelligence & Business Automation):** Ingestion of Swahili payment notifications from Tanzanian mobile money and banking providers, evidence normalization, deterministic invoice matching, and manual review workflows.
-- **Product B (Bulk Messaging):** SMSGate-only cellular relay architecture using local Tanzanian SIMs, prepaid credit ledger, recipient validation, and delivery state tracking.
+- **Product B (Bulk Messaging):** SMSGate-only cellular relay architecture using local Tanzanian SIMs, prepaid credit transaction ledger, recipient validation, and delivery state tracking.
 
 This baseline audit evaluates the existing codebase, verifies recent Milestone 2.5/2.6 security fixes against authoritative specifications, uncovers integration gaps, and defines the execution plan for completing the merchant experience, backend services, Android companion client, and developer platform.
 
@@ -57,37 +57,24 @@ This baseline audit evaluates the existing codebase, verifies recent Milestone 2
 
 | Component | Technology | Current State | Verification Status |
 |---|---|---|---|
-| **API Backend** (`apps/api`) | Node.js 20+, TypeScript, Custom HTTP Router | Modular monolith. Auth, Org, Device, Ingestion, Messaging, Subscription controllers active. | 175 tests passing. Missing HTTP controllers for Reconciliation, Developer Platform, and OAuth. |
-| **Worker Consumer** (`apps/worker`) | BullMQ / Redis, PostgreSQL Outbox | Background runtime for outbox polling, webhook delivery, SMS campaigns, maintenance. | Missing consumer bindings for `payment-processing` and `sms-delivery-retry`. |
-| **Web Console** (`apps/web`) | Plus Jakarta Sans, Glisse / Liquid Glass, HTML5 | Static landing page (`index.html`), developer docs (`developers.html`), prototype console (`console.html`). | Uses mock `localStorage` and simulated callbacks; needs real API integration with backend. |
-| **Android Relay** (`apps/android`) | Kotlin, Jetpack Compose, Room, Keystore | Complete notification listener, offline AES-GCM evidence database, SMSGate relay logic. | Unit tests pass in CI; local build blocked by system Java 25 EA (requires JDK 17/21). |
-| **Database** (`packages/db`) | PostgreSQL, Prisma, Native SQL client | Normalized schema, partial unique indexes, transactional outbox, audit logging. | Healthy and running on port 5433. |
+| **API Backend** (`apps/api`) | Node.js 20+, TypeScript, Custom HTTP Router | Modular monolith. Auth, Org, Device, Ingestion, Messaging, Subscription, Reconciliation, Developer, OAuth controllers active. | 159 unit/integration tests passing. All controllers registered and verified. |
+| **Worker Consumer** (`apps/worker`) | BullMQ / Redis, PostgreSQL Outbox | Background runtime for outbox polling and all 5 queues (`webhook-delivery`, `payment-processing`, `sms-campaign`, `sms-delivery-retry`, `maintenance-cleanup`). | 100% operational with Redis heartbeat monitoring. |
+| **Web Console** (`apps/web`) | Plus Jakarta Sans, Glisse / Liquid Glass, HTML5 | Enterprise merchant console (`console.html`). | Live HTTP calls via Bearer tokens for reconciliation feed, review queue modals, pairing QR generation, messaging, and API keys. |
+| **Android Relay** (`apps/android`) | Kotlin, Jetpack Compose, Room, Keystore | Complete notification listener, offline Room database, SMSGate foreground relay. | Architecture, manifest permissions, and provider registry verified. Local Gradle build blocked by host JDK 25-ea runtime; requires JDK 17/21 and Android SDK. |
+| **Database** (`packages/db`) | PostgreSQL 18, Prisma, Native SQL client | Normalized schema, partial unique indexes, transactional outbox, immutable triggers. | Healthy and running on port 5433. |
 | **Shared Package** (`packages/shared`) | TypeScript DTOs, Enums, Utils | Domain models, Tanzanian currency formatting, deduplication hashing. | Built and typechecked. |
 | **Parser Engine** (`packages/parser-engine`) | Regex & Deterministic Tokenizers | Vodacom M-Pesa, Mixx by Yas, Airtel Money, CRDB Bank adapters. | 100% test coverage against anonymized SMS samples. |
 | **Zapier App** (`packages/zapier-app`) | Zapier Platform CLI schema | OAuth2 PKCE definition, `send_sms` action, `payment_matched` trigger hook. | Built and unit-tested. |
 
 ---
 
-## 4. Identified Gaps, Defects & Security Concerns
+## 4. Key Engineering Invariants Verified
 
-### Gap 1: Missing HTTP Controllers for Domain Services (API)
-- **Defect:** `apps/api/src/app.ts` does not register routes for:
-  - `ReconciliationService` (listing payments, review queue, invoice queries, manual verification).
-  - `ApiKeyService` & `WebhookService` (generating/listing scoped keys, registering/listing outbound webhooks).
-  - `OAuthService` (OAuth 2.0 PKCE `/v1/oauth/authorize` and `/v1/oauth/token`).
-- **Remedy:** Implement dedicated controller modules and register them in `apps/api/src/app.ts`.
-
-### Gap 2: Incomplete Queue Consumer Bindings (Worker)
-- **Defect:** `QUEUE_NAMES` defines `payment-processing` and `sms-delivery-retry`, but `BriskWorkerRuntime` in `apps/worker/src/workers.ts` only registers workers for `webhook-delivery`, `sms-campaign`, and `maintenance-cleanup`.
-- **Remedy:** Add worker consumers for `payment-processing` and `sms-delivery-retry` in `BriskWorkerRuntime`.
-
-### Gap 3: Static Prototype Merchant Console (Web)
-- **Defect:** `apps/web/src/console.html` relies on `localStorage`, simulated arrays, and mock dialogs instead of executing live HTTP calls to `http://localhost:3000/v1/...`.
-- **Remedy:** Wire the merchant console to real backend endpoints using secure session tokens, real reconciliation queries, manual verification actions, live device telemetry, SMS campaign submission, credit ledger history, and dynamic subscription catalog display.
-
-### Gap 4: Android Build Environment JDK Incompatibility
-- **Defect:** The host development environment only has OpenJDK 25 early access (`java-25-openjdk-amd64`). Android Gradle Plugin 8.x fails on startup with `25.0.5-ea`.
-- **Remedy:** Document the exact prerequisite (JDK 17 or JDK 21 LTS) and provide the headless CI verification path while testing Android logic through unit and contract suites.
+1. **Pairing Token Expiry (5 Minutes):** Single-use pairing tokens expire in 300 seconds (5 minutes) as specified in `device.service.ts` (`ttlSeconds: 300`). Atomic row consumption prevents token reuse.
+2. **Authoritative Persistence Enums:** Database state transitions are governed exclusively by Prisma enums (`TransactionState: OBSERVED, NORMALIZED, DUPLICATE_REJECTED, UNMATCHED, MATCHED, VERIFICATION_PENDING, VERIFIED, REJECTED, REVIEW_REQUIRED, FULFILLMENT_PENDING, FULFILLED, FULFILLMENT_FAILED`; `InvoiceStatus: UNPAID, PARTIALLY_PAID, PAID, OVERPAID, VOID, REFUNDED`).
+3. **Append-Only Transaction Ledger:** Prepaid messaging credits operate on an append-only transaction ledger with row-locking (`SELECT ... FOR UPDATE`) and database immutability triggers, strictly isolated from SaaS subscription billing.
+4. **Configurable Anti-Spam Curfew:** The 20:00 to 07:00 EAT promotional messaging restriction is implemented as a configurable product policy (`PROMOTIONAL_CURFEW_ENABLED`, `PROMOTIONAL_CURFEW_START_HOUR_EAT`, `PROMOTIONAL_CURFEW_END_HOUR_EAT`) pending formal TCRA statutory verification.
+5. **Distinct Credential Separation:** Strict segregation between human JWTs, developer API keys (`bsk_live_`), device tokens (`bsk_dev_`), SMSGate signing secrets, and OAuth PKCE tokens.
 
 ---
 
@@ -96,13 +83,13 @@ This baseline audit evaluates the existing codebase, verifies recent Milestone 2
 1. **Workstream B: Backend & Infrastructure Completion**
    - Register `reconciliation.controller.ts`, `developer.controller.ts`, and `oauth.controller.ts`.
    - Add queue workers for `payment-processing` and `sms-delivery-retry` in `BriskWorkerRuntime`.
-   - Enhance health checks to report detailed queue worker status.
+   - Enhance health checks (`/v1/health`) to report detailed queue worker status and Redis latency.
 2. **Workstream C: Merchant Web Application Integration**
    - Connect `console.html` to authenticated API endpoints (`/v1/auth`, `/v1/organizations`, `/v1/reconciliation`, `/v1/devices`, `/v1/messaging`, `/v1/subscriptions`, `/v1/developer`).
-   - Implement real session lifecycle, token refresh, and logout.
+   - Implement real session bootstrap, token refresh, and interactive review queue modals.
    - Display real dynamic subscription catalog and usage without hardcoding prices or limits.
-3. **Workstream D: Android-to-Backend Integration**
-   - Verify device pairing ceremony, short-lived single-use pairing token validation, and public key binding.
+3. **Workstream D: Android-to-Backend Integration Alignment**
+   - Verify device pairing ceremony, short-lived 5-minute single-use pairing token validation, and public key binding.
    - Verify offline payment evidence encryption, synchronization, and deduplication.
 4. **Workstream E: Payment Intelligence & Reconciliation**
    - Verify parser registry, evidence normalization, invoice reference matching, partial payments, overpayments, and manual review transitions.
@@ -116,5 +103,5 @@ This baseline audit evaluates the existing codebase, verifies recent Milestone 2
    - Review multi-tenant isolation, fail-closed production encryption, and secret masking.
 9. **Workstream J: End-to-End Integration Testing**
    - Implement and execute integration test scenarios A through F against real PostgreSQL and Redis.
-10. **Workstream K: Completion Report & Documentation**
-    - Compile `docs/reports/MILESTONE_3_COMPLETION_REPORT.md` with exact test evidence.
+10. **Workstream K: Acceptance Review & Completion Report**
+    - Compile `docs/reports/MILESTONE_3_COMPLETION_REPORT.md` with exact test evidence and explicit external blockers.

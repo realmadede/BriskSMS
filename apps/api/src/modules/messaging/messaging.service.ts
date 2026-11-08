@@ -618,12 +618,24 @@ export class MessagingService {
   }
 
   /**
-   * Checks whether the current or specified time falls within TCRA marketing curfew (20:00 - 07:00 EAT)
+   * Checks whether the current or specified time falls within product anti-spam curfew hours (configurable, defaults to 20:00 - 07:00 EAT)
    */
   isCurfewRestricted(sendDate: Date = new Date()): boolean {
+    if (process.env.PROMOTIONAL_CURFEW_ENABLED === 'false') {
+      return false;
+    }
+    const startHour = Number(process.env.PROMOTIONAL_CURFEW_START_HOUR_EAT ?? 20);
+    const endHour = Number(process.env.PROMOTIONAL_CURFEW_END_HOUR_EAT ?? 7);
+
     const utcHours = sendDate.getUTCHours();
     const eatHours = (utcHours + 3) % 24;
-    return eatHours >= 20 || eatHours < 7;
+
+    if (startHour > endHour) {
+      // Overnight curfew, e.g. 20:00 to 07:00 EAT
+      return eatHours >= startHour || eatHours < endHour;
+    } else {
+      return eatHours >= startHour && eatHours < endHour;
+    }
   }
 
   /**
@@ -651,7 +663,7 @@ export class MessagingService {
     if (payload.isPromotional && this.isCurfewRestricted()) {
       throw new BriskError(
         'MESSAGING_ERROR',
-        'TCRA anti-spam compliance: Promotional SMS broadcasts are prohibited between 20:00 and 07:00 EAT.',
+        'Product anti-spam policy: Promotional SMS broadcasts are restricted between 20:00 and 07:00 EAT. Transactional messages are unaffected.',
       );
     }
 

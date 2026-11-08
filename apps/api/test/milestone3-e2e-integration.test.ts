@@ -77,10 +77,13 @@ describe('BriskSMS Milestone 3: End-to-End Product Integration & Commercial Read
       assert.ok(org.id);
       assert.equal(org.name, 'Alpha Traders Ltd');
 
-      // 3. Merchant requests single-use pairing token from console
+      // 3. Merchant requests single-use pairing token from console (5-minute expiry)
       const tokenRecord = await deviceService.createPairingToken(org.id, auth.user.id);
       assert.ok(tokenRecord.pairingToken);
       assert.ok(tokenRecord.pairingToken.startsWith('bsk_pair_'));
+      const expiryDeltaSeconds = (new Date(tokenRecord.expiresAt).getTime() - Date.now()) / 1000;
+      assert.ok(expiryDeltaSeconds > 280 && expiryDeltaSeconds <= 300, `Pairing token expiry should be ~300s (5m), got ${expiryDeltaSeconds}s`);
+      assert.ok(tokenRecord.qrPayload.includes(tokenRecord.expiresAt));
 
       // 4. Android companion app scans QR code and submits enrollment handshake
       const mockPublicKeyPem = `-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE+mockEcdsaKey${randomUUID().slice(0, 8)}=\n-----END PUBLIC KEY-----`;
