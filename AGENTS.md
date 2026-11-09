@@ -144,3 +144,15 @@ When an AI agent operates in this repository:
 3. Keep documentation in `docs/` synchronised with actual code changes.
 4. Report concrete file changes, executed commands, and test verification results in every turn.
 5. **Design System Governance:** Before creating, editing, or styling any UI component (Angular or Jetpack Compose), consult `docs/skills/brisksms-design/SKILL.md`. Adhere to the Stitch warm palette, geometric typography, performance-guarded Liquid Glass guidelines, and the Anti-AI-Slop 9-pass quality rubric. Never introduce raw unapproved colors, generic AI mesh gradients, or unvetted UI frameworks.
+6. **Remote CI & Diagnostic Invariants (Evidence-Based Debugging):**
+   - **Telemetry Before Modification:** When remote CI, builds, or test suites fail, NEVER make speculative edits to build scripts, dependencies, or source code. Always extract the literal compiler error, stack trace, or failing assertion from execution logs first.
+   - **Diagnostic Pipes on Gated Logs:** If remote logs are not directly streamable via API (e.g., GitHub Actions unauthenticated 403 endpoints), the immediate first step must be establishing an error diagnostic channel (e.g., streaming failure lines to GitHub check annotations `::error::` or uploading raw failure logs as downloadable artifacts). Never guess error causes.
+   - **Strict Failure Layer Isolation:** Deconstruct failures into their exact boundary:
+     1. *Runner / Infrastructure:* Node runtime lifecycles, runner images, native pre-installed toolchains.
+     2. *Build Toolchain:* Daemon heap limits (`gradle.properties`), Kotlin DSL block syntax, plugin resolution.
+     3. *Compilation:* Unresolved references, type signatures, package imports.
+     4. *Test Assertions:* String formatting, regex matching, domain logic edge cases.
+     Never change build toolchains to fix compilation errors, and never alter domain logic to fix runner issues.
+   - **Pipefail Exit Code Integrity:** All CI shell scripts piping command output into logging tools (e.g., `cmd 2>&1 | tee log.txt`) MUST explicitly execute under `set -e -o pipefail` to ensure command exit codes are never masked by downstream utilities.
+   - **Push Back on Misleading Directives (Karpathy Invariant 2.1):** If a user instruction directs changing a version, deleting a check, or modifying code contrary to what the logs prove, do not blindly follow it. Cite the verified log evidence, explain why the directive is misaligned, and recommend the surgical fix.
+   - **Atomic Remote Verification Commits:** When diagnosing remote environments, make isolated single-variable commits per push to ensure unambiguous causality for every CI result.
