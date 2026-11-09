@@ -6,13 +6,12 @@ import {
   FeatureKey,
   UpdateGatewayConfigDto,
   MessagingAccountDto,
-  MessageDispatchPayload,
   MessageDispatchResult,
   NormalizedDeliveryEvent,
   InsufficientCreditsError,
   BriskError,
 } from '@brisksms/shared';
-import { sql, withTransaction } from '@brisksms/db';
+import { sql, withTransaction, SqlExecutor } from '@brisksms/db';
 import {
   MessagingAccountRecord,
   MessagingCreditLedgerRecord,
@@ -27,8 +26,8 @@ import { smsGateProvider } from './providers/smsgate.provider.js';
 import { recipientParserService } from './recipient-parser.service.js';
 import { HttpException } from '../../core/http.js';
 
-// Concurrency guard to coordinate simultaneous in-flight dispatches for identical idempotency keys
-const inFlightDispatches = new Set<string>();
+/** Durable dispatch lease. After expiry an unfinished DISPATCHING operation becomes UNCERTAIN, never re-dispatched. */
+const DISPATCH_LEASE_SECONDS = 60;
 
 export interface CreateCampaignDto {
   name: string;
@@ -91,6 +90,8 @@ export class MessagingService {
         typeof row.response_payload === 'string'
           ? JSON.parse(row.response_payload)
           : (row.response_payload ?? null),
+      claimedBy: row.claimed_by ?? null,
+      leaseExpiresAt: row.lease_expires_at ? new Date(row.lease_expires_at) : null,
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.updated_at),
     };
@@ -510,6 +511,7 @@ export class MessagingService {
     organizationId: string,
     amountCredits: number,
     referenceId?: string,
+    existingTx?: SqlExecutor,
   ): Promise<number> {
     if (amountCredits <= 0) {
       throw new BriskError('MESSAGING_ERROR', 'Refund amount must be greater than zero.');
@@ -558,7 +560,7 @@ export class MessagingService {
       `;
 
       return newBalance;
-    });
+    }, existingTx);
   }
 
   /**
@@ -717,63 +719,16 @@ export class MessagingService {
   }
 
   /**
-   * Finds an existing dispatched message by organization and idempotency key
-   * Enforces request fingerprint consistency and returns the original message record
-   */
-  async findIdempotentMessage(
-    organizationId: string,
-    idempotencyKey: string,
-    expectedFingerprint?: string,
-  ): Promise<SmsMessageRecord | null> {
-    const record = await this.getIdempotencyRecord(organizationId, idempotencyKey);
-    if (!record) {
-      const rows = await sql<Record<string, any>>`
-        SELECT * FROM messaging_credit_ledger
-        WHERE organization_id = ${organizationId}
-          AND reference_id = ${idempotencyKey}
-          AND entry_type = ${CreditLedgerEntryType.USAGE_DEDUCTION}
-        ORDER BY created_at DESC
-        LIMIT 1
-      `;
-      if (rows.length === 0) {
-        return null;
-      }
-
-      const row = rows[0]!;
-      const metadata = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata;
-      if (expectedFingerprint && metadata?.fingerprint && metadata.fingerprint !== expectedFingerprint) {
-        throw new HttpException(
-          409,
-          'DUPLICATE_IDEMPOTENCY',
-          'Idempotency key was previously used with different request parameters',
-        );
-      }
-
-      if (metadata?.messageId) {
-        return this.getMessageById(organizationId, metadata.messageId);
-      }
-
-      return null;
-    }
-
-    if (expectedFingerprint && record.requestFingerprint !== expectedFingerprint) {
-      throw new HttpException(
-        409,
-        'DUPLICATE_IDEMPOTENCY',
-        'Idempotency key was previously used with different request parameters',
-      );
-    }
-
-    if (record.messageId) {
-      return this.getMessageById(organizationId, record.messageId);
-    }
-
-    return null;
-  }
-
-  /**
-   * Dispatches a single SMS message with credit deduction, delivery attempt persistence, and failure refund.
-   * Guarantees durable cross-process idempotency and safe uncertain outcome reconciliation.
+   * Durable, organization-scoped single-message dispatch with crash recovery.
+   *
+   * Operation state lives in PostgreSQL (message_idempotency_records.status); every transition is a
+   * compare-and-set so API instances and sweepers never need shared memory to agree:
+   *   PENDING     Credit deducted and sms_messages(QUEUED) committed; the gateway was definitely NOT contacted.
+   *   DISPATCHING Claimed by exactly one dispatcher under a lease; the gateway MAY have been contacted.
+   *   COMPLETED   Gateway accepted the request (SUBMITTED); delivery is tracked by webhooks.
+   *   FAILED      Definitive gateway rejection; credit refunded in the same transaction as the status change.
+   *   UNCERTAIN   Outcome unknowable (timeout, reset, 5xx, expired lease). Never refunded, never re-dispatched.
+   * Exactly-once external delivery is NOT claimed: UNCERTAIN operations need operator reconciliation.
    */
   async sendSingleMessage(
     organizationId: string,
@@ -807,281 +762,320 @@ export class MessagingService {
       throw new BriskError('MESSAGING_ERROR', 'No cellular gateway token configured. Please connect a relay gateway first.');
     }
 
-    const effectiveSimSlot = payload.simSlot ?? account.defaultSimSlot;
+    const simSlot = payload.simSlot ?? account.defaultSimSlot;
     const fingerprint = createHash('sha256')
-      .update(`${organizationId}:${normalizedPhone}:${payload.content}:${effectiveSimSlot}`)
+      .update(`${organizationId}:${normalizedPhone}:${payload.content}:${simSlot}`)
       .digest('hex');
+    const idempotencyKey = payload.idempotencyKey?.trim() || randomUUID();
 
-    const rawIdempotencyKey = payload.idempotencyKey?.trim();
+    await this.reserveDispatch(organizationId, idempotencyKey, fingerprint, {
+      to: normalizedPhone,
+      content: payload.content,
+      simSlot,
+      campaignId: payload.campaignId,
+    });
+    return this.resolveDispatch(organizationId, idempotencyKey, fingerprint);
+  }
 
-    // 1. Fast check for already completed / settled idempotent operations
-    if (rawIdempotencyKey) {
-      const existing = await this.findIdempotentMessage(organizationId, rawIdempotencyKey, fingerprint);
-      if (existing) {
-        return existing;
-      }
-    }
-
-    const idempotencyKey = rawIdempotencyKey || randomUUID();
-    const inFlightKey = `${organizationId}:${idempotencyKey}`;
-
-    // 2. In-process concurrency guard (coordinating concurrent threads in this process)
-    if (rawIdempotencyKey && inFlightDispatches.has(inFlightKey)) {
-      for (let i = 0; i < 25; i++) {
-        await new Promise((resolve) => setTimeout(resolve, 100));
-        const settled = await this.findIdempotentMessage(organizationId, idempotencyKey, fingerprint);
-        if (settled) return settled;
-        if (!inFlightDispatches.has(inFlightKey)) break;
-      }
-      const settled = await this.findIdempotentMessage(organizationId, idempotencyKey, fingerprint);
-      if (settled) return settled;
-      throw new HttpException(
-        409,
-        'DUPLICATE_IDEMPOTENCY',
-        'Request with this idempotency key is currently being processed. Please retry shortly.',
-      );
-    }
-
-    if (rawIdempotencyKey) {
-      inFlightDispatches.add(inFlightKey);
-    }
-
-    try {
-      const messageId = randomUUID();
+  /**
+   * Step 1 (one ACID transaction): claim the (organization, key) slot, deduct 1 credit and persist the
+   * QUEUED message. A duplicate key is a no-op here; an insufficient balance rolls everything back.
+   */
+  async reserveDispatch(
+    organizationId: string,
+    idempotencyKey: string,
+    fingerprint: string,
+    input: { to: string; content: string; simSlot: number; campaignId?: string },
+  ): Promise<void> {
+    await withTransaction(async (tx) => {
       const now = new Date();
+      const inserted = await tx<Record<string, any>>`
+        INSERT INTO message_idempotency_records (
+          id, organization_id, idempotency_key, request_fingerprint, status, created_at, updated_at
+        ) VALUES (
+          ${randomUUID()}, ${organizationId}, ${idempotencyKey}, ${fingerprint}, 'PENDING', ${now}, ${now}
+        )
+        ON CONFLICT (organization_id, idempotency_key) DO NOTHING
+        RETURNING id
+      `;
+      if (inserted.length === 0) return;
 
-      // 3. Database-backed atomic reservation and credit deduction
-      if (rawIdempotencyKey) {
-        const reservation = await withTransaction(async (tx) => {
-          // Attempt atomic insert into message_idempotency_records
-          const inserted = await tx<Record<string, any>>`
-            INSERT INTO message_idempotency_records (
-              id, organization_id, idempotency_key, request_fingerprint, status, message_id, created_at, updated_at
-            ) VALUES (
-              ${randomUUID()}, ${organizationId}, ${idempotencyKey}, ${fingerprint}, 'PENDING', NULL, ${now}, ${now}
-            )
-            ON CONFLICT (organization_id, idempotency_key) DO NOTHING
-            RETURNING *
-          `;
+      const accRows = await tx<Record<string, any>>`
+        SELECT * FROM messaging_accounts WHERE organization_id = ${organizationId} FOR UPDATE
+      `;
+      const currentBalance = Number(accRows[0]?.credit_balance ?? 0);
+      if (currentBalance < 1) {
+        throw new InsufficientCreditsError(1, currentBalance);
+      }
+      const newBalance = currentBalance - 1;
+      const messageId = randomUUID();
 
-          if (inserted.length === 0) {
-            // Already claimed by another API process!
-            const existingRows = await tx<Record<string, any>>`
-              SELECT * FROM message_idempotency_records
-              WHERE organization_id = ${organizationId} AND idempotency_key = ${idempotencyKey}
-              FOR UPDATE
-            `;
-            return {
-              claimed: false,
-              record: existingRows[0] ? this.mapIdempotencyRow(existingRows[0]) : null,
-            };
-          }
+      await tx`
+        UPDATE messaging_accounts SET credit_balance = ${newBalance}, updated_at = ${now}
+        WHERE organization_id = ${organizationId}
+      `;
+      await tx`
+        INSERT INTO messaging_credit_ledger (
+          id, organization_id, entry_type, amount_credits, balance_after, reference_id, metadata, created_at
+        ) VALUES (
+          ${randomUUID()}, ${organizationId}, ${CreditLedgerEntryType.USAGE_DEDUCTION},
+          1, ${newBalance}, ${idempotencyKey},
+          ${JSON.stringify({ idempotencyKey, fingerprint, messageId, recipientPhone: input.to, simSlot: input.simSlot })}::jsonb,
+          ${now}
+        )
+      `;
+      await tx`
+        INSERT INTO sms_messages (
+          id, organization_id, campaign_id, recipient_phone, message_text,
+          status, cost_credits, sim_slot, gateway_provider, created_at, updated_at
+        ) VALUES (
+          ${messageId}, ${organizationId}, ${input.campaignId ?? null}, ${input.to}, ${input.content},
+          ${SmsStatus.QUEUED}, 1, ${input.simSlot}, ${accRows[0]!.gateway_mode}, ${now}, ${now}
+        )
+      `;
+      await tx`
+        UPDATE message_idempotency_records SET message_id = ${messageId}
+        WHERE id = ${inserted[0]!.id}
+      `;
+    });
+  }
 
-          // We won the race and hold the reservation. Now check and deduct credits inside the same ACID boundary
-          const accRows = await tx<Record<string, any>>`
-            SELECT * FROM messaging_accounts
-            WHERE organization_id = ${organizationId}
-            FOR UPDATE
-          `;
-          const currentBalance = Number(accRows[0]?.credit_balance ?? 0);
-          if (currentBalance < 1) {
-            throw new InsufficientCreditsError(1, currentBalance);
-          }
+  /**
+   * Step 2: drive the operation to a settled state without ever dispatching twice.
+   * PENDING is dispatched by whichever caller wins the claim; DISPATCHING is left to its owner until the
+   * lease expires (then UNCERTAIN); settled states return the original message.
+   */
+  private async resolveDispatch(
+    organizationId: string,
+    idempotencyKey: string,
+    fingerprint: string,
+  ): Promise<SmsMessageRecord> {
+    for (let poll = 0; poll < 25; poll++) {
+      const record = await this.getIdempotencyRecord(organizationId, idempotencyKey);
+      if (!record || !record.messageId) {
+        throw new HttpException(500, 'INTERNAL_ERROR', 'Idempotency record is missing its message');
+      }
+      if (record.requestFingerprint !== fingerprint) {
+        throw new HttpException(
+          409,
+          'DUPLICATE_IDEMPOTENCY',
+          'Idempotency key was previously used with different request parameters',
+        );
+      }
 
-          const newBalance = currentBalance - 1;
-          await tx`
-            UPDATE messaging_accounts
-            SET credit_balance = ${newBalance}, updated_at = ${now}
-            WHERE organization_id = ${organizationId}
-          `;
-
-          await tx`
-            INSERT INTO messaging_credit_ledger (
-              id, organization_id, entry_type, amount_credits, balance_after, reference_id, metadata, created_at
-            ) VALUES (
-              ${randomUUID()}, ${organizationId}, ${CreditLedgerEntryType.USAGE_DEDUCTION},
-              1, ${newBalance}, ${idempotencyKey},
-              ${JSON.stringify({
-                idempotencyKey,
-                fingerprint,
-                messageId,
-                recipientPhone: normalizedPhone,
-                simSlot: effectiveSimSlot,
-              })}::jsonb,
-              ${now}
-            )
-          `;
-
-          return { claimed: true, record: this.mapIdempotencyRow(inserted[0]!) };
-        });
-
-        if (!reservation.claimed) {
-          const rec = reservation.record;
-          if (!rec) {
-            throw new HttpException(500, 'INTERNAL_ERROR', 'Failed to inspect idempotency record');
-          }
-
-          // Validate fingerprint consistency
-          if (rec.requestFingerprint !== fingerprint) {
-            throw new HttpException(
-              409,
-              'DUPLICATE_IDEMPOTENCY',
-              'Idempotency key was previously used with different request parameters',
-            );
-          }
-
-          // If operation already has an associated message:
-          if (rec.messageId) {
-            const existingMsg = await this.getMessageById(organizationId, rec.messageId);
-            if (existingMsg) {
-              return existingMsg;
-            }
-          }
-
-          // If currently PENDING across separate API processes, poll up to 2.5s for completion
-          for (let i = 0; i < 25; i++) {
-            await new Promise((resolve) => setTimeout(resolve, 100));
-            const freshRec = await this.getIdempotencyRecord(organizationId, idempotencyKey);
-            if (freshRec && freshRec.status !== 'PENDING') {
-              if (freshRec.messageId) {
-                const freshMsg = await this.getMessageById(organizationId, freshRec.messageId);
-                if (freshMsg) return freshMsg;
-              }
-              break;
-            }
-          }
-
-          const settledRec = await this.getIdempotencyRecord(organizationId, idempotencyKey);
-          if (settledRec?.messageId) {
-            const settledMsg = await this.getMessageById(organizationId, settledRec.messageId);
-            if (settledMsg) return settledMsg;
-          }
-
-          throw new HttpException(
-            409,
-            'DUPLICATE_IDEMPOTENCY',
-            'Request with this idempotency key is currently being processed. Please retry shortly.',
-          );
-        }
+      if (record.status === 'PENDING') {
+        const dispatched = await this.dispatchReserved(record);
+        if (dispatched) return dispatched;
+      } else if (record.status === 'DISPATCHING') {
+        await this.expireDispatchLeases(record.id);
       } else {
-        // Non-idempotent direct send: deduct credit directly
-        await this.deductCredits(organizationId, 1, idempotencyKey, {
-          idempotencyKey,
-          fingerprint,
-          messageId,
-          recipientPhone: normalizedPhone,
-          simSlot: effectiveSimSlot,
-        });
+        const settled = await this.getMessageById(organizationId, record.messageId);
+        if (settled) return settled;
       }
-
-      // 4. Dispatch to Gateway
-      const dispatchPayload: MessageDispatchPayload = {
-        organizationId,
-        campaignId: payload.campaignId,
-        to: normalizedPhone,
-        content: payload.content,
-        idempotencyKey,
-        simSlot: effectiveSimSlot,
-      };
-
-      const credentials = {
-        mode: account.gatewayMode,
-        baseUrl: account.gatewayBaseUrl || 'https://gateway.brisksms.com/api/v1',
-        apiToken: account.encryptedApiToken,
-        defaultSimSlot: account.defaultSimSlot,
-      };
-
-      let dispatchResult: MessageDispatchResult;
-      let errorMessage: string | null = null;
-      try {
-        dispatchResult = await this.provider.sendMessage(credentials, dispatchPayload);
-      } catch (err: unknown) {
-        errorMessage = err instanceof Error ? err.message : String(err);
-        dispatchResult = {
-          providerMessageId: `uncertain_${Date.now()}_${randomUUID().slice(0, 8)}`,
-          status: 'UNCERTAIN',
-          rawResponse: { error: errorMessage, uncertain: true },
-        };
-      }
-
-      // 5. Determine terminal vs uncertain states
-      let finalSmsStatus: SmsStatus;
-      let finalIdempotencyStatus: 'COMPLETED' | 'FAILED' | 'UNCERTAIN';
-
-      if (dispatchResult.status === 'DISPATCHED') {
-        finalSmsStatus = SmsStatus.SUBMITTED;
-        finalIdempotencyStatus = 'COMPLETED';
-      } else if (dispatchResult.status === 'FAILED') {
-        finalSmsStatus = SmsStatus.FAILED;
-        finalIdempotencyStatus = 'FAILED';
-      } else {
-        // UNCERTAIN: gateway accepted or response was lost/timed out
-        finalSmsStatus = SmsStatus.SUBMITTED;
-        finalIdempotencyStatus = 'UNCERTAIN';
-        errorMessage = errorMessage
-          ? `GATEWAY_UNCERTAIN: ${errorMessage}`
-          : 'Gateway outcome uncertain (network timeout / connection error). Awaiting webhook reconciliation.';
-      }
-
-      const dispatchTimestamp = new Date();
-
-      // 6. Atomically persist sms_messages, delivery attempt, and idempotency status
-      const inserted = await withTransaction(async (tx) => {
-        const msgs = await tx<Record<string, any>>`
-          INSERT INTO sms_messages (
-            id, organization_id, campaign_id, recipient_phone, message_text,
-            status, cost_credits, sim_slot, provider_message_id, gateway_provider,
-            last_error, delivered_at, created_at, updated_at
-          ) VALUES (
-            ${messageId}, ${organizationId}, ${payload.campaignId ?? null}, ${normalizedPhone}, ${payload.content},
-            ${finalSmsStatus}, 1, ${effectiveSimSlot}, ${dispatchResult.providerMessageId}, ${account.gatewayMode},
-            ${errorMessage}, NULL, ${dispatchTimestamp}, ${dispatchTimestamp}
-          )
-          RETURNING *
-        `;
-
-        await tx`
-          INSERT INTO sms_delivery_attempts (
-            id, organization_id, message_id, attempt_number, gateway_provider,
-            provider_message_id, status, error_message, raw_response, attempted_at
-          ) VALUES (
-            ${randomUUID()}, ${organizationId}, ${messageId}, 1, ${account.gatewayMode},
-            ${dispatchResult.providerMessageId}, ${finalSmsStatus}::"SmsStatus", ${errorMessage},
-            ${dispatchResult.rawResponse ? JSON.stringify(dispatchResult.rawResponse) : null}::jsonb,
-            ${dispatchTimestamp}
-          )
-        `;
-
-        if (rawIdempotencyKey) {
-          await tx`
-            UPDATE message_idempotency_records
-            SET status = ${finalIdempotencyStatus},
-                message_id = ${messageId},
-                response_payload = ${JSON.stringify({
-                  messageId,
-                  status: finalSmsStatus,
-                  recipientPhone: normalizedPhone,
-                  costCredits: 1,
-                })}::jsonb,
-                updated_at = ${dispatchTimestamp}
-            WHERE organization_id = ${organizationId} AND idempotency_key = ${idempotencyKey}
-          `;
-        }
-
-        return msgs;
-      });
-
-      // 7. Refund credit ONLY on definitive terminal failure (NEVER on UNCERTAIN)
-      if (dispatchResult.status === 'FAILED') {
-        await this.refundCredits(organizationId, 1, `refund_${messageId}`);
-      }
-
-      return this.mapMessageRow(inserted[0]!);
-    } finally {
-      if (rawIdempotencyKey) {
-        inFlightDispatches.delete(inFlightKey);
-      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
     }
+    throw new HttpException(
+      409,
+      'DUPLICATE_IDEMPOTENCY',
+      'Request with this idempotency key is currently being processed. Please retry shortly.',
+    );
+  }
+
+  /**
+   * Dispatches a reserved (PENDING) operation: everything needed is read back from PostgreSQL, so it works
+   * after a crash. Returns null when another dispatcher won the claim.
+   */
+  private async dispatchReserved(record: MessageIdempotencyRecord): Promise<SmsMessageRecord | null> {
+    const message = await this.getMessageById(record.organizationId, record.messageId!);
+    const account = await this.getOrCreateAccount(record.organizationId);
+    if (!message || !account.encryptedApiToken) {
+      throw new BriskError('MESSAGING_ERROR', 'No cellular gateway token configured. Please connect a relay gateway first.');
+    }
+
+    const claimed = await this.claimDispatch(record.id);
+    if (!claimed) return null;
+
+    let result: MessageDispatchResult;
+    try {
+      result = await this.provider.sendMessage(
+        {
+          mode: account.gatewayMode,
+          baseUrl: account.gatewayBaseUrl || 'https://gateway.brisksms.com/api/v1',
+          apiToken: account.encryptedApiToken,
+          defaultSimSlot: account.defaultSimSlot,
+        },
+        {
+          organizationId: record.organizationId,
+          campaignId: message.campaignId ?? undefined,
+          to: message.recipientPhone,
+          content: message.messageText,
+          idempotencyKey: record.idempotencyKey,
+          simSlot: message.simSlot,
+        },
+      );
+    } catch (err: unknown) {
+      result = {
+        providerMessageId: '',
+        status: 'UNCERTAIN',
+        rawResponse: { error: err instanceof Error ? err.message : String(err), uncertain: true },
+      };
+    }
+    return this.finalizeDispatch(claimed, message, result);
+  }
+
+  /**
+   * Durable claim: exactly one caller flips PENDING -> DISPATCHING. The lease uses PostgreSQL time so
+   * instances with skewed clocks agree. After this commits the gateway MAY be contacted.
+   */
+  async claimDispatch(recordId: string): Promise<MessageIdempotencyRecord | null> {
+    const claimant = `${process.pid}_${randomUUID()}`;
+    const rows = await sql<Record<string, any>>`
+      UPDATE message_idempotency_records
+      SET status = 'DISPATCHING',
+          claimed_by = ${claimant},
+          lease_expires_at = NOW() + (${DISPATCH_LEASE_SECONDS}::int * INTERVAL '1 second'),
+          dispatch_started_at = NOW(),
+          updated_at = NOW()
+      WHERE id = ${recordId} AND status = 'PENDING'
+      RETURNING *
+    `;
+    return rows.length > 0 ? this.mapIdempotencyRow(rows[0]!) : null;
+  }
+
+  /**
+   * Persists the gateway outcome. Only the claimant may settle, so a stale or foreign process cannot
+   * overwrite it. A definitive FAILED refunds in the same transaction (refund is also reference-idempotent).
+   * UNCERTAIN keeps the credit and keeps the message QUEUED with no provider id (nothing to correlate).
+   */
+  private async finalizeDispatch(
+    claimed: MessageIdempotencyRecord,
+    message: SmsMessageRecord,
+    result: MessageDispatchResult,
+  ): Promise<SmsMessageRecord> {
+    const outcome =
+      result.status === 'DISPATCHED' ? 'COMPLETED' : result.status === 'FAILED' ? 'FAILED' : 'UNCERTAIN';
+    const smsStatus =
+      outcome === 'COMPLETED' ? SmsStatus.SUBMITTED : outcome === 'FAILED' ? SmsStatus.FAILED : SmsStatus.QUEUED;
+    const providerMessageId = outcome === 'UNCERTAIN' ? null : result.providerMessageId;
+    const detail = String(result.rawResponse?.error ?? '');
+    const errorText =
+      outcome === 'COMPLETED'
+        ? null
+        : outcome === 'FAILED'
+          ? detail || 'Gateway rejected the request'
+          : `GATEWAY_UNCERTAIN: ${detail || 'gateway outcome unknown'}`;
+    const now = new Date();
+
+    return withTransaction(async (tx) => {
+      const settled = await tx<Record<string, any>>`
+        UPDATE message_idempotency_records
+        SET status = ${outcome},
+            response_payload = ${JSON.stringify({
+              messageId: message.id,
+              status: smsStatus,
+              recipientPhone: message.recipientPhone,
+              costCredits: message.costCredits,
+              outcome,
+            })}::jsonb,
+            updated_at = ${now}
+        WHERE id = ${claimed.id}
+          AND claimed_by = ${claimed.claimedBy}
+          AND status IN ('DISPATCHING', 'UNCERTAIN')
+        RETURNING id
+      `;
+      if (settled.length === 0) {
+        return (await this.getMessageById(message.organizationId, message.id)) ?? message;
+      }
+
+      const updated = await tx<Record<string, any>>`
+        UPDATE sms_messages
+        SET status = ${smsStatus}, provider_message_id = ${providerMessageId},
+            last_error = ${errorText}, updated_at = ${now}
+        WHERE id = ${message.id} AND organization_id = ${message.organizationId}
+        RETURNING *
+      `;
+      await tx`
+        INSERT INTO sms_delivery_attempts (
+          id, organization_id, message_id, attempt_number, gateway_provider,
+          provider_message_id, status, error_message, raw_response, attempted_at
+        ) VALUES (
+          ${randomUUID()}, ${message.organizationId}, ${message.id}, 1, ${message.gatewayProvider},
+          ${providerMessageId}, ${smsStatus}::"SmsStatus", ${errorText},
+          ${result.rawResponse ? JSON.stringify(result.rawResponse) : null}::jsonb, ${now}
+        )
+      `;
+      if (outcome === 'FAILED') {
+        await this.refundCredits(message.organizationId, message.costCredits, `refund_${message.id}`, tx);
+      }
+      return this.mapMessageRow(updated[0]!);
+    });
+  }
+
+  /**
+   * DISPATCHING operations whose lease expired are marked UNCERTAIN (optionally only `recordId`).
+   * They are never re-dispatched and never refunded automatically.
+   */
+  private async expireDispatchLeases(recordId?: string): Promise<number> {
+    const expired = await sql<Record<string, any>>`
+      WITH expired AS (
+        UPDATE message_idempotency_records
+        SET status = 'UNCERTAIN', updated_at = NOW()
+        WHERE status = 'DISPATCHING'
+          AND lease_expires_at < NOW()
+          AND (${recordId ?? null}::uuid IS NULL OR id = ${recordId ?? null}::uuid)
+        RETURNING message_id
+      )
+      UPDATE sms_messages
+      SET last_error = 'GATEWAY_UNCERTAIN: dispatch lease expired before the gateway outcome was recorded',
+          updated_at = NOW()
+      WHERE id IN (SELECT message_id FROM expired)
+      RETURNING id
+    `;
+    return expired.length;
+  }
+
+  /**
+   * Recovery sweep (safe to run from any number of instances): expired leases become UNCERTAIN, and
+   * reservations still PENDING after the grace period (gateway never contacted) are dispatched.
+   */
+  async recoverStaleDispatches(
+    options: { pendingGraceSeconds?: number; limit?: number } = {},
+  ): Promise<{ expiredToUncertain: number; resumed: number }> {
+    const expiredToUncertain = await this.expireDispatchLeases();
+    const stale = await sql<Record<string, any>>`
+      SELECT * FROM message_idempotency_records
+      WHERE status = 'PENDING' AND message_id IS NOT NULL
+        AND created_at < NOW() - (${options.pendingGraceSeconds ?? 60}::int * INTERVAL '1 second')
+      ORDER BY created_at ASC
+      LIMIT ${options.limit ?? 50}
+    `;
+    let resumed = 0;
+    for (const row of stale) {
+      if (await this.dispatchReserved(this.mapIdempotencyRow(row))) resumed++;
+    }
+    return { expiredToUncertain, resumed };
+  }
+
+  /**
+   * Operations whose gateway outcome is unknown and need operator reconciliation.
+   */
+  async listUncertainDispatches(organizationId: string): Promise<
+    Array<{ idempotencyKey: string; messageId: string; recipientPhone: string; lastError: string | null; since: Date }>
+  > {
+    const rows = await sql<Record<string, any>>`
+      SELECT r.idempotency_key, r.message_id, r.updated_at, m.recipient_phone, m.last_error
+      FROM message_idempotency_records r
+      JOIN sms_messages m ON m.id = r.message_id AND m.organization_id = r.organization_id
+      WHERE r.organization_id = ${organizationId} AND r.status = 'UNCERTAIN'
+      ORDER BY r.updated_at ASC
+    `;
+    return rows.map((r) => ({
+      idempotencyKey: r.idempotency_key,
+      messageId: r.message_id,
+      recipientPhone: r.recipient_phone,
+      lastError: r.last_error ?? null,
+      since: new Date(r.updated_at),
+    }));
   }
 
   /**

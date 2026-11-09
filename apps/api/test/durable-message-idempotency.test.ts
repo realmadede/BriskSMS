@@ -15,6 +15,7 @@ import { dbStore } from '../src/core/store.js';
 import { MessagingService } from '../src/modules/messaging/messaging.service.js';
 import { MessagingProvider } from '../src/modules/messaging/interfaces/messaging-provider.interface.js';
 import { HttpException } from '../src/core/http.js';
+import { SmsGateProvider } from '../src/modules/messaging/providers/smsgate.provider.js';
 
 describe('Durable Message Dispatch Idempotency & Gateway Outcome Reconciliation', () => {
   let orgId: string;
@@ -393,7 +394,8 @@ describe('Durable Message Dispatch Idempotency & Gateway Outcome Reconciliation'
     });
 
     assert.equal(dispatchCallCount, 1);
-    assert.equal(msg.status, SmsStatus.SUBMITTED);
+    assert.equal(msg.status, SmsStatus.QUEUED, 'Unconfirmed message must not claim SUBMITTED');
+    assert.equal(msg.providerMessageId, null, 'No synthetic provider id for an uncertain outcome');
     assert.match(String(msg.lastError), /uncertain/i);
 
     const [account, idemRows, refunds] = await Promise.all([
@@ -496,5 +498,156 @@ describe('Durable Message Dispatch Idempotency & Gateway Outcome Reconciliation'
 
     assert.equal(refundLedgerEntries.length, 1, 'Ledger must contain strictly 1 refund entry');
     assert.equal(idemRecord?.status, 'FAILED', 'Idempotency record updated to FAILED');
+  });
+
+  // ---------------------------------------------------------------------------------------------
+  // PENDING crash window, durable claim/lease and recovery
+  // ---------------------------------------------------------------------------------------------
+  const PROCESS_CRASH = 'PROCESS_CRASH';
+  const sendInput = (key: string) => ({ to: '+255754000111', content: 'Crash recovery message', idempotencyKey: key });
+
+  class CrashAfterReservation extends MessagingService {
+    override async claimDispatch(): Promise<never> {
+      throw new Error(PROCESS_CRASH); // reservation committed, gateway never contacted
+    }
+  }
+  class CrashAfterClaim extends MessagingService {
+    override async claimDispatch(recordId: string): Promise<never> {
+      await super.claimDispatch(recordId);
+      throw new Error(PROCESS_CRASH); // claim committed, gateway outcome unknowable
+    }
+  }
+
+  it('11. Crash after reservation commit (gateway never contacted) is recovered by a retry with exactly one dispatch', async () => {
+    const key = `crash_pending_${Date.now()}`;
+    await assert.rejects(() => new CrashAfterReservation(mockGatewayProvider).sendSingleMessage(orgId, sendInput(key)), new RegExp(PROCESS_CRASH));
+
+    const svc = new MessagingService(mockGatewayProvider);
+    const rec = await svc.getIdempotencyRecord(orgId, key);
+    assert.equal(rec?.status, 'PENDING');
+    assert.equal(dispatchCallCount, 0);
+    assert.equal((await svc.getOrCreateAccount(orgId)).creditBalance, 49, 'Credit stays deducted while reserved');
+
+    const msg = await svc.sendSingleMessage(orgId, sendInput(key));
+    assert.equal(msg.status, SmsStatus.SUBMITTED);
+    assert.equal(dispatchCallCount, 1);
+    assert.equal((await svc.getIdempotencyRecord(orgId, key))?.status, 'COMPLETED');
+    assert.equal((await sql`SELECT id FROM sms_messages WHERE organization_id = ${orgId}`).length, 1);
+    assert.equal((await svc.getOrCreateAccount(orgId)).creditBalance, 49);
+  });
+
+  it('12. Crash after claim (gateway outcome unknowable) becomes UNCERTAIN on lease expiry: no re-dispatch, no refund, surfaced for review', async () => {
+    const key = `crash_claimed_${Date.now()}`;
+    await assert.rejects(() => new CrashAfterClaim(mockGatewayProvider).sendSingleMessage(orgId, sendInput(key)), new RegExp(PROCESS_CRASH));
+
+    const svc = new MessagingService(mockGatewayProvider);
+    assert.equal((await svc.getIdempotencyRecord(orgId, key))?.status, 'DISPATCHING');
+
+    // Lease still live: the retry must neither dispatch nor settle.
+    await assert.rejects(() => svc.sendSingleMessage(orgId, sendInput(key)), (e: any) => e instanceof HttpException && e.statusCode === 409);
+    assert.equal(dispatchCallCount, 0);
+
+    await sql`UPDATE message_idempotency_records SET lease_expires_at = NOW() - INTERVAL '1 second' WHERE organization_id = ${orgId} AND idempotency_key = ${key}`;
+    const msg = await svc.sendSingleMessage(orgId, sendInput(key));
+    assert.equal(msg.status, SmsStatus.QUEUED);
+    assert.match(String(msg.lastError), /GATEWAY_UNCERTAIN/);
+    assert.equal((await svc.getIdempotencyRecord(orgId, key))?.status, 'UNCERTAIN');
+
+    await svc.sendSingleMessage(orgId, sendInput(key)); // further retries stay inert
+    assert.equal(dispatchCallCount, 0, 'Expired claim must never trigger a dispatch');
+    assert.equal((await svc.getOrCreateAccount(orgId)).creditBalance, 49, 'No automatic refund');
+    assert.equal((await sql`SELECT id FROM messaging_credit_ledger WHERE organization_id = ${orgId} AND entry_type = ${CreditLedgerEntryType.REFUND}`).length, 0);
+
+    const review = await svc.listUncertainDispatches(orgId);
+    assert.equal(review.length, 1);
+    assert.equal(review[0]!.idempotencyKey, key);
+    assert.equal(review[0]!.messageId, msg.id);
+  });
+
+  it('13. Two instances racing to claim one PENDING operation: exactly one wins and dispatches', async () => {
+    const key = `claim_race_${Date.now()}`;
+    await assert.rejects(() => new CrashAfterReservation(mockGatewayProvider).sendSingleMessage(orgId, sendInput(key)), new RegExp(PROCESS_CRASH));
+    const rec = (await new MessagingService(mockGatewayProvider).getIdempotencyRecord(orgId, key))!;
+
+    const claims = await Promise.all(
+      Array.from({ length: 6 }, () => new MessagingService(mockGatewayProvider).claimDispatch(rec.id)),
+    );
+    assert.equal(claims.filter((c) => c !== null).length, 1, 'Compare-and-set must admit a single claimant');
+
+    // Same race through the recovery sweep on separate instances (fresh PENDING reservation)
+    const key2 = `sweep_race_${Date.now()}`;
+    await assert.rejects(() => new CrashAfterReservation(mockGatewayProvider).sendSingleMessage(orgId, sendInput(key2)), new RegExp(PROCESS_CRASH));
+    await sql`UPDATE message_idempotency_records SET created_at = NOW() - INTERVAL '10 minutes' WHERE idempotency_key = ${key2}`;
+    dispatchCallCount = 0;
+    const sweeps = await Promise.all([
+      new MessagingService(mockGatewayProvider).recoverStaleDispatches(),
+      new MessagingService(mockGatewayProvider).recoverStaleDispatches(),
+    ]);
+    assert.equal(sweeps.reduce((n, r) => n + r.resumed, 0), 1);
+    assert.equal(dispatchCallCount, 1, 'Concurrent sweepers must dispatch the operation once');
+  });
+
+  it('14. Recovery sweep: stale PENDING is dispatched, expired DISPATCHING becomes UNCERTAIN without dispatch or refund', async () => {
+    const svc = new MessagingService(mockGatewayProvider);
+    const pendingKey = `sweep_pending_${Date.now()}`;
+    const claimedKey = `sweep_claimed_${Date.now()}`;
+    await assert.rejects(() => new CrashAfterReservation(mockGatewayProvider).sendSingleMessage(orgId, sendInput(pendingKey)), new RegExp(PROCESS_CRASH));
+    await assert.rejects(() => new CrashAfterClaim(mockGatewayProvider).sendSingleMessage(orgId, { ...sendInput(claimedKey), to: '+255754000222' }), new RegExp(PROCESS_CRASH));
+    await sql`UPDATE message_idempotency_records SET created_at = NOW() - INTERVAL '10 minutes' WHERE idempotency_key = ${pendingKey}`;
+    await sql`UPDATE message_idempotency_records SET lease_expires_at = NOW() - INTERVAL '1 second' WHERE idempotency_key = ${claimedKey}`;
+
+    const result = await svc.recoverStaleDispatches();
+    assert.deepEqual(result, { expiredToUncertain: 1, resumed: 1 });
+    assert.equal(dispatchCallCount, 1, 'Only the never-contacted operation is dispatched');
+    assert.equal((await svc.getIdempotencyRecord(orgId, pendingKey))?.status, 'COMPLETED');
+    assert.equal((await svc.getIdempotencyRecord(orgId, claimedKey))?.status, 'UNCERTAIN');
+    assert.equal((await svc.getOrCreateAccount(orgId)).creditBalance, 48, 'Both credits stay deducted');
+
+    assert.deepEqual(await svc.recoverStaleDispatches(), { expiredToUncertain: 0, resumed: 0 }, 'Sweep is idempotent');
+  });
+
+  it('15. Definitive gateway rejection refunds atomically once; retries and duplicate webhooks never refund again', async () => {
+    const rejecting: MessagingProvider = {
+      ...mockGatewayProvider,
+      async sendMessage() {
+        dispatchCallCount++;
+        return { providerMessageId: 'failed_1', status: 'FAILED', rawResponse: { statusCode: 400, error: 'invalid number' } };
+      },
+    };
+    const svc = new MessagingService(rejecting);
+    const key = `definitive_fail_${Date.now()}`;
+    const msg = await svc.sendSingleMessage(orgId, sendInput(key));
+    assert.equal(msg.status, SmsStatus.FAILED);
+    assert.equal((await svc.getIdempotencyRecord(orgId, key))?.status, 'FAILED');
+    assert.equal((await svc.getOrCreateAccount(orgId)).creditBalance, 50);
+
+    await svc.sendSingleMessage(orgId, sendInput(key));
+    await svc.handleDeliveryEvent({ providerMessageId: msg.providerMessageId!, eventType: 'FAILED', carrierTimestamp: new Date() });
+    await svc.refundCredits(orgId, 1, `refund_${msg.id}`);
+    assert.equal(dispatchCallCount, 1, 'A failed operation is not re-dispatched under the same key');
+    assert.equal((await sql`SELECT id FROM messaging_credit_ledger WHERE organization_id = ${orgId} AND entry_type = ${CreditLedgerEntryType.REFUND}`).length, 1);
+    assert.equal((await svc.getOrCreateAccount(orgId)).creditBalance, 50);
+  });
+
+  it('16. SMSGate response classification: definitive rejection vs uncertain, never a blind refund', async () => {
+    const provider = new SmsGateProvider();
+    const creds = { mode: GatewayMode.EXTERNAL_RELAY, baseUrl: 'https://api.sms-gate.app/3rdparty/v1', apiToken: 'tok' };
+    const payload = { organizationId: orgId, to: '+255754000111', content: 'x', idempotencyKey: 'k' };
+    const originalFetch = globalThis.fetch;
+    const run = async (impl: () => Promise<Response>) => {
+      globalThis.fetch = (async () => impl()) as any;
+      try { return (await provider.sendMessage(creds, payload)).status; } finally { globalThis.fetch = originalFetch; }
+    };
+
+    assert.equal(await run(async () => new Response(JSON.stringify({ id: 'm1' }), { status: 202 })), 'DISPATCHED');
+    for (const status of [400, 401, 403, 404, 422, 429]) {
+      assert.equal(await run(async () => new Response('no', { status })), 'FAILED', `HTTP ${status} is a definitive rejection`);
+    }
+    for (const status of [408, 409, 500, 502, 503, 504]) {
+      assert.equal(await run(async () => new Response('?', { status })), 'UNCERTAIN', `HTTP ${status} is uncertain`);
+    }
+    assert.equal(await run(async () => { throw new Error('ECONNRESET'); }), 'UNCERTAIN');
+    assert.equal(await run(async () => { const e = new Error('timed out'); e.name = 'TimeoutError'; throw e; }), 'UNCERTAIN');
+    assert.equal(await run(async () => new Response('not json', { status: 200 })), 'UNCERTAIN', '2xx with unreadable body is uncertain');
   });
 });

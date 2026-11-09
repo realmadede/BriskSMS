@@ -56,6 +56,7 @@ export enum GatewayMode {
  */
 export enum MessageIdempotencyStatus {
   PENDING = 'PENDING',
+  DISPATCHING = 'DISPATCHING',
   COMPLETED = 'COMPLETED',
   FAILED = 'FAILED',
   UNCERTAIN = 'UNCERTAIN',

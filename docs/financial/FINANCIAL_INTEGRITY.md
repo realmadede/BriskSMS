@@ -204,3 +204,25 @@ Every security-sensitive or financial operation produces an append-only audit ev
 
 Audit records are strictly read-only and indexed by `organization_id`, `resource_id`, and `created_at`.
 
+
+---
+
+## 9. Single-Message Dispatch Idempotency & Crash Recovery (Product B)
+
+`POST /v1/messages/send` (and `/v1/developer/messages/send`) is durable across API instances and restarts. PostgreSQL is the only coordination mechanism: `message_idempotency_records` carries `UNIQUE (organization_id, idempotency_key)`, and every state change is a compare-and-set. A request without an `Idempotency-Key` receives an internal random key and uses the same path.
+
+| State | Meaning | Credit | Automatic action |
+| :--- | :--- | :--- | :--- |
+| `PENDING` | Credit deducted and `sms_messages(QUEUED)` committed in one transaction. Gateway **definitely not contacted**. | Deducted | Safe to dispatch: a retry with the same key, or `recoverStaleDispatches()`, claims and dispatches it. |
+| `DISPATCHING` | Claimed by exactly one dispatcher under a 60 s lease (PostgreSQL clock). Gateway **may have been contacted**. | Deducted | Never re-dispatched. Lease expiry moves it to `UNCERTAIN`. |
+| `COMPLETED` | Gateway accepted the request (2xx). Message `SUBMITTED`; webhooks track delivery. | Deducted | None. |
+| `FAILED` | Definitive rejection (HTTP 400, 401, 403, 404, 413, 422, 429, or a pre-flight validation failure). | Refunded **in the same transaction** as the status change, keyed `refund_<messageId>`. | None; refund is reference-idempotent. |
+| `UNCERTAIN` | Outcome unknowable: timeout, connection reset, 5xx, 408/409, unreadable 2xx body, expired lease. Message stays `QUEUED`, no provider id. | **Kept** | **No automatic refund and no re-dispatch.** Listed by `listUncertainDispatches(orgId)` for operator reconciliation. |
+
+Invariants:
+
+- Different fingerprint (recipient, content, SIM slot) under the same key returns HTTP `409 DUPLICATE_IDEMPOTENCY`.
+- Only the claimant that holds the claim may settle the operation.
+- The HTTP status classification is BriskSMS policy based on HTTP semantics, **not** a documented SMSGate guarantee. SMSGate idempotency is not relied upon: `X-Idempotency-Key` is still sent, but the gateway is never assumed to deduplicate.
+- BriskSMS does **not** claim exactly-once external SMS delivery. An `UNCERTAIN` operation may or may not have reached the handset; deciding refund versus completion is a manual reconciliation step.
+- Request timeout to SMSGate is bounded (15 s) so a healthy dispatch always finishes inside the lease.

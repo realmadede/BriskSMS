@@ -341,9 +341,11 @@ export interface MessageIdempotencyRecord {
   organizationId: string;
   idempotencyKey: string;
   requestFingerprint: string;
-  status: 'PENDING' | 'COMPLETED' | 'FAILED' | 'UNCERTAIN';
+  status: 'PENDING' | 'DISPATCHING' | 'COMPLETED' | 'FAILED' | 'UNCERTAIN';
   messageId: string | null;
   responsePayload: Record<string, unknown> | null;
+  claimedBy: string | null;
+  leaseExpiresAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }

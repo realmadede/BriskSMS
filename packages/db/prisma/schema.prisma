@@ -730,6 +730,9 @@ model MessageIdempotencyRecord {
   status             String    @default("PENDING") @db.VarChar(30)
   messageId          String?   @map("message_id") @db.Uuid
   responsePayload    Json?     @map("response_payload") @db.JsonB
+  claimedBy          String?   @map("claimed_by") @db.VarChar(64)
+  leaseExpiresAt     DateTime? @map("lease_expires_at") @db.Timestamptz(6)
+  dispatchStartedAt  DateTime? @map("dispatch_started_at") @db.Timestamptz(6)
   createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt          DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 

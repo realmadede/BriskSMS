@@ -8,6 +8,10 @@ import {
 } from '@brisksms/shared';
 import { MessagingProvider } from '../interfaces/messaging-provider.interface.js';
 
+/** Bounded so the durable dispatch lease (60s) always outlives a healthy request. */
+const SMSGATE_REQUEST_TIMEOUT_MS = 15_000;
+const SMSGATE_DEFINITIVE_REJECTION_STATUSES = new Set([400, 401, 403, 404, 413, 422, 429]);
+
 export interface WebhookVerificationResult {
   isValid: boolean;
   error?: string;
@@ -367,15 +371,19 @@ export class SmsGateProvider implements MessagingProvider {
         },
         body: JSON.stringify(requestBody),
         redirect: 'error',
+        signal: AbortSignal.timeout(SMSGATE_REQUEST_TIMEOUT_MS),
       });
 
       if (!response.ok) {
         const errorText = await response.text();
-        const isClientError = response.status >= 400 && response.status < 500;
+        // BriskSMS policy (HTTP semantics, not a documented SMSGate guarantee): only statuses that mean the
+        // request was refused before processing are definitive. Everything else (408, 409, 5xx, ...) may have
+        // been accepted by the gateway, so it is UNCERTAIN: never refunded, never re-dispatched.
+        const definitive = SMSGATE_DEFINITIVE_REJECTION_STATUSES.has(response.status);
         return {
           providerMessageId: `failed_${Date.now()}`,
-          status: isClientError ? 'FAILED' : 'UNCERTAIN',
-          rawResponse: { statusCode: response.status, error: errorText, uncertain: !isClientError },
+          status: definitive ? 'FAILED' : 'UNCERTAIN',
+          rawResponse: { statusCode: response.status, error: errorText, uncertain: !definitive },
         };
       }
 
