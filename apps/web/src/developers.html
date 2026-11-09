@@ -1438,7 +1438,7 @@
               <p class="zapier-step-desc">Configure a "Catch Hook" or action in Zapier targeting <code>POST /v1/messages/send</code> with your secret API key.</p>
             </div>
             <div style="margin-top: 1rem; font-family: var(--font-mono); font-size: 0.75rem; background: rgba(11,10,9,0.05); padding: 8px 12px; border-radius: 8px;">
-              x-api-key: YOUR_API_KEY
+              x-api-key: YOUR_BRISKSMS_API_KEY
             </div>
           </div>
 
@@ -1705,7 +1705,7 @@
     const endpointsData = {
       ingest: {
         curl: `curl -X POST https://api.brisksms.com/v1/payments/ingest \\
-  -H "Authorization: Bearer brk_live_9488291048291" \\
+  -H "Authorization: Bearer YOUR_BRISKSMS_API_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{
     "deviceId": "dev_s23_relay_01",
@@ -1746,7 +1746,7 @@ const result: PaymentIngestResult = await client.payments.ingestRaw({
 console.log("Payment State: " + result.state);`,
         python: `from brisksms import BriskClient
 
-client = BriskClient(api_key=os.environ.get("BRISKSMS_API_KEY", "YOUR_API_KEY"))
+client = BriskClient(api_key="YOUR_BRISKSMS_API_KEY")
 
 response = await client.payments.ingest(
     device_id="dev_s23_relay_01",
@@ -1764,7 +1764,7 @@ import (
 )
 
 func main() {
-    client := brisksms.NewClient("brk_live_9488291048291")
+    client := brisksms.NewClient("YOUR_BRISKSMS_API_KEY")
 
     payment, err := client.Payments.Ingest(context.Background(), &brisksms.IngestParams{
         DeviceId:   "dev_s23_relay_01",
@@ -1840,7 +1840,7 @@ Console.WriteLine("Settlement ID: " + payment.PaymentId + ", Status: " + payment
       },
       match: {
         curl: `curl -X POST https://api.brisksms.com/v1/reconcile/match \\
-  -H "Authorization: Bearer brk_live_9488291048291" \\
+  -H "Authorization: Bearer YOUR_BRISKSMS_API_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{
     "invoiceId": "inv_8829_whmcs",
@@ -1977,7 +1977,7 @@ resp, _ := httpClient.Do(req)`,
       },
       dispatch: {
         curl: `curl -X POST https://api.brisksms.com/v1/messages/send-bulk \\
-  -H "Authorization: Bearer brk_live_9488291048291" \\
+  -H "Authorization: Bearer YOUR_BRISKSMS_API_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{
     "senderId": "BRISKSMS",
@@ -2042,7 +2042,7 @@ sendBulk();`,
       },
       device: {
         curl: `curl -X GET https://api.brisksms.com/v1/devices/status \\
-  -H "Authorization: Bearer brk_live_9488291048291"`,
+  -H "Authorization: Bearer YOUR_BRISKSMS_API_KEY"`,
         node: `const { BriskClient } = require("@brisksms/sdk");
 const client = new BriskClient({ apiKey: process.env.BRISKSMS_API_KEY });
 
@@ -2122,7 +2122,7 @@ checkRelays();`,
         step2: {
           title: "2. Initialize BriskClient",
           desc: "Load secret credentials and set up the asynchronous connection pool.",
-          code: `from brisksms import BriskClient\nclient = BriskClient(api_key=os.environ["BRISKSMS_API_KEY"])`
+          code: `import os\nfrom brisksms import BriskClient\n\nclient = BriskClient(api_key=os.environ.get("BRISKSMS_API_KEY", "YOUR_BRISKSMS_API_KEY"))`
         },
         step3: {
           title: "3. Dispatch Async Request",
