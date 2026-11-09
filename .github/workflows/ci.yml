@@ -160,8 +160,19 @@ jobs:
             echo '```text' >> "$GITHUB_STEP_SUMMARY"
             tail -n 120 unit-tests.log >> "$GITHUB_STEP_SUMMARY"
             echo '```' >> "$GITHUB_STEP_SUMMARY"
+            tail -n 40 unit-tests.log | while IFS= read -r line; do
+              echo "::error::$line"
+            done
             exit $status
           }
+
+      - name: Upload Test Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: brisksms-android-test-logs
+          path: apps/android/unit-tests.log
+          if-no-files-found: ignore
 
       - name: Upload Test Results
         if: always()
@@ -181,6 +192,9 @@ jobs:
             echo '```text' >> "$GITHUB_STEP_SUMMARY"
             tail -n 120 lint.log >> "$GITHUB_STEP_SUMMARY"
             echo '```' >> "$GITHUB_STEP_SUMMARY"
+            tail -n 40 lint.log | while IFS= read -r line; do
+              echo "::error::$line"
+            done
             exit $status
           }
 
@@ -194,6 +208,9 @@ jobs:
             echo '```text' >> "$GITHUB_STEP_SUMMARY"
             tail -n 120 assemble.log >> "$GITHUB_STEP_SUMMARY"
             echo '```' >> "$GITHUB_STEP_SUMMARY"
+            tail -n 40 assemble.log | while IFS= read -r line; do
+              echo "::error::$line"
+            done
             exit $status
           }
 
