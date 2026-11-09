@@ -141,7 +141,14 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew --version
-          ./gradlew projects --no-daemon
+          ./gradlew projects --no-daemon 2>&1 | tee projects.log || {
+            status=$?
+            echo "## Gradle Structure Verification Failed" >> "$GITHUB_STEP_SUMMARY"
+            echo '```text' >> "$GITHUB_STEP_SUMMARY"
+            tail -n 120 projects.log >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            exit $status
+          }
 
       - name: Run Android Unit Tests
         working-directory: apps/android

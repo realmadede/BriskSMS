@@ -49,11 +49,13 @@ android {
         }
     }
     testOptions {
-        unitTests.isReturnDefaultValues = true
+        unitTests {
+            isReturnDefaultValues = true
+        }
     }
     lint {
-        isAbortOnError = false
-        isCheckReleaseBuilds = false
+        abortOnError = false
+        checkReleaseBuilds = false
     }
 }
 
