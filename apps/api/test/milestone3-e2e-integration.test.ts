@@ -381,13 +381,14 @@ describe('BriskSMS Milestone 3: End-to-End Product Integration & Commercial Read
       assert.ok(actionResult.messageId);
 
       // 4. Register Webhook Endpoint (Zapier Catch Hook)
+      const mockZapierUrl = 'https://hooks.zapier.example.com/hooks/catch/12345/abcde/';
       const endpoint = await webhookService.registerEndpoint(orgId, {
-        url: 'https://hooks.zapier.com/hooks/catch/12345/abcde/',
+        url: mockZapierUrl,
         subscribedEvents: ['payment.matched' as any],
-        secret: 'whsec_test_secret_32_bytes_entropy_1234',
+        secret: 'test_mock_webhook_secret_32_bytes_min!',
       });
       assert.ok(endpoint.id);
-      assert.equal(endpoint.url, 'https://hooks.zapier.com/hooks/catch/12345/abcde/');
+      assert.equal(endpoint.url, mockZapierUrl);
 
       // 5. Test HMAC-SHA256 signature computation
       const testPayload = JSON.stringify({ event: 'payment.matched', amount: 50000 });

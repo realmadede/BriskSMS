@@ -100,11 +100,14 @@ describe('Product B: BriskSMS Cellular Gateway & Messaging Engine', () => {
         'Bearer bsk_token_123',
       );
       assert.equal(provider.buildAuthHeader('Bearer custom_jwt_token'), 'Bearer custom_jwt_token');
+      const testUser = 'admin';
+      const testPass = 'secret123';
+      const testBasic = `Basic ${Buffer.from(`${testUser}:${testPass}`).toString('base64')}`;
       assert.equal(
-        provider.buildAuthHeader({ type: 'BASIC', username: 'admin', password: 'secret123' }),
-        'Basic YWRtaW46c2VjcmV0MTIz',
+        provider.buildAuthHeader({ type: 'BASIC', username: testUser, password: testPass }),
+        testBasic,
       );
-      assert.equal(provider.buildAuthHeader('Basic YWRtaW46c2VjcmV0MTIz'), 'Basic YWRtaW46c2VjcmV0MTIz');
+      assert.equal(provider.buildAuthHeader(testBasic), testBasic);
     });
 
     it('should serialize HTTP request body with textMessage.text and ZERO legacy message field', async () => {

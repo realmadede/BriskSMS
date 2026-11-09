@@ -143,12 +143,15 @@ describe('Milestone 2.4: SMSGate Protocol Verification, Webhook Security & Crede
 
   describe('2. Explicit Credential Configuration & Authentication Hardening', () => {
     it('should format HTTP Basic header for valid explicit Basic credentials', () => {
+      const username = 'test_gateway_admin';
+      const password = 'test_mock_password_fixture';
+      const expectedEncoded = Buffer.from(`${username}:${password}`).toString('base64');
       const header = provider.buildAuthHeader({
         type: 'BASIC',
-        username: 'smsgate_admin',
-        password: 'secure_password_9988',
+        username,
+        password,
       });
-      assert.equal(header, 'Basic c21zZ2F0ZV9hZG1pbjpzZWN1cmVfcGFzc3dvcmRfOTk4OA==');
+      assert.equal(header, `Basic ${expectedEncoded}`);
     });
 
     it('should reject invalid or missing Basic credentials without guessing', () => {

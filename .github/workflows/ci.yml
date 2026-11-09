@@ -42,6 +42,8 @@ jobs:
       FORCE_TCP_POSTGRES: 'true'
       FORCE_TCP_REDIS: 'true'
       ENCRYPTION_MASTER_KEY: brisksms_ci_encryption_master_key_32_bytes_min!
+      JWT_ACCESS_SECRET: brisksms_ci_jwt_access_secret_32_bytes_min!
+      CSRF_SECRET: brisksms_ci_csrf_secret_32_bytes_min!
 
     steps:
       - name: Checkout Repository
@@ -94,7 +96,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           java-version: '17'
           distribution: 'temurin'

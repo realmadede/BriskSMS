@@ -1,6 +1,6 @@
 import { describe, it, before, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHmac, randomUUID } from 'node:crypto';
+import { createHmac, randomUUID, randomBytes } from 'node:crypto';
 import { sql, resetTestDatabaseState } from '@brisksms/db';
 import { createApp } from '../src/app.js';
 import { smsGateKeyService } from '../src/modules/messaging/services/smsgate-key.service.js';
@@ -1184,7 +1184,7 @@ describe('Milestone 2.6: Webhook Identity, Tenant Binding and Key-Rotation Secur
       const prevKey = process.env.ENCRYPTION_MASTER_KEY;
       try {
         process.env.NODE_ENV = 'production';
-        process.env.ENCRYPTION_MASTER_KEY = 'c8b9d3e5f2a10748b6c4e2d091837562a4b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2';
+        process.env.ENCRYPTION_MASTER_KEY = randomBytes(32).toString('hex');
 
         assert.doesNotThrow(() => {
           validateProductionEncryptionConfig();

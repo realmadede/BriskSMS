@@ -16,6 +16,7 @@ import {
   getAllowedOrigins,
 } from '../src/core/cookies.js';
 import { signJwt } from '../src/core/crypto.js';
+import { randomBytes } from 'node:crypto';
 
 describe('Web Console Session Security & CSRF Protection', () => {
   const router = createApp();
@@ -142,8 +143,8 @@ describe('Web Console Session Security & CSRF Protection', () => {
       const prevCsrfSecret = process.env.CSRF_SECRET;
 
       process.env.NODE_ENV = 'production';
-      process.env.ENCRYPTION_MASTER_KEY = 'production_super_secure_high_entropy_master_key_32_bytes_min!';
-      process.env.CSRF_SECRET = 'production_super_secure_high_entropy_csrf_secret_32_bytes_min!';
+      process.env.ENCRYPTION_MASTER_KEY = randomBytes(32).toString('hex');
+      process.env.CSRF_SECRET = randomBytes(32).toString('hex');
 
       try {
         const res = await makeRequest('POST', '/v1/auth/login', {}, {
