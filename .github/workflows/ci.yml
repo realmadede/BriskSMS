@@ -146,13 +146,13 @@ jobs:
       - name: Run Android Unit Tests
         working-directory: apps/android
         run: |
-          ./gradlew testDebugUnitTest --no-daemon --stacktrace || {
-            echo "=== UNIT TEST EXECUTION REPORT DUMP ==="
-            find app/build -name "*.xml" -o -name "*.txt" | while read -r f; do
-              echo "--- $f ---"
-              cat "$f"
-            done
-            exit 1
+          ./gradlew testDebugUnitTest --no-daemon --stacktrace 2>&1 | tee unit-tests.log || {
+            status=$?
+            echo "## Android Unit Tests Failed" >> "$GITHUB_STEP_SUMMARY"
+            echo '```text' >> "$GITHUB_STEP_SUMMARY"
+            tail -n 120 unit-tests.log >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            exit $status
           }
 
       - name: Upload Test Results
@@ -165,11 +165,27 @@ jobs:
 
       - name: Run Android Lint
         working-directory: apps/android
-        run: ./gradlew lintDebug --no-daemon --stacktrace
+        run: |
+          ./gradlew lintDebug --no-daemon --stacktrace 2>&1 | tee lint.log || {
+            status=$?
+            echo "## Android Lint Failed" >> "$GITHUB_STEP_SUMMARY"
+            echo '```text' >> "$GITHUB_STEP_SUMMARY"
+            tail -n 120 lint.log >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            exit $status
+          }
 
       - name: Assemble Debug APK
         working-directory: apps/android
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
+        run: |
+          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee assemble.log || {
+            status=$?
+            echo "## Android Assemble Failed" >> "$GITHUB_STEP_SUMMARY"
+            echo '```text' >> "$GITHUB_STEP_SUMMARY"
+            tail -n 120 assemble.log >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            exit $status
+          }
 
       - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v4
