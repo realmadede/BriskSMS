@@ -2,9 +2,13 @@
 
 **Repository:** `https://github.com/realmadede/BriskSMS`  
 **Branch:** `main`  
-**Baseline Checkpoint:** `8e3f76843e6bef22e5afec90d0c01779bfbe8c06`  
+**Baseline Checkpoint:** `081bf25a11c838f13275486389069070f923f865`  
+**Status:** **Proposed Execution Plan (Pending remote CI approval and staging infrastructure provisioning)**  
 **Target Environment:** Isolated Staging Environment (Cloud Infrastructure + Physical Cellular Test Gateway)  
 **Scope:** Architecture Topology, Infrastructure Provisioning, Staging Test Matrix, Security Audit Protocols, and Incident Rollback Runbooks.
+
+> [!IMPORTANT]
+> **Staging Validation Status:** Staging is **NOT** labeled as validated prior to actual deployment and live test execution on staging infrastructure. This document defines the protocol, test matrix, and verification gates that will be executed once remote CI passes.
 
 ---
 
@@ -40,7 +44,7 @@ flowchart TD
     end
 
     subgraph Staging_Compute["Isolated Staging Compute Cluster"]
-        API["BriskSMS API Modular Monolith (apps/api)<br/>Node.js 24 / Bun<br/>Port: 3000"]
+        API["BriskSMS API Modular Monolith (apps/api)<br/>Bun / Node.js 24<br/>Port: 3000"]
         Worker["BriskSMS Async Queue Worker (apps/worker)<br/>BullMQ Queue Consumer<br/>Concurrency: 4"]
     end
 
@@ -109,14 +113,14 @@ export NODE_ENV="production"
 ### 3.2 Pre-Flight Validation Steps
 1. **Production Guard Execution:**
    - Execute `validateProductionEncryptionConfig()` on application boot.
-   - Verify that any weak or CI default keys (e.g., `brisksms_ci_encryption_master_key_32_bytes_min!`) trigger immediate fatal shutdown (`FATAL: Insecure or test ENCRYPTION_MASTER_KEY detected`).
+   - Verify that any weak or CI default keys trigger immediate fatal shutdown (`FATAL: Insecure or test ENCRYPTION_MASTER_KEY detected`).
 2. **Independent Key Assertion:**
    - Ensure `CSRF_SECRET !== JWT_ACCESS_SECRET` and `CSRF_SECRET !== ENCRYPTION_MASTER_KEY`.
 3. **Database Migration Deployment:**
-   - Run `npm run db:migrate` against the pristine staging database.
+   - Run `bun run db:migrate` against the pristine staging database.
    - Verify migration records in `_prisma_migrations` (`20261107000000_init_foundation`, `20261107010000_smsgate_keys_and_webhook_events`).
 4. **Commercial Catalog Seeding:**
-   - Run `seedCommercialCatalog()` ensuring feature definitions (device limits, webhook access, member quotas) and default plans (Starter, Growth, Enterprise) exist.
+   - Run `bun run db:seed` (`seedCommercialCatalog()`) ensuring feature definitions (device limits, webhook access, member quotas) and default plans (Starter, Growth, Enterprise) exist.
 
 ---
 
@@ -171,27 +175,6 @@ The staging verification process is structured into five distinct workstreams, e
 
 Before production rollout, staging undergoes external penetration testing covering the OWASP Top 10 API Security Risks:
 
-```mermaid
-flowchart LR
-    Tester["External Security Auditor / Penetration Tester"]
-    
-    subgraph Audit_Scope["Audit Verification Vector"]
-        BOLA["1. Broken Object-Level Auth (BOLA / IDOR)"]
-        BA["2. Broken Authentication & Session Hijack"]
-        BOPLA["3. Broken Property-Level Auth"]
-        SSRF["4. Server-Side Request Forgery (SSRF)"]
-        RATE["5. Unrestricted Resource Consumption"]
-        CSRF["6. Cross-Site Request Forgery (CSRF)"]
-    end
-    
-    Tester --> BOLA
-    Tester --> BA
-    Tester --> BOPLA
-    Tester --> SSRF
-    Tester --> RATE
-    Tester --> CSRF
-```
-
 1. **BOLA / IDOR Isolation:**
    - Attempt to access Organization B's payment record using Organization A's API key or user session (`GET /v1/payments/:id`).
    - *Requirement:* Must return `404 NOT_FOUND` (or `403 FORBIDDEN`), never leaking evidence of existence.
@@ -206,23 +189,37 @@ flowchart LR
 
 ---
 
-## 6. Failure Response, Incident Management & Rollback Runbook
+## 6. Testing Prerequisites & Hardware Boundaries
 
-### 6.1 Database Migration Failure Recovery
-- **Trigger:** A migration fails midway during `npm run db:migrate`.
+The following matrix clarifies dependencies that cannot be validated in CI alone and require physical hardware or third-party services:
+
+| Dependency Layer | Prerequisites | Validation Strategy in Staging |
+| :--- | :--- | :--- |
+| **Database & Queues** | PostgreSQL 16+ & Redis 7+ | Provisioned via managed cloud instances with SSL and password authentication. |
+| **Android Companion Hardware** | Physical Android phone (API 26+) | Merchant staff installs debug APK, grants `NotificationListenerService` permission, and disables battery optimization. |
+| **Tanzanian SIM Cards** | Vodacom, Tigo, Airtel SIMs | Real cellular test accounts loaded with small balances to test live payment and SMS transmission. |
+| **SMSGate Cellular Bridge** | Dedicated gateway Android device | Device running SMSGate relay paired to staging API with private HMAC signing key. |
+| **Regulatory & Legal Review** | TCRA & Bank of Tanzania guidelines | Aggregator registration and compliance review with TCRA for bulk messaging; BoT non-custodial reconciliation audit. |
+
+---
+
+## 7. Failure Response, Incident Management & Rollback Runbook
+
+### 7.1 Database Migration Failure Recovery
+- **Trigger:** A migration fails midway during `bun run db:migrate`.
 - **Mitigation:**
   - `packages/db/src/migrate.ts` executes each migration within an explicit database transaction (`withTransaction`).
   - If a statement errors, PostgreSQL rolls back all DDL/DML statements within that migration file.
   - The `_prisma_migrations` table records only completed migrations.
-  - **Recovery Action:** Identify error log in migration runner output, repair SQL in `packages/db/prisma/migrations/<failed_migration>/migration.sql`, and re-execute `npm run db:migrate`.
+  - **Recovery Action:** Identify error log in migration runner output, repair SQL in `packages/db/prisma/migrations/<failed_migration>/migration.sql`, and re-execute `bun run db:migrate`.
 
-### 6.2 Worker Queue Backpressure / Outbox Stall
+### 7.2 Worker Queue Backpressure / Outbox Stall
 - **Trigger:** Redis memory alerts exceed 80% or BullMQ queue depth exceeds 10,000 pending jobs.
 - **Mitigation:**
   - Increase worker concurrency via `WORKER_CONCURRENCY=8` or deploy additional horizontal instances of `apps/worker`.
   - Stalled jobs are automatically reclaimed after 30 seconds via BullMQ lock renewal limits.
 
-### 6.3 Emergency Signing-Key Compromise Runbook
+### 7.3 Emergency Signing-Key Compromise Runbook
 - **Trigger:** An SMSGate device signing key or webhook secret is exposed.
 - **Mitigation Protocol:**
   1. Generate new 32-byte secret.
@@ -231,7 +228,7 @@ flowchart LR
   4. Webhook verification checks `currentKey` first, falling back to `previousKey`.
   5. Once all gateway devices are reconfigured with the new secret, execute `smsGateKeyService.revokePreviousKey(orgId, deviceId)` to permanently block the compromised key.
 
-### 6.4 Cellular Gateway Hardware Disconnect
+### 7.4 Cellular Gateway Hardware Disconnect
 - **Trigger:** Android gateway device loses cellular connectivity or power.
 - **Mitigation:**
   - Heartbeat monitor marks device `OFFLINE` if no heartbeat is received within 120 seconds.
@@ -241,6 +238,6 @@ flowchart LR
 
 ---
 
-## 7. Conclusion
+## 8. Conclusion
 
-This staging validation plan provides the necessary structure, test matrices, and operational safety nets to ensure BriskSMS meets the highest standards of financial correctness, tenant security, and carrier reliability prior to commercial merchant launch.
+This plan provides the structured test matrices, security verification gates, and operational runbooks necessary to execute staging testing once remote CI passes. Staging remains pending until live cloud infrastructure and physical test devices are provisioned.

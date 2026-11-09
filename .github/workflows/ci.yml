@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   verify:
     name: Build & Verify Monorepo
@@ -41,9 +44,6 @@ jobs:
       REDIS_URL: redis://127.0.0.1:6380
       FORCE_TCP_POSTGRES: 'true'
       FORCE_TCP_REDIS: 'true'
-      ENCRYPTION_MASTER_KEY: brisksms_ci_encryption_master_key_32_bytes_min!
-      JWT_ACCESS_SECRET: brisksms_ci_jwt_access_secret_32_bytes_min!
-      CSRF_SECRET: brisksms_ci_csrf_secret_32_bytes_min!
 
     steps:
       - name: Checkout Repository
@@ -57,35 +57,58 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: '1.4.2'
 
-      - name: Install Workspace Dependencies
-        run: npm install
+      - name: Generate Ephemeral CI Cryptographic Secrets
+        run: |
+          echo "ENCRYPTION_MASTER_KEY=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          echo "JWT_ACCESS_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          echo "CSRF_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+
+      - name: Install Workspace Dependencies (Frozen Lockfile)
+        run: bun install --frozen-lockfile
 
       - name: Typecheck Workspace
-        run: npm run typecheck
+        run: bun run typecheck
 
       - name: Build Workspace Packages
-        run: npm run build
+        run: bun run build
 
-      - name: Verify Service Connectivity
+      - name: Verify Service Connectivity & Operational Readiness
         run: |
+          echo "Probing PostgreSQL and Redis operational readiness..."
+          pg_ready=0
+          redis_ready=0
           for i in {1..30}; do
-            if nc -z 127.0.0.1 5433 && nc -z 127.0.0.1 6380; then
-              echo "PostgreSQL (port 5433) and Redis (port 6380) are reachable."
-              exit 0
+            if [ $pg_ready -eq 0 ]; then
+              if pg_isready -h 127.0.0.1 -p 5433 -U brisksms -d brisksms_dev > /dev/null 2>&1; then
+                echo "PostgreSQL (port 5433) is ready to accept queries."
+                pg_ready=1
+              fi
             fi
-            echo "Waiting for services... ($i/30)"
+            if [ $redis_ready -eq 0 ]; then
+              if (echo "PING" | nc -w 1 127.0.0.1 6380 | grep -q "PONG") || (command -v redis-cli > /dev/null && redis-cli -h 127.0.0.1 -p 6380 ping > /dev/null 2>&1); then
+                echo "Redis (port 6380) is responding with PONG."
+                redis_ready=1
+              fi
+            fi
+            if [ $pg_ready -eq 1 ] && [ $redis_ready -eq 1 ]; then
+              echo "Both PostgreSQL and Redis are verified operationally ready."
+              break
+            fi
+            echo "Waiting for operational readiness... ($i/30)"
             sleep 1
           done
-          echo "Services unreachable after 30 seconds"
-          exit 1
+          if [ $pg_ready -ne 1 ] || [ $redis_ready -ne 1 ]; then
+            echo "FATAL: Services failed operational readiness probe within 30 seconds."
+            exit 1
+          fi
 
       - name: Apply Database Migrations
-        run: npm run db:migrate
+        run: bun run db:migrate
 
       - name: Execute Automated Test Corpus
-        run: npm test
+        run: bun test
 
   android-verify:
     name: Build & Verify Android Companion
@@ -134,4 +157,4 @@ jobs:
         with:
           name: brisksms-companion-debug-apk
           path: apps/android/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: warn
+          if-no-files-found: error

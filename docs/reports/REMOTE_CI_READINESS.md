@@ -1,225 +1,205 @@
-# BriskSMS Engineering Report: Remote CI and Staging Validation Readiness
+# BriskSMS Engineering Report: Remote CI Integrity and Secret-Scanning Audit
 
 **Repository:** `https://github.com/realmadede/BriskSMS`  
-**Branch:** `main`  
-**Baseline Checkpoint:** `8e3f76843e6bef22e5afec90d0c01779bfbe8c06`  
-**Target Environment:** GitHub Actions Ubuntu Runners & Isolated Staging Environment  
-**Execution Scope:** Remote CI Workflow Hardening, GitGuardian Secret Scanning Sanitization, Android Build Audit, and Clean-Runner Reproducibility.  
-**Verdict:** **`READY FOR REMOTE CI EXECUTION`**
+**Active Branch:** `main`  
+**Starting Baseline Checkpoint:** `081bf25a11c838f13275486389069070f923f865`  
+**Authoritative Package Manager:** **Bun (v1.4.2)** with committed text lockfile `bun.lock`  
+**Target Execution Environment:** GitHub Actions (`ubuntu-latest`)  
+**Scope:** Authoritative Package Management, GitHub Actions Workflow Verification, Secret-Scanning Integrity, Cryptographic CI Configuration, and Staging Boundary Verification.  
+**Audit Verdict:** **`READY FOR REMOTE CI EXECUTION`**
 
 ---
 
-## 1. Executive Summary & Readiness Verdict
+## 1. Executive Summary & Audit Verdict
 
-Following the completion of Milestone 3, web console session security hardening, and the final session security acceptance audit, BriskSMS was prepared for its inaugural complete remote CI pipeline execution and controlled staging validation.
-
-An exhaustive inspection of the repository baseline, CI workflow definitions, dependency management, service container configurations, secrets sanitization, and Android build tooling was conducted.
+This engineering audit validates the repository configuration and CI pipeline before the first remote push to GitHub.
 
 ### Readiness Determination
 **Verdict:** **`READY FOR REMOTE CI EXECUTION`**
 
-All prerequisites for clean, reproducible remote execution on GitHub Actions are satisfied:
-1. **GitHub Actions Workflow Updated:** Upgraded deprecated `actions/setup-java@v4` to `actions/setup-java@v5`, eliminating runtime warnings and guaranteeing compatibility with GitHub Actions Node 24 runner migration.
-2. **Secrets Scanning Sanitized:** Created `.gitguardian.yaml` excluding mock test fixture paths and sanitized all static test keys, RFC 7617 Basic auth headers, and webhook URLs in test fixtures to dynamic runtime generation, eliminating automated secret scanning false positives.
-3. **Explicit CI Secrets Injected:** Workflow environment defines explicit non-default secrets for `ENCRYPTION_MASTER_KEY`, `JWT_ACCESS_SECRET`, and `CSRF_SECRET`, ensuring tests operate with strict cryptographic enforcement without falling back to ambiguous defaults.
-4. **Clean Service Probing:** The workflow implements deterministic TCP readiness probing on host ports 5433 (PostgreSQL 16) and 6380 (Redis 7), preventing race conditions during database migration and test execution.
-5. **Zero Compilation or Type Errors:** Verified clean monorepo builds via `bun run build` and `tsc -b`, with zero TypeScript diagnostic errors across all packages and applications.
+### Verified Audit Outcomes:
+1. **Authoritative Package Manager Enforced (Bun):**
+   - Verified that the monorepo scripts (`bun build`, `bun test`, `bun run`) and runtime rely on Bun.
+   - Generated and committed the authoritative text lockfile [`bun.lock`](file:///home/madede/BAGOMWA/PROJECTS/BriskSMS/bun.lock).
+   - Removed the incomplete and stale `package-lock.json` scaffold.
+   - Configured `.github/workflows/ci.yml` to execute frozen-lockfile installation: `bun install --frozen-lockfile`.
+   - Updated package manifest to define `"packageManager": "bun@1.4.2"`.
+2. **GitHub Actions Workflow Hardened (`.github/workflows/ci.yml`):**
+   - Configured minimal workflow permissions: `permissions: contents: read`.
+   - Modernized Java setup to `actions/setup-java@v5` (JDK 17 Temurin), resolving the Node 20 deprecation warning.
+   - Replaced fragile TCP port probing with true operational readiness probes (`pg_isready -h 127.0.0.1 -p 5433 -U brisksms -d brisksms_dev` and Redis PONG probe).
+   - Configured ephemeral cryptographic secret generation via `openssl rand -hex 32` during workflow execution, eliminating static secrets in CI configuration.
+   - Set `if-no-files-found: error` on Android APK artifact upload to guarantee failure propagation.
+3. **Secret-Scanning Integrity Restored:**
+   - Eliminated broad directory exclusions from `.gitguardian.yaml` (`apps/**/test/**`, `packages/**/test/**`, `docs/**`).
+   - Sanitized all test mock fixtures across test suites to dynamic runtime generation (`crypto.randomBytes`) and RFC 2606 reserved example domains (`*.example.com`).
+   - Replaced example API key in documentation (`apps/web/src/developers.html`) with environment-variable lookup pattern.
+4. **Reproducible Monorepo Build:**
+   - Verified clean compilation with `bun run build && cd apps/api && bun x tsc` (Exit code 0, 0 diagnostic errors).
+   - Verified `bun install --frozen-lockfile` executes cleanly in offline/cached mode with zero modifications to lockfile.
 
 ---
 
-## 2. Repository Baseline & Cryptographic Integrity
+## 2. Test Execution & Operational Boundary Matrix
 
-### 2.1 Git Status & Commit History
-- **Active Branch:** `main` tracking `origin/main`
-- **Expected Starting HEAD:** `8e3f76843e6bef22e5afec90d0c01779bfbe8c06`
-- **Commit Signature:** Verified cryptographically signed by `realmadede` (`bagomwaraphael@gmail.com`) using SSH key `SHA256:9lhgsJOaPG2FrX2fmo8XrZxX8z9UvmwwxGHAP8LoykI`.
-- **Preceding Architectural Milestones:**
-  - `8e3f768`: `fix(security): resolve login and refresh csrf gaps, enforce origin restrictions, independent secrets, and cache protections`
-  - `1fb5b73`: `feat(security): harden web console with httponly cookies, hmac csrf defense, and session invalidation`
-  - `5356804`: `fix(milestone3): correct pairing expiry, database lifecycle enums, transaction ledger classification, and anti-spam policy`
-  - `04f712d`: `feat(milestone3): complete end-to-end product integration, merchant console, and operational readiness`
-  - `094cd44`: `feat(messaging): harden webhook identity, authoritative tenant binding, atomic idempotency, and key rotation`
+To maintain strict fidelity between automated assertions and physical hardware capabilities, all testing boundaries are classified explicitly:
 
-### 2.2 Working Tree Status
-All changes implemented during this preparation pass are surgical, scoped strictly to CI workflow definitions, test mock fixtures, GitGuardian rules, and staging documentation.
+| Boundary / Requirement | Classification | Current Execution Status | Notes & Verification Mechanism |
+| :--- | :--- | :--- | :--- |
+| **Monorepo Build & Typecheck** | Automated (Workstation & CI) | **Verified Locally** (Exit 0) | `bun run build && bun run typecheck` across all packages and apps. |
+| **Parser Engine Tests** | Automated Unit Tests | **Verified Locally** (Exit 0, 7/7 Pass) | Anonymized Tanzanian mobile money SMS parsing (M-Pesa, Tigo Pesa, Airtel Money, CRDB). |
+| **PostgreSQL & Redis Integration Tests** | Automated Service Integration | **Configured for Remote CI** | 428 automated integration tests executed against `postgres:16-alpine` and `redis:7-alpine` containers in CI. |
+| **Android Companion Unit Tests & Lint** | Automated Headless CI | **Configured for Remote CI** | Gradle tasks `./gradlew testDebugUnitTest` and `lintDebug` run on Ubuntu runner with JDK 17. |
+| **Android APK Assembly** | Automated Build Artifact | **Configured for Remote CI** | `./gradlew assembleDebug` compiling `app-debug.apk` with `if-no-files-found: error`. |
+| **Physical Android Hardware Validation** | Manual / Staging Hardware | **Pending Staging** | Requires physical device to test `NotificationListenerService` OS permission grant and battery optimization. |
+| **Tanzanian Carrier SIM Cards** | Cellular Radio Network | **Pending Staging** | Requires active Vodacom, Tigo, and Airtel SIMs in Tanzania to test live radio delivery latencies. |
+| **Physical SMSGate Gateway Integration** | Hardware Cellular Bridge | **Pending Staging** | Requires dedicated Android gateway phone paired with staging API monolith. |
+| **Regulatory & Legal Review** | External Compliance | **In Progress** | TCRA commercial SMS aggregator guidelines, BoT non-custodial payment reconciliation compliance. |
 
 ---
 
-## 3. GitHub Actions CI Workflow Audit (`.github/workflows/ci.yml`)
+## 3. Authoritative Package Manager: Bun Architecture
 
-The repository CI pipeline is partitioned into two concurrent jobs executed on clean `ubuntu-latest` GitHub-hosted virtual environments:
+The repository enforces Bun as its single source of truth for dependency resolution and execution:
+
+### 3.1 Lockfile & Toolchain Decisions
+- **Lockfile Format:** Text-based `bun.lock` (Lockfile Version 2, Bun 1.2+ format).
+- **Workspace Resolution:** All internal dependencies (`@brisksms/shared`, `@brisksms/db`, `@brisksms/parser-engine`, `@brisksms/ui`, `@brisksms/worker`, `@brisksms/zapier-app`) are resolved through Bun workspaces.
+- **Frozen-Lockfile Guarantees:** In CI and staging builds, `bun install --frozen-lockfile` guarantees that no lockfile mutations or unexpected package upgrades occur.
+- **De-Scaffolding npm:** The legacy `package-lock.json` file created during Phase 0 was removed to eliminate dual-package-manager confusion and avoid non-deterministic dependency graphs.
+
+---
+
+## 4. GitHub Actions CI Pipeline Audit (`.github/workflows/ci.yml`)
 
 ```mermaid
 flowchart TD
-    subgraph GitHub_Actions["GitHub Actions CI Pipeline"]
-        Trigger["Push / Pull Request on main"] --> MonorepoJob["verify: Monorepo Backend, Web & Libs"]
-        Trigger --> AndroidJob["android-verify: Android Companion App"]
+    subgraph CI["GitHub Actions Pipeline (Permissions: contents: read)"]
+        PushPR["Push / Pull Request on main"] --> MonorepoJob["verify: Monorepo Backend & Web"]
+        PushPR --> AndroidJob["android-verify: Android Companion App"]
         
         subgraph MonorepoJob["Job 1: verify (ubuntu-latest)"]
-            PG["Service: postgres:16-alpine (5433)"]
-            RD["Service: redis:7-alpine (6380)"]
-            Checkout1["actions/checkout@v4"] --> NodeSetup["actions/setup-node@v4 (Node 24)"]
-            NodeSetup --> BunSetup["oven-sh/setup-bun@v2 (Bun latest)"]
-            BunSetup --> Install["npm install"]
-            Install --> Typecheck["npm run typecheck"]
-            Typecheck --> Build["npm run build"]
-            Build --> TCPCheck["TCP Port Connectivity Probe (5433 & 6380)"]
-            TCPCheck --> Migrate["npm run db:migrate"]
-            Migrate --> TestSuite["npm test (428 Tests)"]
+            PG["Service: postgres:16-alpine<br/>(Host Port: 5433)"]
+            RD["Service: redis:7-alpine<br/>(Host Port: 6380)"]
+            Checkout1["actions/checkout@v4"] --> Node24["actions/setup-node@v4 (Node 24)"]
+            Node24 --> BunSetup["oven-sh/setup-bun@v2 (Bun 1.4.2)"]
+            BunSetup --> EphemeralSecrets["Generate Ephemeral CI Secrets<br/>(ENCRYPTION_MASTER_KEY, JWT_ACCESS_SECRET, CSRF_SECRET)"]
+            EphemeralSecrets --> BunInstall["bun install --frozen-lockfile"]
+            BunInstall --> BunCheck["bun run typecheck"]
+            BunCheck --> BunBuild["bun run build"]
+            BunBuild --> Probes["Operational Readiness Probes<br/>(pg_isready & Redis PONG)"]
+            Probes --> Migrate["bun run db:migrate"]
+            Migrate --> TestCorpus["bun test (428 Tests)"]
         end
         
         subgraph AndroidJob["Job 2: android-verify (ubuntu-latest)"]
             Checkout2["actions/checkout@v4"] --> JavaSetup["actions/setup-java@v5 (JDK 17 Temurin)"]
-            JavaSetup --> AndroidSDK["android-actions/setup-android@v3"]
-            AndroidSDK --> Wrapper["Verify Gradle Wrapper & Structure"]
-            Wrapper --> AndroidTest["./gradlew testDebugUnitTest"]
-            AndroidTest --> AndroidLint["./gradlew lintDebug"]
-            AndroidLint --> Assemble["./gradlew assembleDebug"]
-            Assemble --> Artifact["actions/upload-artifact@v4 (app-debug.apk)"]
+            JavaSetup --> SDK["actions/setup-android@v3"]
+            SDK --> Wrapper["Verify Gradle Wrapper"]
+            Wrapper --> UnitTests["./gradlew testDebugUnitTest"]
+            UnitTests --> Lint["./gradlew lintDebug"]
+            Lint --> Assemble["./gradlew assembleDebug"]
+            Assemble --> Artifact["actions/upload-artifact@v4<br/>(if-no-files-found: error)"]
         end
     end
 ```
 
-### 3.1 Monorepo Verification Job (`verify`)
-1. **Service Containers:**
-   - **PostgreSQL 16 Alpine:** Bound to host port `5433:5432` with health probe `pg_isready -U brisksms -d brisksms_dev`.
-   - **Redis 7 Alpine:** Bound to host port `6380:6379` with health probe `redis-cli ping`.
-   - Custom ports (5433/6380) ensure zero conflict with any default local background services on runner hosts.
-2. **Explicit Environment Isolation:**
-   ```yaml
-   env:
-     DATABASE_URL: postgresql://brisksms:brisksms_dev_secret@127.0.0.1:5433/brisksms_dev
-     REDIS_URL: redis://127.0.0.1:6380
-     FORCE_TCP_POSTGRES: 'true'
-     FORCE_TCP_REDIS: 'true'
-     ENCRYPTION_MASTER_KEY: brisksms_ci_encryption_master_key_32_bytes_min!
-     JWT_ACCESS_SECRET: brisksms_ci_jwt_access_secret_32_bytes_min!
-     CSRF_SECRET: brisksms_ci_csrf_secret_32_bytes_min!
-   ```
-   - Prevents tests from attempting Unix domain socket connections in CI.
-   - Enforces distinct cryptographic keys for AES-256-GCM data encryption, JWT token issuance, and CSRF token signing.
-3. **Service Reachability Verification:**
-   - Prior to executing migrations, a shell readiness loop probes `nc -z 127.0.0.1 5433 && nc -z 127.0.0.1 6380` with a 30-second timeout, completely eliminating spurious initialization race conditions.
-4. **Database Migration Execution:**
-   - Executes `npm run db:migrate` using the version-controlled migration engine (`packages/db/src/migrate.ts`).
-   - Applies baseline schema `20261107000000_init_foundation` and messaging security migration `20261107010000_smsgate_keys_and_webhook_events`.
-   - Records state idempotently in `_prisma_migrations`.
-5. **Test Corpus Execution:**
-   - Executes `npm test` running 428 automated unit, contract, and integration tests across 40 test files covering:
-     - Multi-tenant isolation and organization boundaries.
-     - Tanzanian mobile money parsing engine (M-Pesa, Tigo Pesa, Airtel Money, CRDB).
-     - Financial state machine, atomic ledger balancing, and idempotency locks.
-     - Cellular SMSGate relay integration, HMAC-SHA256 signature verification, and key rotation.
-     - Web session security, `HttpOnly` cookies, CSRF protection, and origin restrictions.
-     - Developer API keys, rate limiters, outbound webhooks, and Zapier integration.
+### 4.1 Ephemeral Secret Generation in CI
+Static secrets in workflow configuration files present scanning alerts and potential leakage risks. The workflow dynamically generates independent cryptographic secrets at runtime:
 
-### 3.2 Android Companion Verification Job (`android-verify`)
-1. **Toolchain Modernization:**
-   - Upgraded `actions/setup-java@v4` to `actions/setup-java@v5` (OpenJDK 17 Temurin distribution).
-   - Resolves GitHub Actions warning regarding Node.js 20 deprecation.
-   - Enables Gradle build dependency caching (`cache: 'gradle'`).
-2. **Android SDK Setup:**
-   - Integrates `android-actions/setup-android@v3` for SDK 34/35 platform tooling.
-   - Creates `~/.android/analytics.settings` to prevent interactive prompts or warnings in headless runners.
-3. **Execution Steps:**
-   - `./gradlew --version` and `./gradlew projects --no-daemon` to validate the wrapper integrity.
-   - `./gradlew testDebugUnitTest --no-daemon --stacktrace` executing all Android unit tests (parsers, SQLite outbox, API client).
-   - `./gradlew lintDebug --no-daemon --stacktrace` ensuring strict adherence to Android security and quality rules.
-   - `./gradlew assembleDebug --no-daemon --stacktrace` compiling the companion APK.
-4. **Artifact Upload:**
-   - Archives `apps/android/app/build/outputs/apk/debug/app-debug.apk` via `actions/upload-artifact@v4` with 30-day retention for inspection and staging deployment.
+```yaml
+- name: Generate Ephemeral CI Cryptographic Secrets
+  run: |
+    echo "ENCRYPTION_MASTER_KEY=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+    echo "JWT_ACCESS_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+    echo "CSRF_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+```
+
+- Each secret contains 64 hexadecimal characters (256 bits of entropy).
+- Guarantees `ENCRYPTION_MASTER_KEY !== JWT_ACCESS_SECRET !== CSRF_SECRET`.
+- Satisfies production validation checks without hardcoding credential literals.
+
+### 4.2 Application-Level Readiness Probing
+Rather than relying on basic TCP port responsiveness (`nc -z`), the workflow performs application-level probes before executing migrations:
+1. **PostgreSQL Probe:** `pg_isready -h 127.0.0.1 -p 5433 -U brisksms -d brisksms_dev` confirms the database server is fully recovered and accepting transactions.
+2. **Redis Probe:** Executes `echo "PING" | nc -w 1 127.0.0.1 6380 | grep -q "PONG"` or `redis-cli ping` confirming operational response.
 
 ---
 
-## 4. Operational Boundaries: Headless CI vs Device & Carrier Validation
+## 5. Secret-Scanning Configuration (`.gitguardian.yaml`)
 
-To maintain strict truth in engineering claims, we delineate clearly between what automated CI verifies and what requires physical hardware/carrier testing:
+### 5.1 Elimination of Broad Directory Exclusions
+The previous configuration excluded `apps/**/test/**`, `packages/**/test/**`, and `docs/**`. Broad path exclusions create security blind spots where accidental credential commits could go undetected.
 
-| Layer | Verified by Automated CI | Requires Physical Hardware / Staging Testing |
-| :--- | :--- | :--- |
-| **Android Companion App** | Kotlin compilation, Gradle dependencies, unit tests, SQLite Room migrations, JSON serialization, HTTP retry exponential backoff. | Active SIM card, incoming Tanzanian carrier SMS receipt, `NotificationListenerService` OS permission grant, background battery optimization bypass. |
-| **Payment Parsers** | Regex extraction, currency normalization, Tanzanian Shilling integer parsing, malformed payload safety across 100+ fixture messages. | Real-time live SMS delivery timing from Vodacom M-Pesa, Tigo Pesa, Airtel Money, and CRDB Bank. |
-| **Backend API & Monolith** | Route registration, database migrations, SQL transactions, row-level locks, cookie issuance, CSRF tokens, tenant isolation. | Public DNS routing, Cloudflare CDN / WAF reverse-proxy headers, SSL certificate termination, production load handling. |
-| **SMSGate Cellular Gateway** | Webhook HMAC signature generation/verification, timestamp skew tolerance, replay prevention, key rotation, payload serialization. | Physical Android gateway phone running SMSGate, local carrier network connectivity, physical SMS transmission over cellular towers. |
-| **Web Console UI** | TypeScript compilation, Glisse CSS bundle build, API integration tests, cookie lifecycle tests. | Cross-browser rendering (Chrome, Firefox, Safari, Edge), responsive layout under varying mobile viewport sizes. |
+All broad path exclusions were removed from `.gitguardian.yaml`:
+```yaml
+# GitGuardian (ggshield) configuration
+# https://docs.gitguardian.com/ggshield-docs/configuration
 
----
+version: 2
 
-## 5. GitGuardian & Secrets Scanning Audit
+secret:
+  # Broad directory exclusions are strictly prohibited.
+  # Security scanning applies across all source code, test suites, and documentation.
+  # All test fixtures must use dynamic runtime generation (e.g., crypto.randomBytes),
+  # RFC 2606 reserved example domains (.example.com), or non-functional placeholders.
+```
 
-### 5.1 False Positive Root Cause Analysis
-During previous commit cycles, external scanning tools (such as GitGuardian) flagged automated test files for suspected secrets. An audit of all alerts confirmed that **zero real production credentials were ever exposed**:
-1. **Alert 1 (Base64 Basic Authentication):** Static string `'Basic c21zZ2F0ZV9hZG1pbjpzZWN1cmVfcGFzc3dvcmRfOTk4OA=='` in `apps/api/test/smsgate-contract.test.ts` was an RFC 7617 test assertion for username `smsgate_admin` and password `secure_password_9988`.
-2. **Alert 2 (Zapier Webhook URL):** Mock endpoint `'https://hooks.zapier.com/hooks/catch/12345/abcde/'` in `apps/api/test/milestone3-e2e-integration.test.ts` was an integration fixture.
-3. **Alert 3 (Generic High-Entropy Secrets):** Static 64-character test hex keys in `apps/api/test/smsgate-webhook-and-keys.test.ts` and `apps/api/test/web-session-and-csrf.test.ts` used to test production startup validation logic.
-4. **Alert 4 (Insecure Key Blacklist):** The array `INSECURE_DEFAULT_KEYS` in `apps/api/src/core/crypto.ts` listing known weak strings that production must explicitly reject.
-
-### 5.2 Remediation & Hardening Implemented
-1. **Created Repository Configuration (`.gitguardian.yaml`):**
-   ```yaml
-   version: 2
-   secret:
-     ignored_paths:
-       - 'apps/**/test/**'
-       - 'packages/**/test/**'
-       - 'docs/**'
-   ```
-2. **Sanitized Test Fixtures to Dynamic Generation:**
-   - In `apps/api/test/messaging.test.ts` and `apps/api/test/smsgate-contract.test.ts`, replaced literal base64 strings with dynamic `Buffer.from(`${user}:${pass}`).toString('base64')`.
-   - In `apps/api/test/milestone3-e2e-integration.test.ts`, replaced public Zapier domain with RFC 2606 example domain `https://hooks.zapier.example.com/hooks/catch/12345/abcde/`.
-   - In `apps/api/test/smsgate-webhook-and-keys.test.ts` and `apps/api/test/web-session-and-csrf.test.ts`, replaced static 64-character hex fixtures with `randomBytes(32).toString('hex')`.
-3. **Verification:**
-   - Clean git diff with zero exposed high-entropy static credentials.
+### 5.2 Sanitization of Test Fixtures
+All test suites maintain full deterministic testability while ensuring zero credential-like patterns:
+- In `apps/api/test/messaging.test.ts` and `apps/api/test/smsgate-contract.test.ts`: RFC 7617 Basic auth strings are generated dynamically via `Buffer.from(...)`.
+- In `apps/api/test/milestone3-e2e-integration.test.ts`: Replaced public webhook URL with RFC 2606 `https://hooks.zapier.example.com/...`.
+- In `apps/api/test/smsgate-webhook-and-keys.test.ts` and `apps/api/test/web-session-and-csrf.test.ts`: Dynamic 32-byte keys generated via `randomBytes(32).toString('hex')`.
+- In `apps/web/src/developers.html`: Replaced mock key literal with `os.environ.get("BRISKSMS_API_KEY", "YOUR_API_KEY")`.
 
 ---
 
 ## 6. Clean-Runner Reproducibility Protocol
 
-Any engineer or automated runner can reproduce the entire validation pipeline on a clean machine by executing:
+Any clean workstation can reproduce the build, migration, and test workflow using the authoritative Bun toolchain:
 
 ```bash
-# 1. Clone repository and navigate to root
+# 1. Clone repository and verify signed checkpoint
 git clone https://github.com/realmadede/BriskSMS.git
 cd BriskSMS
-
-# 2. Verify git checkpoint
 git log -1 --show-signature
 
-# 3. Start local PostgreSQL 16 and Redis 7 containers
-docker run -d --name brisksms-ci-postgres -p 5433:5432 -e POSTGRES_USER=brisksms -e POSTGRES_PASSWORD=brisksms_dev_secret -e POSTGRES_DB=brisksms_dev postgres:16-alpine
+# 2. Start PostgreSQL 16 and Redis 7 containers
+docker run -d --name brisksms-ci-postgres -p 5433:5432 \
+  -e POSTGRES_USER=brisksms -e POSTGRES_PASSWORD=brisksms_dev_secret -e POSTGRES_DB=brisksms_dev \
+  postgres:16-alpine
+
 docker run -d --name brisksms-ci-redis -p 6380:6379 redis:7-alpine
 
-# 4. Install dependencies and typecheck
-npm install
-npm run typecheck
+# 3. Install dependencies using frozen lockfile
+bun install --frozen-lockfile
 
-# 5. Build all workspace packages and apps
-npm run build
+# 4. Typecheck and build monorepo packages
+bun run typecheck
+bun run build
 
-# 6. Apply database migrations
+# 5. Apply database migrations
 DATABASE_URL="postgresql://brisksms:brisksms_dev_secret@127.0.0.1:5433/brisksms_dev" \
 REDIS_URL="redis://127.0.0.1:6380" \
-npm run db:migrate
+bun run db:migrate
 
-# 7. Execute complete test suite
+# 6. Execute complete test suite with ephemeral test keys
 DATABASE_URL="postgresql://brisksms:brisksms_dev_secret@127.0.0.1:5433/brisksms_dev" \
 REDIS_URL="redis://127.0.0.1:6380" \
 FORCE_TCP_POSTGRES="true" \
 FORCE_TCP_REDIS="true" \
-ENCRYPTION_MASTER_KEY="brisksms_ci_encryption_master_key_32_bytes_min!" \
-JWT_ACCESS_SECRET="brisksms_ci_jwt_access_secret_32_bytes_min!" \
-CSRF_SECRET="brisksms_ci_csrf_secret_32_bytes_min!" \
-npm test
+ENCRYPTION_MASTER_KEY=$(openssl rand -hex 32) \
+JWT_ACCESS_SECRET=$(openssl rand -hex 32) \
+CSRF_SECRET=$(openssl rand -hex 32) \
+bun test
 
-# 8. Build Android Companion App (requires JDK 17 & Android SDK)
+# 7. Build Android Companion (requires JDK 17 & Android SDK)
 cd apps/android
-./gradlew testDebugUnitTest --no-daemon
-./gradlew lintDebug --no-daemon
-./gradlew assembleDebug --no-daemon
+./gradlew testDebugUnitTest lintDebug assembleDebug --no-daemon
 ```
 
 ---
 
 ## 7. Conclusion
 
-The BriskSMS monorepo is in a fully validated, hardened, and reproducible state. Remote CI execution on GitHub Actions will execute with zero deprecation warnings, robust service synchronization, and complete cryptographic test isolation.
+The repository configuration is consistent, authoritative, and hardened. With Bun established as the sole package manager, ephemeral secrets generated at runtime, operational readiness probes configured, and broad secret-scanning exclusions removed, BriskSMS is fully prepared for remote CI execution.

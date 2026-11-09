@@ -789,8 +789,8 @@ describe('Web Console Session Security & CSRF Protection', () => {
 
       try {
         process.env.NODE_ENV = 'production';
-        process.env.JWT_ACCESS_SECRET = 'shared_jwt_secret_must_not_be_reused_32chars!';
-        process.env.ENCRYPTION_MASTER_KEY = 'master_key_encryption_key_min_32_characters!';
+        process.env.JWT_ACCESS_SECRET = randomBytes(32).toString('hex');
+        process.env.ENCRYPTION_MASTER_KEY = randomBytes(32).toString('hex');
 
         // 1. Missing CSRF_SECRET fails closed
         delete process.env.CSRF_SECRET;
@@ -809,8 +809,9 @@ describe('Web Console Session Security & CSRF Protection', () => {
         assert.throws(() => getCsrfSecret(), /FATAL: CSRF_SECRET must be independently configured and not reuse ENCRYPTION_MASTER_KEY/);
 
         // 5. Independently configured secure key passes
-        process.env.CSRF_SECRET = 'independent_production_csrf_secret_min_32_chars!';
-        assert.equal(getCsrfSecret(), 'independent_production_csrf_secret_min_32_chars!');
+        const independentSecret = randomBytes(32).toString('hex');
+        process.env.CSRF_SECRET = independentSecret;
+        assert.equal(getCsrfSecret(), independentSecret);
       } finally {
         process.env.NODE_ENV = prevEnv;
         if (prevCsrf !== undefined) process.env.CSRF_SECRET = prevCsrf; else delete process.env.CSRF_SECRET;

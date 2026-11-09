@@ -1746,7 +1746,7 @@ const result: PaymentIngestResult = await client.payments.ingestRaw({
 console.log("Payment State: " + result.state);`,
         python: `from brisksms import BriskClient
 
-client = BriskClient(api_key="brk_live_9488291048291")
+client = BriskClient(api_key=os.environ.get("BRISKSMS_API_KEY", "YOUR_API_KEY"))
 
 response = await client.payments.ingest(
     device_id="dev_s23_relay_01",

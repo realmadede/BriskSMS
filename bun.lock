@@ -1,0 +1,129 @@
+{
+  "lockfileVersion": 2,
+  "configVersion": 0,
+  "workspaces": {
+    "": {
+      "name": "brisksms-monorepo",
+      "devDependencies": {
+        "@types/node": "^20.0.0",
+        "typescript": "^5.6.3",
+        "undici-types": "^6.20.0",
+      },
+    },
+    "apps/api": {
+      "name": "@brisksms/api",
+      "version": "1.0.0",
+      "dependencies": {
+        "@brisksms/db": "*",
+        "@brisksms/parser-engine": "*",
+        "@brisksms/shared": "*",
+        "@brisksms/worker": "*",
+      },
+      "devDependencies": {
+        "@types/node": "^20.0.0",
+        "undici-types": "^6.20.0",
+      },
+    },
+    "apps/web": {
+      "name": "@brisksms/web",
+      "version": "1.0.0",
+      "dependencies": {
+        "@brisksms/shared": "*",
+        "@brisksms/ui": "*",
+      },
+      "devDependencies": {
+        "@types/node": "^20.0.0",
+        "undici-types": "^6.20.0",
+      },
+    },
+    "apps/worker": {
+      "name": "@brisksms/worker",
+      "version": "1.0.0",
+      "dependencies": {
+        "@brisksms/db": "*",
+        "@brisksms/shared": "*",
+      },
+      "devDependencies": {
+        "@types/node": "^20.0.0",
+        "typescript": "^5.4.0",
+      },
+    },
+    "packages/config": {
+      "name": "@brisksms/config",
+      "version": "1.0.0",
+    },
+    "packages/db": {
+      "name": "@brisksms/db",
+      "version": "1.0.0",
+      "dependencies": {
+        "@brisksms/shared": "*",
+      },
+      "devDependencies": {
+        "@brisksms/config": "*",
+      },
+    },
+    "packages/parser-engine": {
+      "name": "@brisksms/parser-engine",
+      "version": "1.0.0",
+      "dependencies": {
+        "@brisksms/shared": "*",
+      },
+      "devDependencies": {
+        "@brisksms/config": "*",
+      },
+    },
+    "packages/shared": {
+      "name": "@brisksms/shared",
+      "version": "1.0.0",
+      "devDependencies": {
+        "@brisksms/config": "*",
+      },
+    },
+    "packages/ui": {
+      "name": "@brisksms/ui",
+      "version": "1.0.0",
+      "devDependencies": {
+        "@brisksms/config": "*",
+      },
+    },
+    "packages/zapier-app": {
+      "name": "@brisksms/zapier-app",
+      "version": "1.0.0",
+      "dependencies": {
+        "@brisksms/shared": "*",
+      },
+      "devDependencies": {
+        "@brisksms/config": "*",
+        "@types/node": "^20.0.0",
+        "undici-types": "^6.20.0",
+      },
+    },
+  },
+  "packages": {
+    "@brisksms/api": ["@brisksms/api@workspace:apps/api"],
+
+    "@brisksms/config": ["@brisksms/config@workspace:packages/config"],
+
+    "@brisksms/db": ["@brisksms/db@workspace:packages/db"],
+
+    "@brisksms/parser-engine": ["@brisksms/parser-engine@workspace:packages/parser-engine"],
+
+    "@brisksms/shared": ["@brisksms/shared@workspace:packages/shared"],
+
+    "@brisksms/ui": ["@brisksms/ui@workspace:packages/ui"],
+
+    "@brisksms/web": ["@brisksms/web@workspace:apps/web"],
+
+    "@brisksms/worker": ["@brisksms/worker@workspace:apps/worker"],
+
+    "@brisksms/zapier-app": ["@brisksms/zapier-app@workspace:packages/zapier-app"],
+
+    "@types/node": ["@types/node@20.19.43", "", { "dependencies": { "undici-types": "~6.21.0" } }, "sha512-6oYBAi5ikg4Pl+kGsoYtawUMBT2zZMCvPNF7pVLnHZfd1zf38DRiWn/gT01RYCdUqkv7Fhr+C9ot4/tb+2sVvA=="],
+
+    "typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
+
+    "undici-types": ["undici-types@6.29.1", "", {}, "sha512-8ewZRMhr1pEZVOUITV/cBrtH8iz6juS76jNqam5zXA1LQuTjM5CcidoAEIp8u+3OJc7EWKfMhW7CBD2xJJVh4A=="],
+
+    "@types/node/undici-types": ["undici-types@6.21.0", "", {}, "sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ=="],
+  }
+}

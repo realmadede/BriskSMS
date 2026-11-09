@@ -4,7 +4,8 @@
 version: 2
 
 secret:
-  ignored_paths:
-    - 'apps/**/test/**'
-    - 'packages/**/test/**'
-    - 'docs/**'
+  # Broad directory exclusions (e.g., ignoring entire test or documentation folders)
+  # are strictly prohibited to prevent blind spots for credential exposure.
+  # Security scanning applies across all source code, test suites, and documentation.
+  # All test fixtures must use dynamic runtime generation (e.g., crypto.randomBytes),
+  # RFC 2606 reserved example domains (.example.com), or non-functional placeholders.
