@@ -641,11 +641,379 @@ export async function processSmsDeliveryRetryJob(
   return { status: SmsStatus.SUBMITTED, refunded: false };
 }
 
+/** Bounded so the durable dispatch lease (60s) always outlives a healthy request. */
+const SMSGATE_DEFINITIVE_REJECTION_STATUSES = new Set([400, 401, 403, 404, 413, 422, 429]);
+const DISPATCH_LEASE_SECONDS = 60;
+
 /**
- * Orchestrates all BriskSMS background workers, outbox polling, and Redis heartbeats.
+ * Sweeps expired DISPATCHING leases and transitions them to UNCERTAIN.
+ * Safe to execute concurrently from any number of workers.
+ */
+export async function expireDispatchLeases(recordId?: string): Promise<number> {
+  const expired = await sql<Record<string, any>>`
+    WITH expired AS (
+      UPDATE message_idempotency_records
+      SET status = 'UNCERTAIN', updated_at = NOW()
+      WHERE status = 'DISPATCHING'
+        AND lease_expires_at < NOW()
+        AND (${recordId ?? null}::uuid IS NULL OR id = ${recordId ?? null}::uuid)
+      RETURNING message_id
+    )
+    UPDATE sms_messages
+    SET last_error = 'GATEWAY_UNCERTAIN: dispatch lease expired before the gateway outcome was recorded',
+        updated_at = NOW()
+    WHERE id IN (SELECT message_id FROM expired)
+    RETURNING id
+  `;
+  return expired.length;
+}
+
+/**
+ * Surfaces unresolved UNCERTAIN operations for operational audit and manual settlement.
+ */
+export async function listUncertainDispatches(organizationId: string): Promise<
+  Array<{ idempotencyKey: string; messageId: string; recipientPhone: string; lastError: string | null; since: Date }>
+> {
+  const rows = await sql<Record<string, any>>`
+    SELECT r.idempotency_key, r.message_id, r.updated_at, m.recipient_phone, m.last_error
+    FROM message_idempotency_records r
+    JOIN sms_messages m ON m.id = r.message_id AND m.organization_id = r.organization_id
+    WHERE r.organization_id = ${organizationId} AND r.status = 'UNCERTAIN'
+    ORDER BY r.updated_at ASC
+  `;
+  return rows.map((r) => ({
+    idempotencyKey: r.idempotency_key,
+    messageId: r.message_id,
+    recipientPhone: r.recipient_phone,
+    lastError: r.last_error,
+    since: new Date(r.updated_at),
+  }));
+}
+
+/**
+ * Recovers stale PENDING message dispatches (gateway never contacted) and expires stale leases.
+ * Multi-worker safe: uses PostgreSQL compare-and-set to guarantee exactly one worker wins each claim.
+ */
+export async function defaultRecoverStaleDispatches(
+  options: { pendingGraceSeconds?: number; limit?: number } = {},
+  customFetch?: CustomFetchHandler,
+): Promise<{ expiredToUncertain: number; resumed: number }> {
+  const expiredToUncertain = await expireDispatchLeases();
+  const graceSeconds = options.pendingGraceSeconds ?? 60;
+  const limit = options.limit ?? 50;
+
+  const stale = await sql<Record<string, any>>`
+    SELECT * FROM message_idempotency_records
+    WHERE status = 'PENDING' AND message_id IS NOT NULL
+      AND created_at < NOW() - (${graceSeconds}::int * INTERVAL '1 second')
+    ORDER BY created_at ASC
+    LIMIT ${limit}
+  `;
+
+  let resumed = 0;
+  for (const row of stale) {
+    const claimant = `worker_${process.pid}_${randomUUID()}`;
+    // Atomic CAS claim: only one worker or API process can win
+    const claimedRows = await sql<Record<string, any>>`
+      UPDATE message_idempotency_records
+      SET status = 'DISPATCHING',
+          claimed_by = ${claimant},
+          lease_expires_at = NOW() + (${DISPATCH_LEASE_SECONDS}::int * INTERVAL '1 second'),
+          dispatch_started_at = NOW(),
+          updated_at = NOW()
+      WHERE id = ${row.id} AND status = 'PENDING'
+      RETURNING *
+    `;
+
+    if (claimedRows.length === 0) {
+      continue; // Won by another worker or retry
+    }
+
+    const claimed = claimedRows[0]!;
+    const messageRows = await sql<Record<string, any>>`
+      SELECT * FROM sms_messages
+      WHERE id = ${claimed.message_id} AND organization_id = ${claimed.organization_id}
+      LIMIT 1
+    `;
+    const acctRows = await sql<Record<string, any>>`
+      SELECT * FROM messaging_accounts
+      WHERE organization_id = ${claimed.organization_id}
+      LIMIT 1
+    `;
+
+    if (messageRows.length === 0 || acctRows.length === 0 || !acctRows[0]!.encrypted_api_token) {
+      logger.error('Cannot resume dispatch: message or gateway credentials missing', {
+        recordId: claimed.id,
+        organizationId: claimed.organization_id,
+      });
+      continue;
+    }
+
+    const msg = messageRows[0]!;
+    const acct = acctRows[0]!;
+
+    let authHeader = '';
+    try {
+      const rawAuth = acct.encrypted_api_token;
+      if (rawAuth.startsWith('{')) {
+        const parsedAuth = JSON.parse(rawAuth);
+        if (parsedAuth.type === 'BASIC') {
+          authHeader = `Basic ${Buffer.from(`${parsedAuth.username}:${parsedAuth.password}`).toString('base64')}`;
+        } else {
+          authHeader = `Bearer ${parsedAuth.token}`;
+        }
+      } else {
+        authHeader = `Bearer ${rawAuth}`;
+      }
+    } catch {
+      authHeader = `Bearer ${acct.encrypted_api_token}`;
+    }
+
+    const endpoint = (acct.gateway_base_url || 'https://api.sms-gate.app/3rdparty/v1').replace(/\/+$/, '') + '/messages';
+    const requestBody = {
+      phoneNumbers: [msg.recipient_phone],
+      textMessage: { text: msg.message_text },
+      simNumber: Number(msg.sim_slot || 1),
+      withDeliveryReport: true,
+    };
+
+    let outcome: 'COMPLETED' | 'FAILED' | 'UNCERTAIN';
+    let providerMessageId: string | null = null;
+    let errorText: string | null = null;
+    let rawResponseObj: Record<string, any> | null = null;
+
+    try {
+      let respStatus = 200;
+      let respOk = true;
+      let respText = '';
+      let respJson: any = null;
+
+      if (customFetch) {
+        const res = await customFetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: authHeader,
+            'X-Idempotency-Key': claimed.idempotency_key,
+          },
+          body: JSON.stringify(requestBody),
+        });
+        respStatus = res.status;
+        respOk = res.ok;
+      } else {
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: authHeader,
+            'X-Idempotency-Key': claimed.idempotency_key,
+          },
+          body: JSON.stringify(requestBody),
+          redirect: 'error',
+          signal: AbortSignal.timeout(15_000),
+        });
+        respStatus = response.status;
+        respOk = response.ok;
+        if (respOk) {
+          try {
+            respJson = await response.json();
+          } catch {
+            respOk = false;
+            respText = 'Unparseable JSON body';
+          }
+        } else {
+          respText = await response.text();
+        }
+      }
+
+      if (respOk) {
+        outcome = 'COMPLETED';
+        providerMessageId =
+          (respJson?.id as string) ||
+          (respJson?.messageId as string) ||
+          `msg_${Date.now()}`;
+        rawResponseObj = respJson;
+      } else {
+        // BriskSMS policy: HTTP 400, 401, 403, 404, 413, 422, 429 are definitive rejections.
+        // HTTP 408, 409, 5xx, timeouts, resets are UNCERTAIN. Never refunded blindly, never re-dispatched.
+        const definitive = SMSGATE_DEFINITIVE_REJECTION_STATUSES.has(respStatus);
+        outcome = definitive ? 'FAILED' : 'UNCERTAIN';
+        errorText = definitive
+          ? respText || `Gateway rejected request with HTTP ${respStatus}`
+          : `GATEWAY_UNCERTAIN: HTTP ${respStatus} - ${respText || 'unknown status'}`;
+        rawResponseObj = { statusCode: respStatus, error: respText, uncertain: !definitive };
+      }
+    } catch (err: unknown) {
+      outcome = 'UNCERTAIN';
+      errorText = `GATEWAY_UNCERTAIN: ${err instanceof Error ? err.message : String(err)}`;
+      rawResponseObj = { error: errorText, uncertain: true };
+    }
+
+    const now = new Date();
+    const smsStatus =
+      outcome === 'COMPLETED' ? SmsStatus.SUBMITTED : outcome === 'FAILED' ? SmsStatus.FAILED : SmsStatus.QUEUED;
+    const finalProviderId = outcome === 'UNCERTAIN' ? null : providerMessageId;
+
+    await withTransaction(async (tx) => {
+      const settled = await tx<Record<string, any>>`
+        UPDATE message_idempotency_records
+        SET status = ${outcome},
+            response_payload = ${JSON.stringify({
+              messageId: msg.id,
+              status: smsStatus,
+              recipientPhone: msg.recipient_phone,
+              costCredits: Number(msg.cost_credits || 1),
+              outcome,
+            })}::jsonb,
+            updated_at = ${now}
+        WHERE id = ${claimed.id}
+          AND claimed_by = ${claimant}
+          AND status IN ('DISPATCHING', 'UNCERTAIN')
+        RETURNING id
+      `;
+
+      if (settled.length === 0) return;
+
+      await tx`
+        UPDATE sms_messages
+        SET status = ${smsStatus}::"SmsStatus",
+            provider_message_id = ${finalProviderId},
+            last_error = ${errorText},
+            updated_at = ${now}
+        WHERE id = ${msg.id} AND organization_id = ${claimed.organization_id}
+      `;
+
+      await tx`
+        INSERT INTO sms_delivery_attempts (
+          id, organization_id, message_id, attempt_number, gateway_provider,
+          provider_message_id, status, error_message, raw_response, attempted_at
+        ) VALUES (
+          ${randomUUID()}, ${claimed.organization_id}, ${msg.id}, 1, ${msg.gateway_provider},
+          ${finalProviderId}, ${smsStatus}::"SmsStatus", ${errorText},
+          ${rawResponseObj ? JSON.stringify(rawResponseObj) : null}::jsonb, ${now}
+        )
+      `;
+
+      if (outcome === 'FAILED') {
+        const costCredits = Number(msg.cost_credits || 1);
+        const acctUpdate = await tx<Record<string, any>>`
+          SELECT credit_balance FROM messaging_accounts
+          WHERE organization_id = ${claimed.organization_id}
+          FOR UPDATE
+        `;
+        if (acctUpdate.length > 0) {
+          const nextBal = Number(acctUpdate[0]!.credit_balance) + costCredits;
+          await tx`
+            UPDATE messaging_accounts
+            SET credit_balance = ${nextBal}, updated_at = ${now}
+            WHERE organization_id = ${claimed.organization_id}
+          `;
+          await tx`
+            INSERT INTO messaging_credit_ledger (
+              id, organization_id, entry_type, amount_credits, balance_after, reference_id, created_at
+            ) VALUES (
+              ${randomUUID()}, ${claimed.organization_id}, ${CreditLedgerEntryType.REFUND}::"CreditLedgerEntryType",
+              ${costCredits}, ${nextBal}, ${`refund_${msg.id}`}, ${now}
+            )
+            ON CONFLICT (organization_id, reference_id) DO NOTHING
+          `;
+        }
+      }
+    });
+
+    resumed++;
+  }
+
+  return { expiredToUncertain, resumed };
+}
+
+export interface DispatchRecoveryOptions {
+  intervalMs?: number;
+  pendingGraceSeconds?: number;
+  limit?: number;
+  recoveryHandler?: (options?: { pendingGraceSeconds?: number; limit?: number }) => Promise<{
+    expiredToUncertain: number;
+    resumed: number;
+  }>;
+}
+
+/**
+ * Periodically executes single-message dispatch recovery for stale PENDING operations and expired leases.
+ * Multi-worker safe: uses PostgreSQL atomic compare-and-set to guarantee exactly-once dispatch claim.
+ */
+export class DispatchRecoveryRunner {
+  private intervalTimer: ReturnType<typeof setInterval> | null = null;
+  public readonly intervalMs: number;
+  public readonly pendingGraceSeconds: number;
+  public readonly limit: number;
+  private readonly recoveryHandler: (options?: { pendingGraceSeconds?: number; limit?: number }) => Promise<{
+    expiredToUncertain: number;
+    resumed: number;
+  }>;
+  private isRunning: boolean = false;
+
+  constructor(
+    options?: DispatchRecoveryOptions,
+    customFetch?: CustomFetchHandler,
+  ) {
+    this.intervalMs = options?.intervalMs ?? parseInt(process.env.DISPATCH_RECOVERY_INTERVAL_MS || '10000', 10);
+    this.pendingGraceSeconds = options?.pendingGraceSeconds ?? parseInt(process.env.DISPATCH_PENDING_GRACE_SECONDS || '60', 10);
+    this.limit = options?.limit ?? 50;
+    this.recoveryHandler = options?.recoveryHandler ?? ((opts) => defaultRecoverStaleDispatches(opts, customFetch));
+  }
+
+  public async runOnce(): Promise<{ expiredToUncertain: number; resumed: number }> {
+    if (this.isRunning) {
+      return { expiredToUncertain: 0, resumed: 0 };
+    }
+    this.isRunning = true;
+    try {
+      const result = await this.recoveryHandler({
+        pendingGraceSeconds: this.pendingGraceSeconds,
+        limit: this.limit,
+      });
+      if (result.expiredToUncertain > 0 || result.resumed > 0) {
+        logger.info('Dispatch recovery cycle executed', {
+          expiredToUncertain: result.expiredToUncertain,
+          resumed: result.resumed,
+        });
+      }
+      return result;
+    } catch (err: unknown) {
+      logger.error('Dispatch recovery execution failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    } finally {
+      this.isRunning = false;
+    }
+  }
+
+  public start(): void {
+    if (this.intervalTimer) return;
+    this.intervalTimer = setInterval(() => {
+      this.runOnce().catch(() => {});
+    }, this.intervalMs);
+    logger.info('Dispatch recovery runner scheduled', {
+      intervalMs: this.intervalMs,
+      pendingGraceSeconds: this.pendingGraceSeconds,
+    });
+  }
+
+  public stop(): void {
+    if (this.intervalTimer) {
+      clearInterval(this.intervalTimer);
+      this.intervalTimer = null;
+    }
+  }
+}
+
+/**
+ * Orchestrates all BriskSMS background workers, outbox polling, Redis heartbeats, and dispatch recovery.
  */
 export class BriskWorkerRuntime {
   public readonly outboxDispatcher = new OutboxDispatcher();
+  public readonly dispatchRecoveryRunner: DispatchRecoveryRunner;
   public readonly webhookWorker: BullWorker<WebhookDeliveryJobData>;
   public readonly campaignWorker: BullWorker<SmsCampaignJobData>;
   public readonly maintenanceWorker: BullWorker<MaintenanceCleanupJobData>;
@@ -654,7 +1022,9 @@ export class BriskWorkerRuntime {
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   public readonly workerId = `worker_${process.pid}_${randomUUID().slice(0, 8)}`;
 
-  constructor(customFetch?: CustomFetchHandler) {
+  constructor(customFetch?: CustomFetchHandler, recoveryOptions?: DispatchRecoveryOptions) {
+    this.dispatchRecoveryRunner = new DispatchRecoveryRunner(recoveryOptions, customFetch);
+
     this.webhookWorker = new BullWorker<WebhookDeliveryJobData>(
       QUEUE_NAMES.WEBHOOK_DELIVERY,
       async (job) => {
@@ -720,19 +1090,22 @@ export class BriskWorkerRuntime {
     }, 5000);
 
     this.outboxDispatcher.start(1000);
+    this.dispatchRecoveryRunner.start();
     this.webhookWorker.start();
     this.campaignWorker.start();
     this.maintenanceWorker.start();
     this.paymentWorker.start();
     this.retryWorker.start();
 
-    logger.info('BriskSMS background worker runtime started (all 5 queues active)', {
+    logger.info('BriskSMS background worker runtime started (all 5 queues active, dispatch recovery active)', {
       workerId: this.workerId,
+      recoveryIntervalMs: this.dispatchRecoveryRunner.intervalMs,
     });
   }
 
   public async stop(): Promise<void> {
     this.outboxDispatcher.stop();
+    this.dispatchRecoveryRunner.stop();
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;

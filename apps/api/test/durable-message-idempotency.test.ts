@@ -16,6 +16,7 @@ import { MessagingService } from '../src/modules/messaging/messaging.service.js'
 import { MessagingProvider } from '../src/modules/messaging/interfaces/messaging-provider.interface.js';
 import { HttpException } from '../src/core/http.js';
 import { SmsGateProvider } from '../src/modules/messaging/providers/smsgate.provider.js';
+import { BriskWorkerRuntime } from '@brisksms/worker';
 
 describe('Durable Message Dispatch Idempotency & Gateway Outcome Reconciliation', () => {
   let orgId: string;
@@ -649,5 +650,149 @@ describe('Durable Message Dispatch Idempotency & Gateway Outcome Reconciliation'
     assert.equal(await run(async () => { throw new Error('ECONNRESET'); }), 'UNCERTAIN');
     assert.equal(await run(async () => { const e = new Error('timed out'); e.name = 'TimeoutError'; throw e; }), 'UNCERTAIN');
     assert.equal(await run(async () => new Response('not json', { status: 200 })), 'UNCERTAIN', '2xx with unreadable body is uncertain');
+  });
+
+  it('17. Recovery worker automatic scheduling: BriskWorkerRuntime periodically recovers stale PENDING operations without client retries', async () => {
+    const svc = new MessagingService(mockGatewayProvider);
+    const key = `worker_sched_${Date.now()}`;
+    await svc.reserveDispatch(orgId, key, 'dummy_fingerprint', {
+      to: '+255754111222',
+      content: 'Hello worker',
+      simSlot: 1,
+    });
+    // Stale PENDING in PostgreSQL (gateway never contacted)
+    await sql`
+      UPDATE message_idempotency_records
+      SET created_at = NOW() - INTERVAL '120 seconds', updated_at = NOW() - INTERVAL '120 seconds'
+      WHERE organization_id = ${orgId} AND idempotency_key = ${key}
+    `;
+
+    let customFetchCalls = 0;
+    const runtime = new BriskWorkerRuntime(
+      async () => {
+        customFetchCalls++;
+        return { status: 200, ok: true };
+      },
+      { intervalMs: 50, pendingGraceSeconds: 5 },
+    );
+
+    const cycleResult = await runtime.dispatchRecoveryRunner.runOnce();
+    assert.equal(cycleResult.resumed, 1);
+    assert.equal(customFetchCalls, 1);
+
+    const rec = await svc.getIdempotencyRecord(orgId, key);
+    assert.equal(rec?.status, 'COMPLETED');
+    const msg = await svc.getMessageById(orgId, rec!.messageId!);
+    assert.equal(msg?.status, SmsStatus.SUBMITTED);
+  });
+
+  it('18. Recovery works across worker restart: cold boot resumes from PostgreSQL state', async () => {
+    const svc = new MessagingService(mockGatewayProvider);
+    const key = `worker_restart_${Date.now()}`;
+    await svc.reserveDispatch(orgId, key, 'dummy_fingerprint', {
+      to: '+255754999888',
+      content: 'Cold reboot message',
+      simSlot: 1,
+    });
+    await sql`
+      UPDATE message_idempotency_records
+      SET created_at = NOW() - INTERVAL '120 seconds'
+      WHERE organization_id = ${orgId} AND idempotency_key = ${key}
+    `;
+
+    // Simulate worker 1 dying
+    const worker1 = new BriskWorkerRuntime(async () => ({ status: 200, ok: true }));
+    await worker1.stop(); // Worker 1 shut down before running recovery
+
+    // Simulate worker 2 starting from fresh process context
+    let worker2Dispatched = false;
+    const worker2 = new BriskWorkerRuntime(async () => {
+      worker2Dispatched = true;
+      return { status: 200, ok: true };
+    });
+
+    const result = await worker2.dispatchRecoveryRunner.runOnce();
+    assert.equal(result.resumed, 1);
+    assert.equal(worker2Dispatched, true);
+
+    const rec = await svc.getIdempotencyRecord(orgId, key);
+    assert.equal(rec?.status, 'COMPLETED');
+  });
+
+  it('19. Multiple concurrent workers: atomic CAS prevents duplicate recovery and duplicate dispatches', async () => {
+    const svc = new MessagingService(mockGatewayProvider);
+    const keys: string[] = [];
+    for (let i = 0; i < 4; i++) {
+      const key = `race_worker_${Date.now()}_${i}`;
+      keys.push(key);
+      await svc.reserveDispatch(orgId, key, `fp_${i}`, {
+        to: `+25575400000${i}`,
+        content: `Race content ${i}`,
+        simSlot: 1,
+      });
+    }
+
+    for (const key of keys) {
+      await sql`
+        UPDATE message_idempotency_records
+        SET created_at = NOW() - INTERVAL '120 seconds'
+        WHERE organization_id = ${orgId} AND idempotency_key = ${key}
+      `;
+    }
+
+    let totalDispatches = 0;
+    const mockFetch = async () => {
+      totalDispatches++;
+      return { status: 200, ok: true };
+    };
+
+    const workerA = new BriskWorkerRuntime(mockFetch, { pendingGraceSeconds: 10 });
+    const workerB = new BriskWorkerRuntime(mockFetch, { pendingGraceSeconds: 10 });
+
+    const [resA, resB] = await Promise.all([
+      workerA.dispatchRecoveryRunner.runOnce(),
+      workerB.dispatchRecoveryRunner.runOnce(),
+    ]);
+
+    assert.equal(resA.resumed + resB.resumed, 4, 'Exactly 4 operations recovered across both workers');
+    assert.equal(totalDispatches, 4, 'Zero duplicate gateway dispatches between racing workers');
+  });
+
+  it('20. Gateway HTTP 409 Conflict is strictly classified as UNCERTAIN: never blindly refunded, never re-dispatched, visible in reconciliation', async () => {
+    const conflictGateway: MessagingProvider = {
+      ...mockGatewayProvider,
+      async sendMessage() {
+        dispatchCallCount++;
+        return {
+          providerMessageId: `conflicted_${Date.now()}`,
+          status: 'UNCERTAIN',
+          rawResponse: { statusCode: 409, error: 'Resource conflict: message already in-flight on gateway' },
+        };
+      },
+    };
+
+    const svc = new MessagingService(conflictGateway);
+    const key = `conflict_409_${Date.now()}`;
+    const msg = await svc.sendSingleMessage(orgId, sendInput(key));
+
+    assert.equal(msg.status, SmsStatus.QUEUED, 'Message remains QUEUED with no provider ID');
+    assert.equal(msg.providerMessageId, null);
+    assert.equal(dispatchCallCount, 1);
+
+    const rec = await svc.getIdempotencyRecord(orgId, key);
+    assert.equal(rec?.status, 'UNCERTAIN');
+
+    // Financial invariant: Credit remains deducted (NEVER refunded on 409)
+    const acct = await svc.getOrCreateAccount(orgId);
+    assert.equal(acct.creditBalance, 49, 'Credit is NOT refunded for UNCERTAIN outcome');
+
+    // Subsequent call returns original message without extra dispatch
+    const retryMsg = await svc.sendSingleMessage(orgId, sendInput(key));
+    assert.equal(retryMsg.id, msg.id);
+    assert.equal(dispatchCallCount, 1, 'Never re-dispatched');
+
+    // Operational visibility: surfaced for reconciliation
+    const uncertainList = await svc.listUncertainDispatches(orgId);
+    assert.equal(uncertainList.some((u) => u.idempotencyKey === key), true);
   });
 });
