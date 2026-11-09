@@ -332,7 +332,7 @@ fun PaymentIntelligenceScreen() {
                             Spacer(modifier = Modifier.height(4.dp))
 
                             // Decrypt or preview with sensitive mask
-                            val decrypted = encryptor.decrypt(item.rawPayload)
+                            val decrypted = encryptor.decryptPayload(item.rawPayload)
                             val displayText = maskSensitiveDigits(decrypted)
 
                             Text(

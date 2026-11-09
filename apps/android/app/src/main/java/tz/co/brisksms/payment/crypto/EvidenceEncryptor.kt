@@ -36,4 +36,8 @@ class EvidenceEncryptor(private val secureStorage: KeystoreSecureStorage) {
     fun isEncrypted(storedPayload: String): Boolean {
         return storedPayload.startsWith(ENCRYPTED_PREFIX)
     }
+
+    fun encrypt(rawPayload: String): String = encryptPayload(rawPayload)
+
+    fun decrypt(storedPayload: String): String = decryptPayload(storedPayload)
 }
