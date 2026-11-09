@@ -114,7 +114,7 @@ The lifecycle of every payment received by BriskSMS follows a strict, determinis
    - The payment remains in `VERIFIED`, while the action transitions to `FULFILLMENT_FAILED`. Fulfillment can be retried independently without affecting financial records.
 5. **Ledger Segregation (Product A vs Product B):**
    - **Product A (SaaS Subscriptions):** Tracked in `tenant_subscriptions` and `subscription_invoices`.
-   - **Product B (Bulk Messaging Credits):** Tracked in an append-only double-entry ledger `messaging_credit_ledger`:
+   - **Product B (Bulk Messaging Credits):** Tracked in an append-only immutable credit transaction ledger `messaging_credit_ledger`:
      ```sql
      CREATE TABLE messaging_credit_ledger (
        id UUID PRIMARY KEY,

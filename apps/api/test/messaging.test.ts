@@ -253,7 +253,7 @@ describe('Product B: BriskSMS Cellular Gateway & Messaging Engine', () => {
     });
   });
 
-  describe('3. Double-Entry Prepaid Credit Ledger & Accounting', () => {
+  describe('3. Append-Only Immutable Credit Transaction Ledger & ACID Accounting', () => {
     it('should record credit purchase and accurately track ledger balance', async () => {
       assert.equal(await messagingService.getCreditBalance(orgId), 0);
 
@@ -316,6 +316,25 @@ describe('Product B: BriskSMS Cellular Gateway & Messaging Engine', () => {
       const ledgers = await messagingService.listLedgerEntries(orgId);
       assert.equal(ledgers.length, 3); // 1. Purchase, 2. Usage deduction, 3. Refund
       assert.equal(ledgers[2]!.balanceAfter, 10);
+    });
+
+    it('should prevent duplicate refunds when refundCredits is called repeatedly with the same referenceId', async () => {
+      await messagingService.purchaseCredits(orgId, 10);
+      await messagingService.deductCredits(orgId, 2, 'ref_test_01');
+      assert.equal(await messagingService.getCreditBalance(orgId), 8);
+
+      const bal1 = await messagingService.refundCredits(orgId, 1, 'refund_test_01');
+      assert.equal(bal1, 9);
+      assert.equal(await messagingService.getCreditBalance(orgId), 9);
+
+      // Attempt duplicate refund with the exact same referenceId
+      const bal2 = await messagingService.refundCredits(orgId, 1, 'refund_test_01');
+      assert.equal(bal2, 9);
+      assert.equal(await messagingService.getCreditBalance(orgId), 9);
+
+      const ledgers = await messagingService.listLedgerEntries(orgId);
+      const refunds = ledgers.filter((l) => l.referenceId === 'refund_test_01');
+      assert.equal(refunds.length, 1);
     });
   });
 

@@ -143,7 +143,7 @@ Phase 8: Security Hardening, Penetration Testing & Production Launch
 ---
 
 ### Phase 5: BriskSMS Cellular Gateway & Bulk Messaging Engine (Product B)
-- **Objective:** Implement the commercial bulk messaging module with dual-mode cellular SIM gateway integration (Mode A: External Relay, Mode B: Managed BriskSMS Private Gateway on 24/7 VPS behind Cloudflare), multi-SIM slot routing, CSV/XLSX recipient ingestion, and double-entry prepaid credit accounting.
+- **Objective:** Implement the commercial bulk messaging module with dual-mode cellular SIM gateway integration (Mode A: External Relay, Mode B: Managed BriskSMS Private Gateway on 24/7 VPS behind Cloudflare), multi-SIM slot routing, CSV/XLSX recipient ingestion, and append-only immutable credit transaction ledger with ACID reservations.
 - **Dependencies:** Phase 1 (Organizations & RBAC) & Phase 2 (Entitlements).
 - **Deliverables:**
   - Internal provider boundary: `MessagingProvider` interface.
@@ -153,7 +153,7 @@ Phase 8: Security Hardening, Penetration Testing & Production Launch
   - Configurable recipient batch limit (default 1,000 recipients per campaign).
   - TCRA anti-spam curfew compliance: Automatic marketing broadcast lock between 20:00 and 07:00 EAT.
   - BullMQ carrier-pacing queue: Sliding-window rate limiter (1 SMS / 3 seconds per SIM) to prevent carrier anti-spam SIM blocks.
-  - Double-entry prepaid credit ledger (`messaging_credit_ledgers`) with atomic debits and delivery-failure refunds.
+  - Append-only immutable credit transaction ledger (`messaging_credit_ledger`) with atomic usage deductions and delivery-failure refunds.
 - **Tests:**
   - Mock gateway dispatch and failure retry tests.
   - CSV/XLSX upload parser test with malformed phone numbers and deduplication.

@@ -6,6 +6,7 @@ export interface SendMessageActionDto {
   recipientPhone: string;
   message: string;
   simSlot?: number;
+  idempotencyKey?: string;
 }
 
 export interface SendMessageActionResult {
@@ -47,6 +48,7 @@ export class DeveloperActionService {
       to: dto.recipientPhone,
       content: dto.message,
       simSlot: dto.simSlot ?? 1,
+      idempotencyKey: dto.idempotencyKey,
     });
 
     return {

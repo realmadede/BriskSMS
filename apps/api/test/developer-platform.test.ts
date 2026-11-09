@@ -468,5 +468,178 @@ describe('Developer Platform & Zapier Webhook Automation', () => {
       assert.equal(otherEntries.length, 1, 'Other organization ledger must remain untouched');
       assert.equal(otherEntries[0]?.referenceId, 'SEED_OTHER');
     });
+
+    it('validates Idempotency-Key format and rejects invalid formats with 400 VALIDATION_ERROR', async () => {
+      const keyResult = await apiKeyService.createApiKey(orgId, {
+        organizationId: orgId,
+        name: 'Idempotency Validation Key',
+        scopes: [ApiKeyScope.SMS_SEND],
+      });
+
+      const res = await makeRequest(
+        'POST',
+        '/v1/messages/send',
+        {
+          'x-api-key': keyResult.plainTextSecret,
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'invalid key with spaces and special chars @#$%',
+        },
+        { recipientPhone: '+255754000111', message: 'Test invalid key' },
+      );
+
+      assert.equal(res.statusCode, 400);
+      assert.equal(res.json?.error?.code, 'VALIDATION_ERROR');
+      assert.match(res.json?.error?.message, /Idempotency key must be between 1 and 80 characters/);
+    });
+
+    it('prevents duplicate SMS dispatch and credit deduction on repeated requests with same Idempotency-Key header', async () => {
+      const keyResult = await apiKeyService.createApiKey(orgId, {
+        organizationId: orgId,
+        name: 'Idempotency Test Key',
+        scopes: [ApiKeyScope.SMS_SEND],
+      });
+
+      const idempotencyKey = `idem_test_${Date.now()}_991`;
+
+      // 1. Initial request
+      const res1 = await makeRequest(
+        'POST',
+        '/v1/messages/send',
+        {
+          'x-api-key': keyResult.plainTextSecret,
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKey,
+        },
+        { recipientPhone: '+255754000111', message: 'Order #101 confirmed' },
+      );
+
+      assert.equal(res1.statusCode, 200);
+      assert.equal(res1.json?.success, true);
+      const messageId1 = res1.json?.data?.messageId;
+      assert.ok(messageId1);
+
+      const initialLedger = await messagingService.listLedgerEntries(orgId);
+      const deductions1 = initialLedger.filter((l) => l.referenceId === idempotencyKey);
+      assert.equal(deductions1.length, 1);
+
+      // 2. Duplicate retry with same idempotency key and identical body
+      const res2 = await makeRequest(
+        'POST',
+        '/v1/messages/send',
+        {
+          'x-api-key': keyResult.plainTextSecret,
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKey,
+        },
+        { recipientPhone: '+255754000111', message: 'Order #101 confirmed' },
+      );
+
+      assert.equal(res2.statusCode, 200);
+      assert.equal(res2.json?.success, true);
+      assert.equal(res2.json?.data?.messageId, messageId1, 'Must return identical messageId');
+
+      // Verify no duplicate deduction was created
+      const finalLedger = await messagingService.listLedgerEntries(orgId);
+      const deductions2 = finalLedger.filter((l) => l.referenceId === idempotencyKey);
+      assert.equal(deductions2.length, 1, 'Must not create duplicate deduction in ledger');
+    });
+
+    it('rejects duplicate request with 409 DUPLICATE_IDEMPOTENCY when same key is reused with different parameters', async () => {
+      const keyResult = await apiKeyService.createApiKey(orgId, {
+        organizationId: orgId,
+        name: 'Idempotency Conflict Key',
+        scopes: [ApiKeyScope.SMS_SEND],
+      });
+
+      const idempotencyKey = `idem_conflict_${Date.now()}`;
+
+      // 1. Initial request
+      const res1 = await makeRequest(
+        'POST',
+        '/v1/messages/send',
+        {
+          'x-api-key': keyResult.plainTextSecret,
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKey,
+        },
+        { recipientPhone: '+255754000111', message: 'Initial message' },
+      );
+      assert.equal(res1.statusCode, 200);
+
+      // 2. Conflicting request with same idempotency key but different content
+      const res2 = await makeRequest(
+        'POST',
+        '/v1/messages/send',
+        {
+          'x-api-key': keyResult.plainTextSecret,
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKey,
+        },
+        { recipientPhone: '+255754000111', message: 'Completely different content!' },
+      );
+
+      assert.equal(res2.statusCode, 409);
+      assert.equal(res2.json?.success, false);
+      assert.equal(res2.json?.error?.code, 'DUPLICATE_IDEMPOTENCY');
+      assert.match(res2.json?.error?.message, /different request parameters/);
+    });
+
+    it('isolates idempotency keys across organizations', async () => {
+      const otherOrgId = randomUUID();
+      await dbStore.seedOrganizationDirect({
+        id: otherOrgId,
+        name: 'Ngorongoro Safaris',
+        slug: `ngorongoro-${otherOrgId.slice(0, 8)}`,
+        countryCode: 'TZA',
+        timezone: 'Africa/Dar_es_Salaam',
+        planTier: 'BUSINESS',
+        isActive: true,
+      });
+      await messagingService.purchaseCredits(otherOrgId, 20, 'SEED_NGORONGORO');
+      await messagingService.updateGatewayConfig(otherOrgId, {
+        gatewayMode: GatewayMode.MANAGED_GATEWAY,
+        apiToken: 'enc_token_ngo_123',
+      });
+
+      const keyOrg1 = await apiKeyService.createApiKey(orgId, {
+        organizationId: orgId,
+        name: 'Org1 Key',
+        scopes: [ApiKeyScope.SMS_SEND],
+      });
+      const keyOrg2 = await apiKeyService.createApiKey(otherOrgId, {
+        organizationId: otherOrgId,
+        name: 'Org2 Key',
+        scopes: [ApiKeyScope.SMS_SEND],
+      });
+
+      const sharedKey = `shared_idem_${Date.now()}`;
+
+      // Org 1 sends with sharedKey
+      const res1 = await makeRequest(
+        'POST',
+        '/v1/messages/send',
+        {
+          'x-api-key': keyOrg1.plainTextSecret,
+          'Content-Type': 'application/json',
+          'Idempotency-Key': sharedKey,
+        },
+        { recipientPhone: '+255754000111', message: 'Org 1 message' },
+      );
+      assert.equal(res1.statusCode, 200);
+
+      // Org 2 sends with the same sharedKey
+      const res2 = await makeRequest(
+        'POST',
+        '/v1/messages/send',
+        {
+          'x-api-key': keyOrg2.plainTextSecret,
+          'Content-Type': 'application/json',
+          'Idempotency-Key': sharedKey,
+        },
+        { recipientPhone: '+255754000222', message: 'Org 2 message' },
+      );
+      assert.equal(res2.statusCode, 200);
+      assert.notEqual(res1.json?.data?.messageId, res2.json?.data?.messageId, 'Must be distinct messages for distinct tenants');
+    });
   });
 });

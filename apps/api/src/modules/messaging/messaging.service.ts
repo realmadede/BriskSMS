@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   GatewayMode,
   CreditLedgerEntryType,
@@ -25,6 +25,9 @@ import { MessagingProvider } from './interfaces/messaging-provider.interface.js'
 import { smsGateProvider } from './providers/smsgate.provider.js';
 import { recipientParserService } from './recipient-parser.service.js';
 import { HttpException } from '../../core/http.js';
+
+// Concurrency guard to coordinate simultaneous in-flight dispatches for identical idempotency keys
+const inFlightDispatches = new Set<string>();
 
 export interface CreateCampaignDto {
   name: string;
@@ -400,6 +403,7 @@ export class MessagingService {
     organizationId: string,
     amountCredits: number,
     referenceId?: string,
+    metadata?: Record<string, any>,
   ): Promise<number> {
     if (amountCredits <= 0) {
       throw new BriskError('MESSAGING_ERROR', 'Deduction amount must be greater than zero.');
@@ -414,6 +418,21 @@ export class MessagingService {
         FOR UPDATE
       `;
       const currentBalance = Number(rows[0]!.credit_balance);
+
+      // Idempotency: verify if this exact reference was already deducted
+      if (referenceId) {
+        const existing = await tx<Record<string, any>>`
+          SELECT id FROM messaging_credit_ledger
+          WHERE organization_id = ${organizationId}
+            AND reference_id = ${referenceId}
+            AND entry_type = ${CreditLedgerEntryType.USAGE_DEDUCTION}
+          LIMIT 1
+        `;
+        if (existing.length > 0) {
+          return currentBalance;
+        }
+      }
+
       if (currentBalance < amountCredits) {
         throw new InsufficientCreditsError(amountCredits, currentBalance);
       }
@@ -429,10 +448,10 @@ export class MessagingService {
 
       await tx`
         INSERT INTO messaging_credit_ledger (
-          id, organization_id, entry_type, amount_credits, balance_after, reference_id, created_at
+          id, organization_id, entry_type, amount_credits, balance_after, reference_id, metadata, created_at
         ) VALUES (
           ${randomUUID()}, ${organizationId}, ${CreditLedgerEntryType.USAGE_DEDUCTION},
-          ${amountCredits}, ${newBalance}, ${referenceId ?? null}, ${now}
+          ${amountCredits}, ${newBalance}, ${referenceId ?? null}, ${metadata ? JSON.stringify(metadata) : null}::jsonb, ${now}
         )
       `;
 
@@ -441,7 +460,7 @@ export class MessagingService {
   }
 
   /**
-   * Atomically refunds credits upon permanent delivery failure
+   * Atomically refunds credits upon permanent delivery failure (with duplicate refund protection)
    */
   async refundCredits(
     organizationId: string,
@@ -461,6 +480,21 @@ export class MessagingService {
         FOR UPDATE
       `;
       const currentBalance = Number(rows[0]!.credit_balance);
+
+      // Protection against duplicate refunds
+      if (referenceId) {
+        const existingRefund = await tx<Record<string, any>>`
+          SELECT id FROM messaging_credit_ledger
+          WHERE organization_id = ${organizationId}
+            AND reference_id = ${referenceId}
+            AND entry_type = ${CreditLedgerEntryType.REFUND}
+          LIMIT 1
+        `;
+        if (existingRefund.length > 0) {
+          return currentBalance;
+        }
+      }
+
       const newBalance = currentBalance + amountCredits;
       const now = new Date();
 
@@ -639,6 +673,51 @@ export class MessagingService {
   }
 
   /**
+   * Finds an existing dispatched message by organization and idempotency key
+   * Enforces request fingerprint consistency and returns the original message record
+   */
+  async findIdempotentMessage(
+    organizationId: string,
+    idempotencyKey: string,
+    expectedFingerprint?: string,
+  ): Promise<SmsMessageRecord | null> {
+    const rows = await sql<Record<string, any>>`
+      SELECT * FROM messaging_credit_ledger
+      WHERE organization_id = ${organizationId}
+        AND reference_id = ${idempotencyKey}
+        AND entry_type = ${CreditLedgerEntryType.USAGE_DEDUCTION}
+      ORDER BY created_at DESC
+      LIMIT 1
+    `;
+    if (rows.length === 0) {
+      return null;
+    }
+
+    const row = rows[0]!;
+    const metadata = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata;
+    if (expectedFingerprint && metadata?.fingerprint && metadata.fingerprint !== expectedFingerprint) {
+      throw new HttpException(
+        409,
+        'DUPLICATE_IDEMPOTENCY',
+        'Idempotency key was previously used with different request parameters',
+      );
+    }
+
+    if (metadata?.messageId) {
+      const msgs = await sql<Record<string, any>>`
+        SELECT * FROM sms_messages
+        WHERE id = ${metadata.messageId} AND organization_id = ${organizationId}
+        LIMIT 1
+      `;
+      if (msgs.length > 0) {
+        return this.mapMessageRow(msgs[0]!);
+      }
+    }
+
+    return null;
+  }
+
+  /**
    * Dispatches a single SMS message with credit deduction, delivery attempt persistence, and failure refund
    */
   async sendSingleMessage(
@@ -649,6 +728,7 @@ export class MessagingService {
       simSlot?: number;
       isPromotional?: boolean;
       campaignId?: string;
+      idempotencyKey?: string;
     },
   ): Promise<SmsMessageRecord> {
     if (!(await entitlementService.isFeatureEnabled(organizationId, FeatureKey.BULK_MESSAGING_ENABLED))) {
@@ -672,73 +752,126 @@ export class MessagingService {
       throw new BriskError('MESSAGING_ERROR', 'No cellular gateway token configured. Please connect a relay gateway first.');
     }
 
-    const idempotencyKey = randomUUID();
-    await this.deductCredits(organizationId, 1, idempotencyKey);
+    const effectiveSimSlot = payload.simSlot ?? account.defaultSimSlot;
+    const fingerprint = createHash('sha256')
+      .update(`${organizationId}:${normalizedPhone}:${payload.content}:${effectiveSimSlot}`)
+      .digest('hex');
 
-    const messageId = randomUUID();
-    const now = new Date();
+    const rawIdempotencyKey = payload.idempotencyKey?.trim();
+    if (rawIdempotencyKey) {
+      const existing = await this.findIdempotentMessage(organizationId, rawIdempotencyKey, fingerprint);
+      if (existing) {
+        return existing;
+      }
+    }
 
-    const dispatchPayload: MessageDispatchPayload = {
-      organizationId,
-      campaignId: payload.campaignId,
-      to: normalizedPhone,
-      content: payload.content,
-      idempotencyKey,
-      simSlot: payload.simSlot ?? account.defaultSimSlot,
-    };
+    const idempotencyKey = rawIdempotencyKey || randomUUID();
+    const inFlightKey = `${organizationId}:${idempotencyKey}`;
 
-    const credentials = {
-      mode: account.gatewayMode,
-      baseUrl: account.gatewayBaseUrl || 'https://gateway.brisksms.com/api/v1',
-      apiToken: account.encryptedApiToken,
-      defaultSimSlot: account.defaultSimSlot,
-    };
+    if (rawIdempotencyKey && inFlightDispatches.has(inFlightKey)) {
+      for (let i = 0; i < 20; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        if (!inFlightDispatches.has(inFlightKey)) break;
+      }
+      const settled = await this.findIdempotentMessage(organizationId, idempotencyKey, fingerprint);
+      if (settled) {
+        return settled;
+      }
+      throw new HttpException(
+        409,
+        'DUPLICATE_IDEMPOTENCY',
+        'Request with this idempotency key is currently being processed. Please retry shortly.',
+      );
+    }
 
-    let dispatchResult: MessageDispatchResult;
-    let errorMessage: string | null = null;
+    if (rawIdempotencyKey) {
+      inFlightDispatches.add(inFlightKey);
+    }
+
     try {
-      dispatchResult = await this.provider.sendMessage(credentials, dispatchPayload);
-    } catch (err: unknown) {
-      errorMessage = err instanceof Error ? err.message : String(err);
-      dispatchResult = {
-        providerMessageId: `fail_${Date.now()}_${randomUUID().slice(0, 8)}`,
-        status: 'FAILED',
-        rawResponse: { error: errorMessage },
+      if (rawIdempotencyKey) {
+        const existing = await this.findIdempotentMessage(organizationId, idempotencyKey, fingerprint);
+        if (existing) {
+          return existing;
+        }
+      }
+
+      const messageId = randomUUID();
+      await this.deductCredits(organizationId, 1, idempotencyKey, {
+        idempotencyKey,
+        fingerprint,
+        messageId,
+        recipientPhone: normalizedPhone,
+        simSlot: effectiveSimSlot,
+      });
+
+      const now = new Date();
+      const dispatchPayload: MessageDispatchPayload = {
+        organizationId,
+        campaignId: payload.campaignId,
+        to: normalizedPhone,
+        content: payload.content,
+        idempotencyKey,
+        simSlot: effectiveSimSlot,
       };
+
+      const credentials = {
+        mode: account.gatewayMode,
+        baseUrl: account.gatewayBaseUrl || 'https://gateway.brisksms.com/api/v1',
+        apiToken: account.encryptedApiToken,
+        defaultSimSlot: account.defaultSimSlot,
+      };
+
+      let dispatchResult: MessageDispatchResult;
+      let errorMessage: string | null = null;
+      try {
+        dispatchResult = await this.provider.sendMessage(credentials, dispatchPayload);
+      } catch (err: unknown) {
+        errorMessage = err instanceof Error ? err.message : String(err);
+        dispatchResult = {
+          providerMessageId: `fail_${Date.now()}_${randomUUID().slice(0, 8)}`,
+          status: 'FAILED',
+          rawResponse: { error: errorMessage },
+        };
+      }
+
+      const finalStatus = dispatchResult.status === 'DISPATCHED' ? SmsStatus.SUBMITTED : SmsStatus.FAILED;
+
+      const inserted = await sql<Record<string, any>>`
+        INSERT INTO sms_messages (
+          id, organization_id, campaign_id, recipient_phone, message_text,
+          status, cost_credits, sim_slot, provider_message_id, gateway_provider,
+          delivered_at, created_at, updated_at
+        ) VALUES (
+          ${messageId}, ${organizationId}, ${payload.campaignId ?? null}, ${normalizedPhone}, ${payload.content},
+          ${finalStatus}, 1, ${effectiveSimSlot}, ${dispatchResult.providerMessageId}, ${account.gatewayMode},
+          NULL, ${now}, ${now}
+        )
+        RETURNING *
+      `;
+
+      await sql`
+        INSERT INTO sms_delivery_attempts (
+          id, organization_id, message_id, attempt_number, gateway_provider,
+          provider_message_id, status, error_message, raw_response, attempted_at
+        ) VALUES (
+          ${randomUUID()}, ${organizationId}, ${messageId}, 1, ${account.gatewayMode},
+          ${dispatchResult.providerMessageId}, ${finalStatus}::"SmsStatus", ${errorMessage},
+          ${dispatchResult.rawResponse ? JSON.stringify(dispatchResult.rawResponse) : null}::jsonb,
+          ${now}
+        )
+      `;
+
+      if (dispatchResult.status === 'FAILED') {
+        await this.refundCredits(organizationId, 1, `refund_${messageId}`);
+      }
+
+      return this.mapMessageRow(inserted[0]!);
+    } finally {
+      if (rawIdempotencyKey) {
+        inFlightDispatches.delete(inFlightKey);
+      }
     }
-
-    const finalStatus = dispatchResult.status === 'DISPATCHED' ? SmsStatus.SUBMITTED : SmsStatus.FAILED;
-
-    const inserted = await sql<Record<string, any>>`
-      INSERT INTO sms_messages (
-        id, organization_id, campaign_id, recipient_phone, message_text,
-        status, cost_credits, sim_slot, provider_message_id, gateway_provider,
-        delivered_at, created_at, updated_at
-      ) VALUES (
-        ${messageId}, ${organizationId}, ${payload.campaignId ?? null}, ${normalizedPhone}, ${payload.content},
-        ${finalStatus}, 1, ${dispatchPayload.simSlot ?? 1}, ${dispatchResult.providerMessageId}, ${account.gatewayMode},
-        NULL, ${now}, ${now}
-      )
-      RETURNING *
-    `;
-
-    await sql`
-      INSERT INTO sms_delivery_attempts (
-        id, organization_id, message_id, attempt_number, gateway_provider,
-        provider_message_id, status, error_message, raw_response, attempted_at
-      ) VALUES (
-        ${randomUUID()}, ${organizationId}, ${messageId}, 1, ${account.gatewayMode},
-        ${dispatchResult.providerMessageId}, ${finalStatus}::"SmsStatus", ${errorMessage},
-        ${dispatchResult.rawResponse ? JSON.stringify(dispatchResult.rawResponse) : null}::jsonb,
-        ${now}
-      )
-    `;
-
-    if (dispatchResult.status === 'FAILED') {
-      await this.refundCredits(organizationId, 1, `refund_${messageId}`);
-    }
-
-    return this.mapMessageRow(inserted[0]!);
   }
 
   /**

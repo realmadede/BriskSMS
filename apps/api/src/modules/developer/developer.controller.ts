@@ -204,6 +204,28 @@ export function registerDeveloperRoutes(router: Router): void {
       throw new HttpException(400, 'VALIDATION_ERROR', 'recipientPhone (or recipient) and message are required');
     }
 
+    const rawIdempotencyKey = (
+      req.headers['idempotency-key'] ||
+      req.headers['Idempotency-Key'] ||
+      req.headers['x-idempotency-key'] ||
+      req.headers['X-Idempotency-Key'] ||
+      body.idempotencyKey ||
+      body.idempotency_key
+    ) as string | undefined;
+
+    let idempotencyKey: string | undefined;
+    if (rawIdempotencyKey && typeof rawIdempotencyKey === 'string') {
+      const trimmed = rawIdempotencyKey.trim();
+      if (!/^[a-zA-Z0-9_\-:.]{1,80}$/.test(trimmed)) {
+        throw new HttpException(
+          400,
+          'VALIDATION_ERROR',
+          'Idempotency key must be between 1 and 80 characters matching [a-zA-Z0-9_\\-:.]',
+        );
+      }
+      idempotencyKey = trimmed;
+    }
+
     // Scoped API Key authentication (e.g. bsk_live_...)
     if (token.startsWith('bsk_live_')) {
       try {
@@ -211,6 +233,7 @@ export function registerDeveloperRoutes(router: Router): void {
           recipientPhone,
           message,
           simSlot: body.simSlot ? Number(body.simSlot) : 1,
+          idempotencyKey,
         });
 
         return {
@@ -218,9 +241,15 @@ export function registerDeveloperRoutes(router: Router): void {
           data: result,
         };
       } catch (err: any) {
+        if (err instanceof HttpException) {
+          throw err;
+        }
         const errMsg = err?.message || 'API key authorization failed';
         if (errMsg.includes('requires sms:send') || errMsg.includes('scope')) {
           throw new HttpException(403, 'INSUFFICIENT_SCOPE', errMsg);
+        }
+        if (errMsg.includes('Idempotency') || errMsg.includes('DUPLICATE_IDEMPOTENCY')) {
+          throw new HttpException(409, 'DUPLICATE_IDEMPOTENCY', errMsg);
         }
         throw new HttpException(401, 'UNAUTHORIZED', errMsg);
       }
@@ -239,6 +268,7 @@ export function registerDeveloperRoutes(router: Router): void {
       to: recipientPhone,
       content: message,
       simSlot: body.simSlot ? Number(body.simSlot) : 1,
+      idempotencyKey,
     });
 
     return {
