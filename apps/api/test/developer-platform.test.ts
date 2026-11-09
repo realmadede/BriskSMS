@@ -1,6 +1,9 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { IncomingMessage, ServerResponse } from 'node:http';
+import { Socket } from 'node:net';
+import { createApp } from '../src/app.js';
 import {
   ApiKeyScope,
   BusinessEventType,
@@ -199,6 +202,141 @@ describe('Developer Platform & Zapier Webhook Automation', () => {
           ),
         /Unauthorized/,
       );
+    });
+  });
+
+  describe('HTTP Route Integration: POST /v1/messages/send & /v1/developer/messages/send', () => {
+    const router = createApp();
+
+    async function makeRequest(
+      method: string,
+      path: string,
+      headers: Record<string, string> = {},
+      body?: any,
+    ): Promise<{ statusCode: number; json: any }> {
+      const socket = new Socket();
+      const req = new IncomingMessage(socket);
+      req.method = method;
+      req.url = path;
+      req.headers = Object.fromEntries(
+        Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v]),
+      );
+
+      let statusCode = 200;
+      let capturedBody = '';
+      const res = new ServerResponse(req);
+      res.writeHead = (code: number, ..._rest: any[]) => {
+        statusCode = code;
+        return res;
+      };
+      res.end = (chunk?: any, ..._rest: any[]) => {
+        if (chunk) capturedBody += chunk.toString();
+        return res;
+      };
+
+      if (body !== undefined) {
+        req.push(JSON.stringify(body));
+      }
+      req.push(null);
+
+      await router.handle(req, res);
+      let parsed: any = null;
+      try {
+        parsed = capturedBody ? JSON.parse(capturedBody) : null;
+      } catch {
+        parsed = capturedBody;
+      }
+      return { statusCode, json: parsed };
+    }
+
+    it('authenticates POST /v1/messages/send using x-api-key header', async () => {
+      const keyResult = await apiKeyService.createApiKey(orgId, {
+        organizationId: orgId,
+        name: 'Zapier Key',
+        scopes: [ApiKeyScope.SMS_SEND],
+      });
+
+      const res = await makeRequest(
+        'POST',
+        '/v1/messages/send',
+        { 'x-api-key': keyResult.plainTextSecret, 'Content-Type': 'application/json' },
+        { recipientPhone: '+255754000111', message: 'Order ready' },
+      );
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.json?.success, true);
+      assert.equal(res.json?.data?.success, true);
+      assert.ok(res.json?.data?.messageId);
+    });
+
+    it('authenticates POST /v1/messages/send using Authorization: Bearer <key>', async () => {
+      const keyResult = await apiKeyService.createApiKey(orgId, {
+        organizationId: orgId,
+        name: 'Bearer Key',
+        scopes: [ApiKeyScope.SMS_SEND],
+      });
+
+      const res = await makeRequest(
+        'POST',
+        '/v1/messages/send',
+        { Authorization: `Bearer ${keyResult.plainTextSecret}`, 'Content-Type': 'application/json' },
+        { recipientPhone: '+255754000111', message: 'Order ready' },
+      );
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.json?.success, true);
+      assert.equal(res.json?.data?.success, true);
+    });
+
+    it('supports alias POST /v1/developer/messages/send with recipient property', async () => {
+      const keyResult = await apiKeyService.createApiKey(orgId, {
+        organizationId: orgId,
+        name: 'Alias Key',
+        scopes: [ApiKeyScope.SMS_SEND],
+      });
+
+      const res = await makeRequest(
+        'POST',
+        '/v1/developer/messages/send',
+        { 'x-api-key': keyResult.plainTextSecret, 'Content-Type': 'application/json' },
+        { recipient: '+255754000111', message: 'Order ready via alias' },
+      );
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.json?.success, true);
+      assert.equal(res.json?.data?.success, true);
+    });
+
+    it('rejects dispatch with 401 when authentication header is missing', async () => {
+      const res = await makeRequest(
+        'POST',
+        '/v1/messages/send',
+        { 'Content-Type': 'application/json' },
+        { recipientPhone: '+255754000111', message: 'Unauthenticated' },
+      );
+
+      assert.equal(res.statusCode, 401);
+      assert.equal(res.json?.success, false);
+      assert.equal(res.json?.error?.code, 'UNAUTHORIZED');
+    });
+
+    it('rejects dispatch with 403 when API key lacks sms:send scope', async () => {
+      const keyResult = await apiKeyService.createApiKey(orgId, {
+        organizationId: orgId,
+        name: 'Wrong Scope Key',
+        scopes: [ApiKeyScope.PAYMENTS_READ],
+      });
+
+      const res = await makeRequest(
+        'POST',
+        '/v1/messages/send',
+        { 'x-api-key': keyResult.plainTextSecret, 'Content-Type': 'application/json' },
+        { recipientPhone: '+255754000111', message: 'Forbidden' },
+      );
+
+      assert.equal(res.statusCode, 403);
+      assert.equal(res.json?.success, false);
+      assert.equal(res.json?.error?.code, 'INSUFFICIENT_SCOPE');
     });
   });
 });

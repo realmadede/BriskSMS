@@ -1331,11 +1331,11 @@
             </div>
 
             <div class="endpoint-tabs">
-              <button class="ep-btn active" onclick="setEndpoint('ingest', this)">POST /v1/payments/ingest</button>
-              <button class="ep-btn" onclick="setEndpoint('match', this)">POST /v1/reconcile/match</button>
+              <button class="ep-btn active" onclick="setEndpoint('ingest', this)">POST /v1/ingestion/evidence</button>
+              <button class="ep-btn" onclick="setEndpoint('match', this)">POST /v1/reconciliation/verify</button>
               <button class="ep-btn" onclick="setEndpoint('send', this)">POST /v1/messages/send</button>
-              <button class="ep-btn" onclick="setEndpoint('dispatch', this)">POST /v1/messages/send-bulk</button>
-              <button class="ep-btn" onclick="setEndpoint('device', this)">GET /v1/devices/status</button>
+              <button class="ep-btn" onclick="setEndpoint('dispatch', this)">POST /v1/messaging/campaigns</button>
+              <button class="ep-btn" onclick="setEndpoint('device', this)">GET /v1/devices</button>
             </div>
 
             <div class="lang-tabs">
@@ -1704,57 +1704,57 @@
     // 1. API Playground Data
     const endpointsData = {
       ingest: {
-        curl: `curl -X POST https://api.brisksms.com/v1/payments/ingest \\
-  -H "Authorization: Bearer YOUR_BRISKSMS_API_KEY" \\
+        curl: `curl -X POST https://api.brisksms.com/v1/ingestion/evidence \\
+  -H "Authorization: Bearer YOUR_DEVICE_TOKEN" \\
   -H "Content-Type: application/json" \\
   -d '{
-    "deviceId": "dev_s23_relay_01",
-    "provider": "MPESA_TZ",
+    "senderAddress": "M-PESA",
     "rawPayload": "09B8291M Confirmed. Tsh 150,000 received from AMANI MTEMI 255754000111 on 05/11/2026 14:22. Ref: INV-8829",
-    "receivedAt": "2026-11-05T14:22:18Z"
+    "simSlot": 1,
+    "deviceTimestamp": "2026-11-05T14:22:18Z"
   }'`,
         node: `const { BriskClient } = require("@brisksms/sdk");
 
 const client = new BriskClient({
-  apiKey: process.env.BRISKSMS_API_KEY
+  deviceToken: process.env.BRISKSMS_DEVICE_TOKEN
 });
 
 async function ingestPayment() {
-  const result = await client.payments.ingest({
-    deviceId: "dev_s23_relay_01",
-    provider: "MPESA_TZ",
+  const result = await client.ingestion.ingestEvidence({
+    senderAddress: "M-PESA",
     rawPayload: "09B8291M Confirmed. Tsh 150,000 received from AMANI MTEMI 255754000111 on 05/11/2026 14:22. Ref: INV-8829",
-    receivedAt: new Date().toISOString()
+    simSlot: 1,
+    deviceTimestamp: new Date().toISOString()
   });
 
-  console.log("Settlement ID: " + result.paymentId);
-  console.log("Deduplication Hash: " + result.deterministicHash);
+  console.log("Evidence ID: " + result.evidenceId);
+  console.log("Deduplication Hash: " + result.deduplicationHash);
 }
 
 ingestPayment();`,
-        ts: `import { BriskClient, type PaymentIngestResult } from "@brisksms/sdk";
+        ts: `import { BriskClient, type IngestionAckResult } from "@brisksms/sdk";
 
-const client = new BriskClient({ apiKey: process.env.BRISKSMS_API_KEY! });
+const client = new BriskClient({ deviceToken: process.env.BRISKSMS_DEVICE_TOKEN! });
 
-const result: PaymentIngestResult = await client.payments.ingestRaw({
-  deviceId: "dev_s23_relay_01",
-  provider: "MPESA_TZ",
+const result: IngestionAckResult = await client.ingestion.ingestEvidence({
+  senderAddress: "M-PESA",
   rawPayload: "09B8291M Confirmed. Tsh 150,000 received from AMANI MTEMI...",
-  receivedAt: new Date()
+  simSlot: 1,
+  deviceTimestamp: new Date().toISOString()
 });
 
-console.log("Payment State: " + result.state);`,
+console.log("Ingestion State: " + result.status);`,
         python: `from brisksms import BriskClient
 
-client = BriskClient(api_key="YOUR_BRISKSMS_API_KEY")
+client = BriskClient(device_token="YOUR_DEVICE_TOKEN")
 
-response = await client.payments.ingest(
-    device_id="dev_s23_relay_01",
-    provider="MPESA_TZ",
+response = await client.ingestion.ingest_evidence(
+    sender_address="M-PESA",
     raw_payload="09B8291M Confirmed. Tsh 150,000 received...",
-    received_at="2026-11-05T14:22:18Z"
+    sim_slot=1,
+    device_timestamp="2026-11-05T14:22:18Z"
 )
-print("Settlement status: " + response.status)`,
+print("Evidence status: " + response.status)`,
         go: `package main
 
 import (
@@ -1764,146 +1764,142 @@ import (
 )
 
 func main() {
-    client := brisksms.NewClient("YOUR_BRISKSMS_API_KEY")
+    client := brisksms.NewClient("YOUR_DEVICE_TOKEN")
 
-    payment, err := client.Payments.Ingest(context.Background(), &brisksms.IngestParams{
-        DeviceId:   "dev_s23_relay_01",
-        Provider:   "MPESA_TZ",
-        RawPayload: "09B8291M Confirmed. Tsh 150,000 received from AMANI MTEMI...",
-        ReceivedAt: "2026-11-05T14:22:18Z",
+    ack, err := client.Ingestion.IngestEvidence(context.Background(), &brisksms.EvidenceParams{
+        SenderAddress:   "M-PESA",
+        RawPayload:      "09B8291M Confirmed. Tsh 150,000 received from AMANI MTEMI...",
+        SimSlot:         1,
+        DeviceTimestamp: "2026-11-05T14:22:18Z",
     })
     if err != nil {
         panic(err)
     }
-    fmt.Printf("Payment ID: %s, State: %s\\n", payment.ID, payment.State)
+    fmt.Printf("Evidence ID: %s, Status: %s\\n", ack.EvidenceID, ack.Status)
 }`,
         php: `<?php
 use BriskSMS\\BriskClient;
 
-$client = new BriskClient(['api_key' => getenv('BRISKSMS_API_KEY')]);
+$client = new BriskClient(['device_token' => getenv('BRISKSMS_DEVICE_TOKEN')]);
 
-$payment = $client->payments->ingest([
-    'deviceId'   => 'dev_s23_relay_01',
-    'provider'   => 'MPESA_TZ',
-    'rawPayload' => '09B8291M Confirmed. Tsh 150,000 received from AMANI MTEMI...',
-    'receivedAt' => date(DATE_ATOM)
+$ack = $client->ingestion->ingestEvidence([
+    'senderAddress'   => 'M-PESA',
+    'rawPayload'      => '09B8291M Confirmed. Tsh 150,000 received from AMANI MTEMI...',
+    'simSlot'         => 1,
+    'deviceTimestamp' => date(DATE_ATOM)
 ]);
 
-echo "Payment: " . $payment->paymentId . " | Status: " . $payment->state;`,
+echo "Evidence: " . $ack->evidenceId . " | Status: " . $ack->status;`,
         java: `import com.brisksms.BriskClient;
-import com.brisksms.model.PaymentIngestRequest;
-import com.brisksms.model.PaymentRecord;
+import com.brisksms.model.EvidenceIngestRequest;
+import com.brisksms.model.IngestionAckResult;
 
-public class PaymentService {
+public class EvidenceService {
     public static void main(String[] args) {
-        BriskClient client = BriskClient.withApiKey(System.getenv("BRISKSMS_API_KEY"));
+        BriskClient client = BriskClient.withDeviceToken(System.getenv("BRISKSMS_DEVICE_TOKEN"));
 
-        PaymentRecord record = client.payments().ingest(
-            PaymentIngestRequest.builder()
-                .deviceId("dev_s23_relay_01")
-                .provider("MPESA_TZ")
+        IngestionAckResult ack = client.ingestion().ingestEvidence(
+            EvidenceIngestRequest.builder()
+                .senderAddress("M-PESA")
                 .rawPayload("09B8291M Confirmed. Tsh 150,000 received...")
+                .simSlot(1)
                 .build()
         );
 
-        System.out.println("Ingested Payment: " + record.getPaymentId());
+        System.out.println("Ingested Evidence: " + ack.getEvidenceId());
     }
 }`,
         csharp: `using BriskSMS;
 using BriskSMS.Models;
 
-var client = new BriskClient(Environment.GetEnvironmentVariable("BRISKSMS_API_KEY"));
+var client = new BriskClient(Environment.GetEnvironmentVariable("BRISKSMS_DEVICE_TOKEN"));
 
-var payment = await client.Payments.IngestAsync(new IngestPaymentRequest
+var ack = await client.Ingestion.IngestEvidenceAsync(new IngestEvidenceRequest
 {
-    DeviceId = "dev_s23_relay_01",
-    Provider = "MPESA_TZ",
+    SenderAddress = "M-PESA",
     RawPayload = "09B8291M Confirmed. Tsh 150,000 received from AMANI MTEMI...",
-    ReceivedAt = DateTime.UtcNow
+    SimSlot = 1,
+    DeviceTimestamp = DateTime.UtcNow
 });
 
-Console.WriteLine("Settlement ID: " + payment.PaymentId + ", Status: " + payment.State);`,
+Console.WriteLine("Evidence ID: " + ack.EvidenceId + ", Status: " + ack.Status);`,
         response: `{
-  "status": "INGESTED",
-  "paymentId": "pay_984920194829",
-  "provider": "VODACOM_MPESA",
-  "providerReference": "09B8291M",
-  "amountMinor": 15000000,
-  "currency": "TZS",
-  "customerName": "AMANI MTEMI",
-  "customerPhone": "+255754000111",
-  "invoiceHint": "INV-8829",
-  "deterministicHash": "e3b0c44298fc1c149afbf4c8996fb924...",
-  "duplicate": false,
-  "state": "RECONCILED"
+  "success": true,
+  "data": {
+    "acknowledged": true,
+    "status": "OBSERVED",
+    "evidenceId": "evi_984920194829",
+    "deduplicationHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
 }`
       },
       match: {
-        curl: `curl -X POST https://api.brisksms.com/v1/reconcile/match \\
-  -H "Authorization: Bearer YOUR_BRISKSMS_API_KEY" \\
+        curl: `curl -X POST https://api.brisksms.com/v1/reconciliation/verify \\
+  -H "Authorization: Bearer YOUR_SESSION_TOKEN" \\
   -H "Content-Type: application/json" \\
   -d '{
+    "paymentId": "pay_984920194829",
     "invoiceId": "inv_8829_whmcs",
-    "expectedAmountMinor": 15000000,
-    "paymentId": "pay_984920194829"
+    "verificationMethod": "MANUAL_FINANCE_APPROVAL",
+    "notes": "Verified against bank settlement record"
   }'`,
         node: `const { BriskClient } = require("@brisksms/sdk");
 const client = new BriskClient({ apiKey: process.env.BRISKSMS_API_KEY });
 
-async function matchInvoice() {
-  const match = await client.reconcile.matchInvoice({
+async function verifySettlement() {
+  const result = await client.reconciliation.verifyPayment({
+    paymentId: "pay_984920194829",
     invoiceId: "inv_8829_whmcs",
-    expectedAmountMinor: 15000000,
-    paymentId: "pay_984920194829"
+    verificationMethod: "MANUAL_FINANCE_APPROVAL",
+    notes: "Verified against bank settlement record"
   });
 
-  if (match.matchType === "EXACT_MATCH") {
-    console.log("Invoice " + match.invoiceId + " settled!");
-  }
+  console.log("Settlement status: " + result.status);
 }
 
-matchInvoice();`,
-        ts: `const match = await client.reconcile.matchInvoice({
+verifySettlement();`,
+        ts: `const result = await client.reconciliation.verifyPayment({
+  paymentId: "pay_984920194829",
   invoiceId: "inv_8829_whmcs",
-  expectedAmountMinor: 15000000,
-  paymentId: "pay_984920194829"
+  verificationMethod: "MANUAL_FINANCE_APPROVAL"
 });`,
-        python: `match = await client.reconcile.match_invoice(
+        python: `result = await client.reconciliation.verify_payment(
+    payment_id="pay_984920194829",
     invoice_id="inv_8829_whmcs",
-    expected_amount_minor=15000000,
-    payment_id="pay_984920194829"
+    verification_method="MANUAL_FINANCE_APPROVAL"
 )`,
-        go: `match, err := client.Reconcile.MatchInvoice(ctx, &brisksms.MatchParams{
-    InvoiceID:           "inv_8829_whmcs",
-    ExpectedAmountMinor: 15000000,
-    PaymentID:           "pay_984920194829",
+        go: `result, err := client.Reconciliation.VerifyPayment(ctx, &brisksms.VerifyPaymentParams{
+    PaymentID:          "pay_984920194829",
+    InvoiceID:          "inv_8829_whmcs",
+    VerificationMethod: "MANUAL_FINANCE_APPROVAL",
 })`,
-        php: `$match = $client->reconcile->matchInvoice([
-    'invoiceId'           => 'inv_8829_whmcs',
-    'expectedAmountMinor' => 15000000,
-    'paymentId'           => 'pay_984920194829'
+        php: `$result = $client->reconciliation->verifyPayment([
+    'paymentId'          => 'pay_984920194829',
+    'invoiceId'          => 'inv_8829_whmcs',
+    'verificationMethod' => 'MANUAL_FINANCE_APPROVAL'
 ]);`,
-        java: `ReconciliationResult match = client.reconcile().matchInvoice(
-    MatchInvoiceRequest.builder()
-        .invoiceId("inv_8829_whmcs")
-        .expectedAmountMinor(15000000L)
+        java: `SettlementResult result = client.reconciliation().verifyPayment(
+    VerifyPaymentRequest.builder()
         .paymentId("pay_984920194829")
+        .invoiceId("inv_8829_whmcs")
+        .verificationMethod("MANUAL_FINANCE_APPROVAL")
         .build()
 );`,
-        csharp: `var match = await client.Reconcile.MatchInvoiceAsync(new MatchInvoiceRequest
+        csharp: `var result = await client.Reconciliation.VerifyPaymentAsync(new VerifyPaymentRequest
 {
+    PaymentId = "pay_984920194829",
     InvoiceId = "inv_8829_whmcs",
-    ExpectedAmountMinor = 15000000,
-    PaymentId = "pay_984920194829"
+    VerificationMethod = "MANUAL_FINANCE_APPROVAL"
 });`,
         response: `{
-  "reconciliationId": "rec_77492018",
-  "invoiceId": "inv_8829_whmcs",
-  "matchType": "EXACT_MATCH",
-  "invoiceStatus": "SETTLED",
-  "remainingBalance": 0,
-  "ledgerHash": "8f489a291b...",
-  "webhookDispatched": true
+  "success": true,
+  "data": {
+    "paymentId": "pay_984920194829",
+    "status": "VERIFIED",
+    "settlementResult": "EXACT_SETTLEMENT",
+    "invoiceId": "inv_8829_whmcs",
+    "remainingBalanceMinor": 0
+  }
 }`
       },
       send: {
@@ -1925,7 +1921,7 @@ async function sendCellularSms() {
   }, {
     headers: { "x-api-key": process.env.BRISKSMS_API_KEY }
   });
-  console.log("Message queued:", res.data.messageId);
+  console.log("Message queued:", res.data.data.messageId);
 }
 sendCellularSms();`,
         ts: `import axios from "axios";
@@ -1969,108 +1965,128 @@ resp, _ := httpClient.Do(req)`,
     .build();`,
         response: `{
   "success": true,
-  "messageId": "msg_992019401",
-  "status": "SENT",
-  "recipientPhone": "+255754000111",
-  "costCredits": 1
+  "data": {
+    "success": true,
+    "messageId": "msg_992019401",
+    "status": "SENT",
+    "recipientPhone": "+255754000111",
+    "costCredits": 1
+  }
 }`
       },
       dispatch: {
-        curl: `curl -X POST https://api.brisksms.com/v1/messages/send-bulk \\
-  -H "Authorization: Bearer YOUR_BRISKSMS_API_KEY" \\
+        curl: `curl -X POST https://api.brisksms.com/v1/messaging/campaigns \\
+  -H "Authorization: Bearer YOUR_SESSION_TOKEN" \\
   -H "Content-Type: application/json" \\
   -d '{
-    "senderId": "BRISKSMS",
-    "recipients": ["+255754000111", "+255713999222"],
-    "message": "Habari Juma! Order #4829 dispatched. Pickup code: 8829."
+    "name": "Order Dispatch Broadcast",
+    "templateText": "Habari {name}! Order #{orderId} dispatched.",
+    "recipients": [
+      { "phoneNumber": "+255754000111", "variables": { "name": "Juma", "orderId": "4829" } },
+      { "phoneNumber": "+255713999222", "variables": { "name": "Amani", "orderId": "4830" } }
+    ]
   }'`,
         node: `const { BriskClient } = require("@brisksms/sdk");
 const client = new BriskClient({ apiKey: process.env.BRISKSMS_API_KEY });
 
-async function sendBulk() {
-  const campaign = await client.messages.sendBulk({
-    senderId: "BRISKSMS",
-    recipients: ["+255754000111", "+255713999222"],
-    message: "Habari Juma! Order #4829 dispatched. Pickup code: 8829."
+async function sendCampaign() {
+  const campaign = await client.messaging.createCampaign({
+    name: "Order Dispatch Broadcast",
+    templateText: "Habari {name}! Order #{orderId} dispatched.",
+    recipients: [
+      { phoneNumber: "+255754000111", variables: { name: "Juma", orderId: "4829" } },
+      { phoneNumber: "+255713999222", variables: { name: "Amani", orderId: "4830" } }
+    ]
   });
 
-  console.log("Queued messages: " + campaign.queued + ", Campaign: " + campaign.campaignId);
+  console.log("Campaign ID: " + campaign.campaignId);
 }
 
-sendBulk();`,
-        ts: `const campaign = await client.messages.sendBulk({
-  senderId: "BRISKSMS",
-  recipients: ["+255754000111", "+255713999222"],
-  message: "Habari Juma! Order #4829 dispatched. Pickup code: 8829."
+sendCampaign();`,
+        ts: `const campaign = await client.messaging.createCampaign({
+  name: "Order Dispatch Broadcast",
+  templateText: "Habari {name}! Order #{orderId} dispatched.",
+  recipients: [
+    { phoneNumber: "+255754000111", variables: { name: "Juma", orderId: "4829" } },
+    { phoneNumber: "+255713999222", variables: { name: "Amani", orderId: "4830" } }
+  ]
 });`,
-        python: `campaign = await client.messages.send_bulk(
-    sender_id="BRISKSMS",
-    recipients=["+255754000111", "+255713999222"],
-    message="Habari Juma! Order #4829 dispatched. Pickup code: 8829."
+        python: `campaign = await client.messaging.create_campaign(
+    name="Order Dispatch Broadcast",
+    template_text="Habari {name}! Order #{orderId} dispatched.",
+    recipients=[
+        {"phoneNumber": "+255754000111", "variables": {"name": "Juma", "orderId": "4829"}},
+        {"phoneNumber": "+255713999222", "variables": {"name": "Amani", "orderId": "4830"}}
+    ]
 )`,
-        go: `campaign, err := client.Messages.SendBulk(ctx, &brisksms.BulkParams{
-    SenderID:   "BRISKSMS",
-    Recipients: []string{"+255754000111", "+255713999222"},
-    Message:    "Habari Juma! Order #4829 dispatched. Pickup code: 8829.",
+        go: `campaign, err := client.Messaging.CreateCampaign(ctx, &brisksms.CampaignParams{
+    Name:         "Order Dispatch Broadcast",
+    TemplateText: "Habari {name}! Order #{orderId} dispatched.",
+    Recipients:   []brisksms.RecipientParam{...},
 })`,
-        php: `$campaign = $client->messages->sendBulk([
-    'senderId'   => 'BRISKSMS',
-    'recipients' => ['+255754000111', '+255713999222'],
-    'message'    => 'Habari Juma! Order #4829 dispatched. Pickup code: 8829.'
+        php: `$campaign = $client->messaging->createCampaign([
+    'name'         => 'Order Dispatch Broadcast',
+    'templateText' => 'Habari {name}! Order #{orderId} dispatched.',
+    'recipients'   => [
+        ['phoneNumber' => '+255754000111', 'variables' => ['name' => 'Juma', 'orderId' => '4829']]
+    ]
 ]);`,
-        java: `CampaignResponse campaign = client.messages().sendBulk(
-    SendBulkRequest.builder()
-        .senderId("BRISKSMS")
-        .recipients(List.of("+255754000111", "+255713999222"))
-        .message("Habari Juma! Order #4829 dispatched. Pickup code: 8829.")
+        java: `CampaignRecord campaign = client.messaging().createCampaign(
+    CreateCampaignRequest.builder()
+        .name("Order Dispatch Broadcast")
+        .templateText("Habari {name}! Order #{orderId} dispatched.")
+        .recipients(List.of(...))
         .build()
 );`,
-        csharp: `var campaign = await client.Messages.SendBulkAsync(new SendBulkRequest
+        csharp: `var campaign = await client.Messaging.CreateCampaignAsync(new CreateCampaignRequest
 {
-    SenderId = "BRISKSMS",
-    Recipients = new[] { "+255754000111", "+255713999222" },
-    Message = "Habari Juma! Order #4829 dispatched. Pickup code: 8829."
+    Name = "Order Dispatch Broadcast",
+    TemplateText = "Habari {name}! Order #{orderId} dispatched.",
+    Recipients = new[] { ... }
 });`,
         response: `{
-  "campaignId": "cmp_8829401",
-  "queued": 2,
-  "sent": 2,
-  "failed": 0,
-  "creditsDeducted": 2,
-  "estimatedDeliveryMs": 1800
+  "success": true,
+  "data": {
+    "campaignId": "cmp_8829401",
+    "name": "Order Dispatch Broadcast",
+    "queued": 2,
+    "sent": 2,
+    "failed": 0,
+    "creditsDeducted": 2
+  }
 }`
       },
       device: {
-        curl: `curl -X GET https://api.brisksms.com/v1/devices/status \\
-  -H "Authorization: Bearer YOUR_BRISKSMS_API_KEY"`,
+        curl: `curl -X GET https://api.brisksms.com/v1/devices \\
+  -H "Authorization: Bearer YOUR_SESSION_TOKEN"`,
         node: `const { BriskClient } = require("@brisksms/sdk");
 const client = new BriskClient({ apiKey: process.env.BRISKSMS_API_KEY });
 
 async function checkRelays() {
-  const devices = await client.devices.listStatus();
+  const devices = await client.devices.list();
   devices.forEach(dev => {
-    console.log("Relay: " + dev.model + " | Battery: " + dev.battery + "% | State: " + dev.state);
+    console.log("Relay: " + dev.deviceModel + " | Status: " + dev.status);
   });
 }
 
 checkRelays();`,
-        ts: `const devices = await client.devices.listStatus();`,
-        python: `devices = await client.devices.get_status()`,
-        go: `devices, err := client.Devices.GetStatus(ctx)`,
-        php: `$devices = $client->devices->listStatus();`,
-        java: `DeviceListResponse devices = client.devices().listStatus();`,
-        csharp: `var devices = await client.Devices.ListStatusAsync();`,
+        ts: `const devices = await client.devices.list();`,
+        python: `devices = await client.devices.list()`,
+        go: `devices, err := client.Devices.List(ctx)`,
+        php: `$devices = $client->devices->list();`,
+        java: `List<DeviceRecord> devices = client.devices().list();`,
+        csharp: `var devices = await client.Devices.ListAsync();`,
         response: `{
-  "devices": [
+  "success": true,
+  "data": [
     {
-      "deviceId": "dev_s23_relay_01",
-      "model": "Samsung Galaxy S23",
-      "battery": 94,
-      "isCharging": true,
-      "gsmSignalDbm": -68,
-      "activeSimSlots": ["VODACOM_TZ", "AIRTEL_TZ"],
-      "lastHeartbeat": "2026-11-05T14:28:10Z",
-      "state": "ONLINE_HEALTHY"
+      "id": "dev_s23_relay_01",
+      "label": "Samsung Galaxy S23 Relay",
+      "deviceModel": "SM-S911B",
+      "status": "ACTIVE",
+      "batteryPercentage": 94,
+      "networkType": "WIFI",
+      "isCharging": true
     }
   ]
 }`
@@ -2401,13 +2417,13 @@ Data (JSON Payload):
   }'`,
       response_json: `{
   "success": true,
-  "messageId": "msg_01hy8z7a9b3c4d5e6f7g8h9j",
-  "status": "QUEUED",
-  "carrier": "Tigo Tanzania",
-  "simSlot": 1,
-  "costTsh": 0.0,
-  "tcraCurfewCompliance": "COMPLIANT_ACTIVE_HOURS",
-  "dispatchedAt": "2026-11-06T06:30:00.000Z"
+  "data": {
+    "success": true,
+    "messageId": "msg_01hy8z7a9b3c4d5e6f7g8h9j",
+    "status": "SENT",
+    "recipientPhone": "+255712345678",
+    "costCredits": 1
+  }
 }`
     };
 

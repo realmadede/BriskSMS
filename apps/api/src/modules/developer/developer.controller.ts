@@ -163,34 +163,59 @@ export function registerDeveloperRoutes(router: Router): void {
   });
 
   // 7. Developer Dispatch Message Action (Zapier / Google Sheets / API Key Integration)
-  router.post('/v1/developer/messages/send', async (req: RouteRequest): Promise<ApiResponse> => {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || typeof authHeader !== 'string') {
-      throw new HttpException(401, 'UNAUTHORIZED', 'Missing Authorization header');
+  const handleSendMessage = async (req: RouteRequest): Promise<ApiResponse> => {
+    let token: string | undefined;
+
+    // Check x-api-key header first (case-insensitive fallback)
+    const xApiKey = (req.headers['x-api-key'] || req.headers['X-API-Key']) as string | undefined;
+    if (xApiKey && typeof xApiKey === 'string' && xApiKey.trim()) {
+      token = xApiKey.trim();
+    } else {
+      const authHeader = req.headers.authorization;
+      if (authHeader && typeof authHeader === 'string') {
+        const [scheme, bearerToken] = authHeader.split(' ');
+        if (scheme === 'Bearer' && bearerToken) {
+          token = bearerToken.trim();
+        }
+      }
     }
 
-    const [scheme, token] = authHeader.split(' ');
-    if (scheme !== 'Bearer' || !token) {
-      throw new HttpException(401, 'UNAUTHORIZED', 'Expected Bearer <token>');
+    if (!token) {
+      throw new HttpException(
+        401,
+        'UNAUTHORIZED',
+        'Missing authentication credentials (Authorization: Bearer <token> or x-api-key required)',
+      );
     }
 
-    const body = req.body as Record<string, any>;
-    if (!body.recipientPhone || !body.message) {
-      throw new HttpException(400, 'VALIDATION_ERROR', 'recipientPhone and message are required');
+    const body = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, any>;
+    const recipientPhone = String(body.recipientPhone || body.recipient || body.to || '').trim();
+    const message = String(body.message || body.content || '').trim();
+
+    if (!recipientPhone || !message) {
+      throw new HttpException(400, 'VALIDATION_ERROR', 'recipientPhone (or recipient) and message are required');
     }
 
     // Scoped API Key authentication (e.g. bsk_live_...)
     if (token.startsWith('bsk_live_')) {
-      const result = await developerActionService.handleSendMessageAction(token, {
-        recipientPhone: String(body.recipientPhone),
-        message: String(body.message),
-        simSlot: body.simSlot ? Number(body.simSlot) : 1,
-      });
+      try {
+        const result = await developerActionService.handleSendMessageAction(token, {
+          recipientPhone,
+          message,
+          simSlot: body.simSlot ? Number(body.simSlot) : 1,
+        });
 
-      return {
-        success: true,
-        data: result,
-      };
+        return {
+          success: true,
+          data: result,
+        };
+      } catch (err: any) {
+        const errMsg = err?.message || 'API key authorization failed';
+        if (errMsg.includes('requires sms:send') || errMsg.includes('scope')) {
+          throw new HttpException(403, 'INSUFFICIENT_SCOPE', errMsg);
+        }
+        throw new HttpException(401, 'UNAUTHORIZED', errMsg);
+      }
     }
 
     // Otherwise standard JWT user authentication
@@ -203,8 +228,8 @@ export function registerDeveloperRoutes(router: Router): void {
     await assertDeveloperAccess(orgId, userId);
 
     const msg = await messagingService.sendSingleMessage(orgId, {
-      to: String(body.recipientPhone),
-      content: String(body.message),
+      to: recipientPhone,
+      content: message,
       simSlot: body.simSlot ? Number(body.simSlot) : 1,
     });
 
@@ -218,5 +243,8 @@ export function registerDeveloperRoutes(router: Router): void {
         costCredits: msg.costCredits,
       },
     };
-  });
+  };
+
+  router.post('/v1/developer/messages/send', handleSendMessage);
+  router.post('/v1/messages/send', handleSendMessage);
 }
