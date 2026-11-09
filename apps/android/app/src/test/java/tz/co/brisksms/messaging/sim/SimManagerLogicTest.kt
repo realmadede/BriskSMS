@@ -78,7 +78,7 @@ class SimManagerLogicTest {
     private fun normalizeCarrier(raw: String): String {
         val upper = raw.uppercase()
         return when {
-            upper.contains("VODA") || upper.contains("MPESA") -> "Vodacom"
+            upper.contains("VODA") || upper.contains("MPESA") || upper.contains("M-PESA") -> "Vodacom"
             upper.contains("MIXX") || upper.contains("TIGO") -> "Mixx by Yas"
             upper.contains("AIRTEL") -> "Airtel"
             upper.contains("HALO") -> "Halotel"

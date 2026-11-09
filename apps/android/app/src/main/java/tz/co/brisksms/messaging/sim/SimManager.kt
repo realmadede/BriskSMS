@@ -83,7 +83,7 @@ class SimManager(private val context: Context) {
     private fun normalizeCarrierName(raw: String): String {
         val upper = raw.uppercase()
         return when {
-            upper.contains("VODA") || upper.contains("MPESA") -> "Vodacom"
+            upper.contains("VODA") || upper.contains("MPESA") || upper.contains("M-PESA") -> "Vodacom"
             upper.contains("MIXX") || upper.contains("TIGO") -> "Mixx by Yas"
             upper.contains("AIRTEL") -> "Airtel"
             upper.contains("HALO") -> "Halotel"
