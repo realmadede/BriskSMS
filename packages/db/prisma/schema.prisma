@@ -209,6 +209,7 @@ model Organization {
   outboxEvents          OutboxEvent[]
   smsGateSigningKeys    SmsGateSigningKey[]
   smsGateWebhookEvents  SmsGateWebhookEvent[]
+  messageIdempotencyRecords MessageIdempotencyRecord[]
 
   @@map("organizations")
 }
@@ -695,6 +696,7 @@ model SmsMessage {
   organization Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   campaign     SmsCampaign?         @relation(fields: [campaignId], references: [id], onDelete: SetNull)
   attempts     SmsDeliveryAttempt[]
+  idempotencyRecords MessageIdempotencyRecord[]
 
   @@index([organizationId, status])
   @@index([providerMessageId])
@@ -718,6 +720,25 @@ model SmsDeliveryAttempt {
 
   @@index([organizationId, messageId])
   @@map("sms_delivery_attempts")
+}
+
+model MessageIdempotencyRecord {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId     String    @map("organization_id") @db.Uuid
+  idempotencyKey     String    @map("idempotency_key") @db.VarChar(80)
+  requestFingerprint String    @map("request_fingerprint") @db.VarChar(64)
+  status             String    @default("PENDING") @db.VarChar(30)
+  messageId          String?   @map("message_id") @db.Uuid
+  responsePayload    Json?     @map("response_payload") @db.JsonB
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  message      SmsMessage?  @relation(fields: [messageId], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, idempotencyKey])
+  @@index([organizationId, status])
+  @@map("message_idempotency_records")
 }
 
 // ------------------------------------------------------------------------------

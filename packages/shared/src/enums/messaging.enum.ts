@@ -51,3 +51,14 @@ export enum GatewayMode {
   EXTERNAL_RELAY = 'EXTERNAL_RELAY',
 }
 
+/**
+ * Durable Message Idempotency Lifecycle State
+ */
+export enum MessageIdempotencyStatus {
+  PENDING = 'PENDING',
+  COMPLETED = 'COMPLETED',
+  FAILED = 'FAILED',
+  UNCERTAIN = 'UNCERTAIN',
+}
+
+

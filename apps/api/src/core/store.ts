@@ -336,6 +336,18 @@ export interface SmsDeliveryAttemptRecord {
   attemptedAt: Date;
 }
 
+export interface MessageIdempotencyRecord {
+  id: string;
+  organizationId: string;
+  idempotencyKey: string;
+  requestFingerprint: string;
+  status: 'PENDING' | 'COMPLETED' | 'FAILED' | 'UNCERTAIN';
+  messageId: string | null;
+  responsePayload: Record<string, unknown> | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export interface RawPaymentEvidenceRecord {
   id: string;
   organizationId: string;

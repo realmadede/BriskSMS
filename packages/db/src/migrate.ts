@@ -181,6 +181,7 @@ export async function resetTestDatabaseState(): Promise<void> {
   // TRUNCATE does not fire row-level BEFORE UPDATE/DELETE triggers, so it cleanly resets append-only tables in test suites
   await sqlUnsafe(`
     TRUNCATE TABLE
+      "message_idempotency_records",
       "smsgate_webhook_events",
       "smsgate_signing_keys",
       "webhook_deliveries",

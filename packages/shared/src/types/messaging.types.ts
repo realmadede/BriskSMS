@@ -1,4 +1,4 @@
-import { GatewayMode, CampaignStatus } from '../enums/messaging.enum.js';
+import { GatewayMode, CampaignStatus, MessageIdempotencyStatus } from '../enums/messaging.enum.js';
 
 /**
  * Message Dispatch Request Payload
@@ -19,8 +19,23 @@ export interface MessageDispatchPayload {
  */
 export interface MessageDispatchResult {
   providerMessageId: string;
-  status: 'PENDING' | 'DISPATCHED' | 'FAILED';
+  status: 'PENDING' | 'DISPATCHED' | 'FAILED' | 'UNCERTAIN';
   rawResponse: Record<string, unknown>;
+}
+
+/**
+ * Durable Message Idempotency Record
+ */
+export interface MessageIdempotencyRecord {
+  id: string;
+  organizationId: string;
+  idempotencyKey: string;
+  requestFingerprint: string;
+  status: MessageIdempotencyStatus;
+  messageId: string | null;
+  responsePayload?: Record<string, unknown> | null;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 /**

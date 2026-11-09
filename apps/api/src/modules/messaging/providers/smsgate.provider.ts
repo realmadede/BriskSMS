@@ -371,10 +371,11 @@ export class SmsGateProvider implements MessagingProvider {
 
       if (!response.ok) {
         const errorText = await response.text();
+        const isClientError = response.status >= 400 && response.status < 500;
         return {
           providerMessageId: `failed_${Date.now()}`,
-          status: 'FAILED',
-          rawResponse: { statusCode: response.status, error: errorText },
+          status: isClientError ? 'FAILED' : 'UNCERTAIN',
+          rawResponse: { statusCode: response.status, error: errorText, uncertain: !isClientError },
         };
       }
 
@@ -394,8 +395,8 @@ export class SmsGateProvider implements MessagingProvider {
       const message = err instanceof Error ? err.message : String(err);
       return {
         providerMessageId: `err_${Date.now()}`,
-        status: 'FAILED',
-        rawResponse: { error: message },
+        status: 'UNCERTAIN',
+        rawResponse: { error: message, uncertain: true },
       };
     }
   }
