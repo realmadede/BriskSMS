@@ -153,6 +153,7 @@ jobs:
       - name: Run Android Unit Tests
         working-directory: apps/android
         run: |
+          set -e -o pipefail
           ./gradlew testDebugUnitTest --no-daemon --stacktrace 2>&1 | tee unit-tests.log || {
             status=$?
             echo "## Android Unit Tests Failed" >> "$GITHUB_STEP_SUMMARY"
@@ -173,6 +174,7 @@ jobs:
       - name: Run Android Lint
         working-directory: apps/android
         run: |
+          set -e -o pipefail
           ./gradlew lintDebug --no-daemon --stacktrace 2>&1 | tee lint.log || {
             status=$?
             echo "## Android Lint Failed" >> "$GITHUB_STEP_SUMMARY"
@@ -185,6 +187,7 @@ jobs:
       - name: Assemble Debug APK
         working-directory: apps/android
         run: |
+          set -e -o pipefail
           ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee assemble.log || {
             status=$?
             echo "## Android Assemble Failed" >> "$GITHUB_STEP_SUMMARY"
@@ -195,10 +198,19 @@ jobs:
           }
 
       - name: Locate Debug APK
+        if: always()
         working-directory: apps/android
         run: |
           echo "=== LOCATING GENERATED APKS ==="
-          find app/build/outputs/apk -type f -name "*.apk"
+          find . -name "*.apk" || true
+
+      - name: Upload Assemble Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: brisksms-android-assemble-log
+          path: apps/android/assemble.log
+          if-no-files-found: ignore
 
       - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v4
