@@ -188,6 +188,14 @@ export function registerDeveloperRoutes(router: Router): void {
       );
     }
 
+    if (token.startsWith('bsk_dev_')) {
+      throw new HttpException(
+        401,
+        'INVALID_CREDENTIALS',
+        'Device tokens cannot be used to dispatch developer messages. Use a scoped API key (bsk_live_...) or user bearer token.',
+      );
+    }
+
     const body = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, any>;
     const recipientPhone = String(body.recipientPhone || body.recipient || body.to || '').trim();
     const message = String(body.message || body.content || '').trim();

@@ -200,7 +200,7 @@ describe('Developer Platform & Zapier Webhook Automation', () => {
               message: 'Hello',
             },
           ),
-        /Unauthorized/,
+        /Forbidden/,
       );
     });
   });
@@ -337,6 +337,136 @@ describe('Developer Platform & Zapier Webhook Automation', () => {
       assert.equal(res.statusCode, 403);
       assert.equal(res.json?.success, false);
       assert.equal(res.json?.error?.code, 'INSUFFICIENT_SCOPE');
+    });
+
+    it('rejects dispatch with 401 INVALID_CREDENTIALS when device token (bsk_dev_...) is provided', async () => {
+      const res = await makeRequest(
+        'POST',
+        '/v1/messages/send',
+        { 'x-api-key': 'bsk_dev_fake_device_token_123', 'Content-Type': 'application/json' },
+        { recipientPhone: '+255754000111', message: 'Hello from device' },
+      );
+
+      assert.equal(res.statusCode, 401);
+      assert.equal(res.json?.success, false);
+      assert.equal(res.json?.error?.code, 'INVALID_CREDENTIALS');
+      assert.match(res.json?.error?.message, /Device tokens cannot be used/);
+    });
+
+    it('rejects dispatch with 401 when invalid API key is provided', async () => {
+      const res = await makeRequest(
+        'POST',
+        '/v1/messages/send',
+        { 'x-api-key': 'bsk_live_nonexistentkey123456789012345678', 'Content-Type': 'application/json' },
+        { recipientPhone: '+255754000111', message: 'Hello' },
+      );
+
+      assert.equal(res.statusCode, 401);
+      assert.equal(res.json?.success, false);
+      assert.equal(res.json?.error?.code, 'UNAUTHORIZED');
+    });
+
+    it('rejects dispatch with 401 when revoked API key is provided', async () => {
+      const keyResult = await apiKeyService.createApiKey(orgId, {
+        organizationId: orgId,
+        name: 'Revoked Key',
+        scopes: [ApiKeyScope.SMS_SEND],
+      });
+      await apiKeyService.revokeApiKey(orgId, keyResult.apiKey.id);
+
+      const res = await makeRequest(
+        'POST',
+        '/v1/messages/send',
+        { 'x-api-key': keyResult.plainTextSecret, 'Content-Type': 'application/json' },
+        { recipientPhone: '+255754000111', message: 'Hello' },
+      );
+
+      assert.equal(res.statusCode, 401);
+      assert.equal(res.json?.success, false);
+      assert.equal(res.json?.error?.code, 'UNAUTHORIZED');
+    });
+
+    it('rejects dispatch with 401 when only browser session cookie is provided without key', async () => {
+      const res = await makeRequest(
+        'POST',
+        '/v1/messages/send',
+        { Cookie: 'bsk_session=valid_or_invalid_jwt_cookie', 'Content-Type': 'application/json' },
+        { recipientPhone: '+255754000111', message: 'Cookie attempt' },
+      );
+
+      assert.equal(res.statusCode, 401);
+      assert.equal(res.json?.success, false);
+      assert.equal(res.json?.error?.code, 'UNAUTHORIZED');
+    });
+
+    it('rejects dispatch with 400 VALIDATION_ERROR when recipient or message is missing', async () => {
+      const keyResult = await apiKeyService.createApiKey(orgId, {
+        organizationId: orgId,
+        name: 'Valid Key',
+        scopes: [ApiKeyScope.SMS_SEND],
+      });
+
+      const missingRecipient = await makeRequest(
+        'POST',
+        '/v1/messages/send',
+        { 'x-api-key': keyResult.plainTextSecret, 'Content-Type': 'application/json' },
+        { message: 'Hello' },
+      );
+      assert.equal(missingRecipient.statusCode, 400);
+      assert.equal(missingRecipient.json?.error?.code, 'VALIDATION_ERROR');
+
+      const missingMessage = await makeRequest(
+        'POST',
+        '/v1/messages/send',
+        { 'x-api-key': keyResult.plainTextSecret, 'Content-Type': 'application/json' },
+        { recipientPhone: '+255754000111' },
+      );
+      assert.equal(missingMessage.statusCode, 400);
+      assert.equal(missingMessage.json?.error?.code, 'VALIDATION_ERROR');
+    });
+
+    it('enforces tenant isolation and deducts credits strictly on the key owning organization', async () => {
+      const otherOrgId = randomUUID();
+      await dbStore.seedOrganizationDirect({
+        id: otherOrgId,
+        name: 'Serengeti Tours',
+        slug: `serengeti-${otherOrgId.slice(0, 8)}`,
+        countryCode: 'TZA',
+        timezone: 'Africa/Dar_es_Salaam',
+        planTier: 'BUSINESS',
+        isActive: true,
+      });
+      await messagingService.purchaseCredits(otherOrgId, 50, 'SEED_OTHER');
+
+      const keyResult = await apiKeyService.createApiKey(orgId, {
+        organizationId: orgId,
+        name: 'Tenant Isolation Key',
+        scopes: [ApiKeyScope.SMS_SEND],
+      });
+
+      // Attempt to spoof organizationId in request body to otherOrgId
+      const res = await makeRequest(
+        'POST',
+        '/v1/messages/send',
+        { 'x-api-key': keyResult.plainTextSecret, 'Content-Type': 'application/json' },
+        {
+          recipientPhone: '+255754000111',
+          message: 'Tenant check message',
+          organizationId: otherOrgId,
+        },
+      );
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.json?.success, true);
+
+      // Verify dispatch was recorded for orgId and NOT otherOrgId
+      const orgEntries = await messagingService.listLedgerEntries(orgId);
+      const otherEntries = await messagingService.listLedgerEntries(otherOrgId);
+
+      const deduction = orgEntries.find((e) => e.entryType === 'USAGE_DEDUCTION');
+      assert.ok(deduction, 'Credit deduction must be recorded for key owning organization');
+      assert.equal(otherEntries.length, 1, 'Other organization ledger must remain untouched');
+      assert.equal(otherEntries[0]?.referenceId, 'SEED_OTHER');
     });
   });
 });

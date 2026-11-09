@@ -108,7 +108,7 @@ jobs:
         run: bun run db:migrate
 
       - name: Execute Automated Test Corpus
-        run: bun test
+        run: bun run test
 
   android-verify:
     name: Build & Verify Android Companion
