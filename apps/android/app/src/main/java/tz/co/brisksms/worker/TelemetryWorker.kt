@@ -56,6 +56,10 @@ class TelemetryWorker(
 
             val result = apiClient.sendTelemetry(telemetry)
             if (result.isSuccess) {
+                val response = result.getOrNull()
+                if (response != null && response.commands.isNotEmpty()) {
+                    processRemoteCommands(response.commands, db)
+                }
                 Log.i(TAG, "Reported device telemetry successfully. Battery: $batteryPct%, Net: $networkType")
                 Result.success()
             } else {
@@ -65,6 +69,55 @@ class TelemetryWorker(
         } catch (e: Exception) {
             Log.e(TAG, "Exception during telemetry collection: ${e.message}")
             Result.retry()
+        }
+    }
+
+    private suspend fun processRemoteCommands(
+        commands: List<tz.co.brisksms.core.network.DeviceCommandPayload>,
+        db: BriskDatabase
+    ) {
+        for (cmd in commands) {
+            Log.i(TAG, "Processing remote fleet command: ${cmd.type} [${cmd.id}]")
+            when (cmd.type) {
+                "PAUSE_RELAY" -> {
+                    secureStorage.isBulkMessagingEnabled = false
+                    val stopIntent = Intent(applicationContext, tz.co.brisksms.messaging.service.SmsGateRelayService::class.java).apply {
+                        action = tz.co.brisksms.messaging.service.SmsGateRelayService.ACTION_STOP
+                    }
+                    applicationContext.stopService(stopIntent)
+                    Log.i(TAG, "Cellular SMS relay paused by remote command.")
+                }
+                "RESUME_RELAY" -> {
+                    secureStorage.isBulkMessagingEnabled = true
+                    val startIntent = Intent(applicationContext, tz.co.brisksms.messaging.service.SmsGateRelayService::class.java).apply {
+                        action = tz.co.brisksms.messaging.service.SmsGateRelayService.ACTION_START
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        applicationContext.startForegroundService(startIntent)
+                    } else {
+                        applicationContext.startService(startIntent)
+                    }
+                    Log.i(TAG, "Cellular SMS relay resumed by remote command.")
+                }
+                "SWITCH_SIM" -> {
+                    val targetSlot = cmd.payload?.optInt("simSlot", 1) ?: 1
+                    secureStorage.preferredSimSlot = targetSlot
+                    Log.i(TAG, "Primary SIM preference switched to slot $targetSlot by remote command.")
+                }
+                "WIPE_AND_REVOKE" -> {
+                    Log.w(TAG, "Executing emergency WIPE_AND_REVOKE remote command.")
+                    secureStorage.isRevoked = true
+                    secureStorage.isPaired = false
+                    secureStorage.deviceToken = null
+                    db.clearAllTables()
+                    try {
+                        val km = tz.co.brisksms.security.KeystoreManager()
+                        km.deleteKey()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed deleting Keystore key: ${e.message}")
+                    }
+                }
+            }
         }
     }
 

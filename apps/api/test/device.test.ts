@@ -125,4 +125,43 @@ describe('Phase 1: DeviceModule & Cryptographic Pairing Flow', () => {
       /This device has been revoked|Device authentication failed/,
     );
   });
+
+  it('should queue remote fleet commands and deliver them in subsequent telemetry response', async () => {
+    const pairingData = await deviceService.createPairingToken(orgId, ownerUserId);
+    const pairResult = await deviceService.pairDevice({
+      enrollmentToken: pairingData.pairingToken,
+      deviceModel: 'Infinix Note 30',
+      manufacturer: 'Transsion',
+      androidVersion: '13',
+      appVersion: '1.0.0',
+      publicKeyPem: 'infinix_key',
+    });
+
+    // Queue commands
+    const cmd1 = await deviceService.queueCommand(pairResult.deviceId, orgId, ownerUserId, 'PAUSE_RELAY');
+    assert.equal(cmd1.type, 'PAUSE_RELAY');
+    assert.equal(cmd1.deviceId, pairResult.deviceId);
+
+    const cmd2 = await deviceService.queueCommand(pairResult.deviceId, orgId, ownerUserId, 'SWITCH_SIM', { simSlot: 2 });
+    assert.equal(cmd2.type, 'SWITCH_SIM');
+
+    // Telemetry heartbeat from device should receive both queued commands
+    const telemetryRes = await deviceService.recordTelemetry(pairResult.deviceId, pairResult.deviceToken, {
+      batteryPercentage: 92,
+      isCharging: false,
+      networkType: 'WIFI',
+    });
+
+    assert.equal(telemetryRes.commands.length, 2);
+    assert.equal(telemetryRes.commands[0]!.type, 'PAUSE_RELAY');
+    assert.equal(telemetryRes.commands[1]!.type, 'SWITCH_SIM');
+
+    // Next telemetry heartbeat should be drained (0 commands)
+    const nextTelemetry = await deviceService.recordTelemetry(pairResult.deviceId, pairResult.deviceToken, {
+      batteryPercentage: 91,
+      isCharging: false,
+      networkType: 'WIFI',
+    });
+    assert.equal(nextTelemetry.commands.length, 0);
+  });
 });

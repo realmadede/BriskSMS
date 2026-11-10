@@ -266,4 +266,43 @@ describe('Universal Ingestion & Financial Reconciliation Engine', () => {
     assert.equal(ack.state, TransactionState.REVIEW_REQUIRED);
     assert.equal(ack.matchedInvoiceId, undefined);
   });
+
+  it('discovers and ranks candidate invoices for ambiguous payments in REVIEW_REQUIRED', async () => {
+    const inv1 = await reconciliationService.createInvoice(orgId, {
+      referenceNumber: 'INV-A-101',
+      totalAmountCents: 2000000n,
+      customerPhone: '+255754999000',
+      customerName: 'Hamisi Ally',
+    });
+    const inv2 = await reconciliationService.createInvoice(orgId, {
+      referenceNumber: 'INV-B-202',
+      totalAmountCents: 5000000n,
+      customerPhone: '+255754999000',
+      customerName: 'Hamisi Ally',
+    });
+
+    const rawPayload = 'QA88HH99II Imethibitishwa. Umepokea Tsh20,000 kutoka kwa Hamisi Ally 255754999000 tarehe 05/11/2026 saa 12:00.';
+
+    const ack = await ingestionService.ingestEvidence({
+      organizationId: orgId,
+      sourceType: EvidenceSourceType.ANDROID_NOTIFICATION_RELAY,
+      deviceId,
+      senderAddress: 'M-PESA',
+      rawPayload,
+      deviceTimestamp: new Date('2026-11-05T12:00:00Z'),
+    });
+
+    assert.equal(ack.state, TransactionState.REVIEW_REQUIRED);
+    assert.ok(ack.paymentId);
+
+    // Query candidate suggestions
+    const candidates = await reconciliationService.findCandidateInvoicesForPayment(orgId, ack.paymentId!);
+    assert.ok(candidates.length >= 2);
+    // inv1 should be ranked highest because customer phone AND exact balance match
+    assert.equal(candidates[0]!.invoiceId, inv1.id);
+    assert.ok(candidates.some((c) => c.invoiceId === inv2.id));
+    assert.ok(candidates[0]!.confidenceScore > candidates[1]!.confidenceScore);
+    assert.ok(candidates[0]!.matchReasons.some((r) => r.includes('phone')));
+    assert.ok(candidates[0]!.matchReasons.some((r) => r.includes('balance')));
+  });
 });

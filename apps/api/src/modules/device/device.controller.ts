@@ -1,5 +1,5 @@
 import { Router, RouteRequest, ApiResponse, HttpException } from '../../core/http.js';
-import { deviceService, PairDeviceDto, TelemetryDto } from './device.service.js';
+import { deviceService, PairDeviceDto, TelemetryDto, DeviceCommandType } from './device.service.js';
 import { authenticate } from '../../core/guards.js';
 
 export function registerDeviceRoutes(router: Router): void {
@@ -102,6 +102,37 @@ export function registerDeviceRoutes(router: Router): void {
     return {
       success: true,
       data: revoked,
+    };
+  });
+
+  // Queue remote device command (Fleet Management)
+  router.post('/v1/devices/:id/command', async (req: RouteRequest): Promise<ApiResponse> => {
+    authenticate(req);
+    const userId = req.context.userId!;
+    const orgId = req.context.organizationId || (req.body.organizationId as string);
+    const deviceId = req.params.id || '';
+
+    if (!orgId) {
+      throw new HttpException(400, 'MISSING_ORG', 'Organization context or body organizationId is required');
+    }
+
+    const body = (req.body || {}) as Record<string, unknown>;
+    const commandType = body.type as DeviceCommandType;
+    if (!commandType || !['PAUSE_RELAY', 'RESUME_RELAY', 'SWITCH_SIM', 'WIPE_AND_REVOKE'].includes(commandType)) {
+      throw new HttpException(400, 'INVALID_COMMAND', 'type must be PAUSE_RELAY, RESUME_RELAY, SWITCH_SIM, or WIPE_AND_REVOKE');
+    }
+
+    const cmd = await deviceService.queueCommand(
+      deviceId,
+      orgId,
+      userId,
+      commandType,
+      body.payload as Record<string, unknown> | undefined,
+    );
+
+    return {
+      success: true,
+      data: cmd,
     };
   });
 }

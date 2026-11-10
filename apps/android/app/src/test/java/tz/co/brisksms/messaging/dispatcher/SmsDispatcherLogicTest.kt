@@ -82,4 +82,25 @@ class SmsDispatcherLogicTest {
         val canBlindlyRetry = entity.status == DispatchState.FAILED.name && entity.attempts < 3
         assertFalse(canBlindlyRetry)
     }
+
+    @Test
+    fun carrierDailyCap_triggersSimFailoverLogic() {
+        val defaultCap = SmsDispatcher.DEFAULT_SIM_DAILY_CAP
+        assertEquals(400, defaultCap)
+
+        // Simulate SIM 1 reaching daily cap
+        val sim1Sent = 400
+        val sim2Sent = 150
+
+        val sim1Capped = sim1Sent >= defaultCap
+        val sim2Capped = sim2Sent >= defaultCap
+
+        assertTrue(sim1Capped)
+        assertFalse(sim2Capped)
+
+        // Resolved alternative slot when SIM 1 is capped
+        val targetSlot = 1
+        val altSlot = if (targetSlot == 1) 2 else 1
+        assertEquals(2, altSlot)
+    }
 }

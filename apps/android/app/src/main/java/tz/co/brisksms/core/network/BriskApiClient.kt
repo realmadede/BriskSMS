@@ -54,6 +54,17 @@ data class DeviceTelemetryRequest(
     val pendingOfflineCount: Int = 0
 )
 
+data class DeviceCommandPayload(
+    val id: String,
+    val type: String,
+    val payload: JSONObject? = null
+)
+
+data class DeviceTelemetryResponse(
+    val acknowledged: Boolean,
+    val commands: List<DeviceCommandPayload> = emptyList()
+)
+
 /**
  * Universal Secure Network Client for BriskSMS Android
  * Enforces TLS, device Bearer token authentication, timeout policies, and structured error responses.
@@ -207,7 +218,7 @@ class BriskApiClient(private val secureStorage: KeystoreSecureStorage) {
     /**
      * Reports device operational health & telemetry (POST /v1/devices/:id/telemetry)
      */
-    suspend fun sendTelemetry(telemetry: DeviceTelemetryRequest): Result<Boolean> {
+    suspend fun sendTelemetry(telemetry: DeviceTelemetryRequest): Result<DeviceTelemetryResponse> {
         return try {
             val deviceId = secureStorage.deviceId ?: return Result.failure(IllegalStateException("Device not paired"))
             val endpoint = "${getBaseUrl()}/v1/devices/$deviceId/telemetry"
@@ -229,7 +240,30 @@ class BriskApiClient(private val secureStorage: KeystoreSecureStorage) {
 
             okHttpClient.newCall(httpRequest).execute().use { response ->
                 if (response.isSuccessful) {
-                    Result.success(true)
+                    val bodyStr = response.body?.string() ?: ""
+                    val commandsList = mutableListOf<DeviceCommandPayload>()
+                    if (bodyStr.isNotEmpty()) {
+                        try {
+                            val json = JSONObject(bodyStr)
+                            val dataObj = json.optJSONObject("data") ?: json
+                            val cmdsArray = dataObj.optJSONArray("commands")
+                            if (cmdsArray != null) {
+                                for (i in 0 until cmdsArray.length()) {
+                                    val cmdObj = cmdsArray.getJSONObject(i)
+                                    commandsList.add(
+                                        DeviceCommandPayload(
+                                            id = cmdObj.optString("id"),
+                                            type = cmdObj.optString("type"),
+                                            payload = cmdObj.optJSONObject("payload")
+                                        )
+                                    )
+                                }
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Failed parsing commands array: ${e.message}")
+                        }
+                    }
+                    Result.success(DeviceTelemetryResponse(acknowledged = true, commands = commandsList))
                 } else {
                     Result.failure(IOException("Telemetry failed with HTTP ${response.code}"))
                 }

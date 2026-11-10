@@ -184,6 +184,10 @@ class KeystoreSecureStorage(private val context: Context) {
         get() = prefs.getBoolean(KEY_BULK_MESSAGING_ENABLED, true)
         set(value) = prefs.edit().putBoolean(KEY_BULK_MESSAGING_ENABLED, value).apply()
 
+    var preferredSimSlot: Int
+        get() = prefs.getInt("preferred_sim_slot", 1)
+        set(value) = prefs.edit().putInt("preferred_sim_slot", value).apply()
+
     /**
      * Wipes device credentials and resets application state on disconnection or revocation
      */

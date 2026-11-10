@@ -1,9 +1,24 @@
+import { randomUUID } from 'node:crypto';
 import { dbStore, DeviceRecord, DeviceTelemetryRecord } from '../../core/store.js';
 import { DeviceStatus, DeviceIngestionMode, UserRole } from '@brisksms/shared';
 import { HttpException } from '../../core/http.js';
 import { generateSecureToken, hashToken } from '../../core/crypto.js';
 import { entitlementService } from '../subscription/entitlement.service.js';
 import { withTransaction } from '@brisksms/db';
+
+export type DeviceCommandType = 'PAUSE_RELAY' | 'RESUME_RELAY' | 'SWITCH_SIM' | 'WIPE_AND_REVOKE';
+
+export interface DeviceCommand {
+  id: string;
+  deviceId: string;
+  type: DeviceCommandType;
+  payload?: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface DeviceTelemetryResult extends DeviceTelemetryRecord {
+  commands: DeviceCommand[];
+}
 
 export interface PairingTokenResponse {
   pairingToken: string;
@@ -145,7 +160,45 @@ export class DeviceService {
     return { device, telemetryHistory };
   }
 
-  async recordTelemetry(deviceId: string, deviceToken: string, dto: TelemetryDto): Promise<DeviceTelemetryRecord> {
+  private pendingCommands: Map<string, DeviceCommand[]> = new Map();
+
+  async queueCommand(
+    deviceId: string,
+    organizationId: string,
+    actorUserId: string,
+    commandType: DeviceCommandType,
+    payload?: Record<string, unknown>,
+  ): Promise<DeviceCommand> {
+    const mem = await dbStore.getMembership(organizationId, actorUserId);
+    if (!mem || ![UserRole.OWNER, UserRole.ADMIN].includes(mem.role)) {
+      throw new HttpException(403, 'INSUFFICIENT_PERMISSIONS', 'Only Owners and Admins can issue device commands');
+    }
+
+    const device = await dbStore.getDeviceById(deviceId, organizationId);
+    if (!device) {
+      throw new HttpException(404, 'DEVICE_NOT_FOUND', `Device '${deviceId}' not found in organization`);
+    }
+
+    const cmd: DeviceCommand = {
+      id: randomUUID(),
+      deviceId,
+      type: commandType,
+      payload,
+      createdAt: new Date().toISOString(),
+    };
+
+    const queue = this.pendingCommands.get(deviceId) || [];
+    queue.push(cmd);
+    this.pendingCommands.set(deviceId, queue);
+
+    if (commandType === 'WIPE_AND_REVOKE') {
+      await dbStore.revokeDevice(deviceId, organizationId, actorUserId);
+    }
+
+    return cmd;
+  }
+
+  async recordTelemetry(deviceId: string, deviceToken: string, dto: TelemetryDto): Promise<DeviceTelemetryResult> {
     const tokenHash = hashToken(deviceToken);
     const device = await dbStore.getDeviceByTokenHash(tokenHash);
 
@@ -157,7 +210,7 @@ export class DeviceService {
       throw new HttpException(403, 'DEVICE_REVOKED', 'This device has been revoked by the organization');
     }
 
-    return dbStore.recordTelemetry({
+    const telemetry = await dbStore.recordTelemetry({
       deviceId,
       batteryPct: Math.max(0, Math.min(100, dto.batteryPercentage ?? 100)),
       isCharging: Boolean(dto.isCharging),
@@ -165,6 +218,14 @@ export class DeviceService {
       signalStrengthDbm: dto.signalStrengthDbm ?? null,
       pendingOfflineCount: dto.pendingOfflineCount || 0,
     });
+
+    const commands = this.pendingCommands.get(deviceId) || [];
+    this.pendingCommands.delete(deviceId);
+
+    return {
+      ...telemetry,
+      commands,
+    };
   }
 
   async revokeDevice(deviceId: string, organizationId: string, actorUserId: string): Promise<DeviceRecord> {

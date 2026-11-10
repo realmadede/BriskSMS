@@ -69,6 +69,9 @@ interface SmsDispatchDao {
     @Query("SELECT COUNT(*) FROM sms_dispatch_queue WHERE simSlot = :slot AND status IN ('SUBMITTED', 'DELIVERED') AND createdAt >= :sinceTimestamp")
     suspend fun countSlotSentSince(slot: Int, sinceTimestamp: Long): Int
 
+    @Query("UPDATE sms_dispatch_queue SET simSlot = :slot, updatedAt = :now WHERE id = :id")
+    suspend fun updateSimSlot(id: String, slot: Int, now: Long = System.currentTimeMillis())
+
     @Query("SELECT * FROM sms_dispatch_queue ORDER BY createdAt DESC LIMIT 20")
     suspend fun getRecentDispatches(): List<SmsDispatchEntity>
 }

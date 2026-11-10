@@ -88,6 +88,15 @@ dependencies {
     // Android Keystore & Security Crypto
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
+    // CameraX for QR pairing viewfinder
+    val cameraxVersion = "1.3.2"
+    implementation("androidx.camera:camera-camera2:$cameraxVersion")
+    implementation("androidx.camera:camera-lifecycle:$cameraxVersion")
+    implementation("androidx.camera:camera-view:$cameraxVersion")
+
+    // Google ML Kit Barcode Scanning
+    implementation("com.google.mlkit:barcode-scanning:17.2.0")
+
     // Unit Testing
     testImplementation("junit:junit:4.13.2")
 }

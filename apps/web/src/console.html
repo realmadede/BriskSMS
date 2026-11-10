@@ -1108,6 +1108,7 @@
             </div>
           </div>
           <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.35rem;">Cryptographic ECDSA pairing handshake</div>
+          <div id="pairingTimerCountdown" style="font-size: 0.8rem; font-weight: 600; color: var(--accent, #E5853B); margin-top: 0.5rem;">Token expires in 05:00 (Single-use)</div>
         </div>
 
         <div style="display: flex; gap: 0.75rem;">
@@ -1989,12 +1990,30 @@
     }
 
     async function verifyPaymentAction(paymentId, candidateInvoiceId) {
+      let suggestedPrompt = 'Confirm or enter target Invoice ID to settle against this payment notification:';
+      let defaultId = candidateInvoiceId || '';
+
+      try {
+        const candidatesRes = await apiFetch(`/v1/reconciliation/payments/${paymentId}/candidates?organizationId=${currentSession.org.id}`);
+        const candidates = candidatesRes?.candidates || [];
+        if (candidates.length > 0) {
+          const top = candidates[0];
+          defaultId = defaultId || top.invoiceId;
+          const suggestionsText = candidates.slice(0, 3).map(c => 
+            `• ${c.referenceNumber}: ${c.customerName || 'Customer'} (TZS ${Number(c.balanceCents).toLocaleString()}, ${c.confidenceScore}% confidence)`
+          ).join('\n');
+          suggestedPrompt = `Top Candidate Invoices Discovered:\n${suggestionsText}\n\nConfirm or enter target Invoice ID:`;
+        }
+      } catch (e) {
+        // Fallback to standard prompt if candidates query fails
+      }
+
       const invoiceId = await showBriskDialog({
         title: 'Verify & Settle Payment',
-        message: 'Confirm or enter the target Invoice ID to settle against this payment notification:',
+        message: suggestedPrompt,
         input: true,
         inputLabel: 'Invoice ID:',
-        defaultValue: candidateInvoiceId || '',
+        defaultValue: defaultId,
         placeholder: 'e.g. inv_...',
         confirmText: 'Verify & Settle'
       });
@@ -2007,7 +2026,7 @@
               paymentId,
               invoiceId: typeof invoiceId === 'string' && invoiceId.trim() ? invoiceId.trim() : undefined,
               verificationMethod: 'MANUAL_FINANCE_APPROVAL',
-              notes: 'Accountant approved via BriskSMS Merchant Console'
+              notes: 'Accountant approved via BriskSMS Merchant Console candidate matcher'
             })
           });
           showToast('Payment verified and invoice settled successfully.', 'success');
@@ -2049,7 +2068,7 @@
       }
     }
 
-    // 3. Load Real Device Fleet from Backend
+    // 3. Load Real Device Fleet from Backend with Remote Fleet Controls
     async function loadDeviceFleet() {
       const fleet = document.getElementById('deviceFleetContainer');
       if (!fleet || !currentSession?.org?.id) return;
@@ -2074,21 +2093,23 @@
         }
 
         fleet.innerHTML = deviceList.map(d => `
-          <div style="background: #FFFFFF; border: 1px solid var(--border-subtle); border-radius: 12px; padding: 1.25rem; margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center;">
+          <div style="background: #FFFFFF; border: 1px solid var(--border-subtle); border-radius: 12px; padding: 1.25rem; margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
             <div style="display: flex; align-items: center; gap: 1rem;">
               <div style="width: 44px; height: 44px; border-radius: 10px; background: var(--bg-bone); display: flex; align-items: center; justify-content: center;">
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
               </div>
               <div>
-                <div style="font-weight: 700; font-size: 0.95rem;">${d.deviceName || d.deviceModel || 'Android Relay Device'}</div>
+                <div style="font-weight: 700; font-size: 0.95rem;">${d.label || d.deviceName || d.deviceModel || 'Android Relay Device'}</div>
                 <div style="font-size: 0.775rem; color: var(--text-muted); margin-top: 0.2rem;">
-                  Model: ${d.deviceModel || 'Android'} &bull; Status: ${d.status} &bull; Keystore Hardware Backed
+                  Model: ${d.deviceModel || 'Android'} &bull; Ingestion: ${d.ingestionMode || 'NOTIFICATION_LISTENER'} &bull; Status: ${d.status}
                 </div>
               </div>
             </div>
-            <div style="display: flex; align-items: center; gap: 1rem;">
+            <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
               <span class="status-pill ${d.status === 'ACTIVE' ? 'status-matched' : 'status-review'}">${d.status === 'ACTIVE' ? 'Online & Relaying' : d.status}</span>
-              <button class="btn btn-outline" style="padding: 0.4rem 0.8rem; font-size: 0.775rem;" onclick="showToast('Relay health ping: 21ms latency.', 'info')">Ping Device</button>
+              <button class="btn btn-outline" style="padding: 0.35rem 0.7rem; font-size: 0.75rem;" onclick="pauseDeviceAction('${d.id}')">Pause</button>
+              <button class="btn btn-outline" style="padding: 0.35rem 0.7rem; font-size: 0.75rem;" onclick="resumeDeviceAction('${d.id}')">Resume</button>
+              <button class="btn btn-outline" style="padding: 0.35rem 0.7rem; font-size: 0.75rem; color: #DC2626;" onclick="revokeDeviceAction('${d.id}')">Revoke</button>
             </div>
           </div>
         `).join('');
@@ -2097,7 +2118,59 @@
       }
     }
 
-    // 4. Real Device Pairing Modal Flow
+    async function pauseDeviceAction(deviceId) {
+      try {
+        await apiFetch(`/v1/devices/${deviceId}/command`, {
+          method: 'POST',
+          body: JSON.stringify({
+            organizationId: currentSession.org.id,
+            type: 'PAUSE_RELAY'
+          })
+        });
+        showToast('Remote PAUSE_RELAY command sent to device.', 'info');
+      } catch (err) {
+        showToast(err.message, 'warning');
+      }
+    }
+
+    async function resumeDeviceAction(deviceId) {
+      try {
+        await apiFetch(`/v1/devices/${deviceId}/command`, {
+          method: 'POST',
+          body: JSON.stringify({
+            organizationId: currentSession.org.id,
+            type: 'RESUME_RELAY'
+          })
+        });
+        showToast('Remote RESUME_RELAY command sent to device.', 'success');
+      } catch (err) {
+        showToast(err.message, 'warning');
+      }
+    }
+
+    async function revokeDeviceAction(deviceId) {
+      const confirmed = await showBriskDialog({
+        title: 'Revoke Android Device',
+        message: 'Are you sure you want to revoke this Android device? Its hardware keys will be invalidated and relay operations halted immediately.',
+        confirmText: 'Revoke Device'
+      });
+      if (confirmed) {
+        try {
+          await apiFetch(`/v1/devices/${deviceId}/revoke`, {
+            method: 'POST',
+            body: JSON.stringify({ organizationId: currentSession.org.id })
+          });
+          showToast('Device revoked successfully.', 'info');
+          loadDeviceFleet();
+        } catch (err) {
+          showToast(err.message, 'warning');
+        }
+      }
+    }
+
+    // 4. Real Device Pairing Modal Flow with 5-Minute Countdown
+    let pairingTimerInterval = null;
+
     async function openPairingModal() {
       resetPairingSteps();
       document.getElementById('pairingModal').classList.add('active');
@@ -2114,12 +2187,33 @@
             displayEl.textContent = rawToken;
           }
         }
+
+        // Initialize 5-minute countdown timer
+        const timerEl = document.getElementById('pairingTimerCountdown');
+        if (timerEl) {
+          if (pairingTimerInterval) clearInterval(pairingTimerInterval);
+          let remainingSeconds = 300;
+          const updateTimer = () => {
+            const mins = Math.floor(remainingSeconds / 60);
+            const secs = remainingSeconds % 60;
+            timerEl.textContent = `Token expires in ${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')} (Single-use)`;
+            if (remainingSeconds <= 0) {
+              clearInterval(pairingTimerInterval);
+              timerEl.textContent = 'Token expired. Please close and re-open to generate a new QR.';
+              timerEl.style.color = '#DC2626';
+            }
+            remainingSeconds--;
+          };
+          updateTimer();
+          pairingTimerInterval = setInterval(updateTimer, 1000);
+        }
       } catch (err) {
         console.warn('Pairing token generation error:', err);
       }
     }
 
     function closePairingModal() {
+      if (pairingTimerInterval) clearInterval(pairingTimerInterval);
       document.getElementById('pairingModal').classList.remove('active');
       resetPairingSteps();
     }

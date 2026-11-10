@@ -52,6 +52,21 @@ export interface VerificationSettlementResult {
   fulfillmentEligible: boolean;
 }
 
+export interface CandidateMatchSuggestion {
+  invoiceId: string;
+  referenceNumber: string;
+  totalAmountCents: bigint;
+  balanceCents: bigint;
+  currency: string;
+  status: InvoiceStatus;
+  customerName: string | null;
+  customerPhone: string | null;
+  dueDate: Date | null;
+  confidenceScore: number;
+  confidenceTier: string;
+  matchReasons: string[];
+}
+
 /**
  * Multi-Tier Deterministic Reconciliation Engine
  *
@@ -902,6 +917,96 @@ export class ReconciliationService {
       LIMIT 1
     `;
     return rows[0] ? mapNormalizedPaymentRow(rows[0]) : null;
+  }
+
+  /**
+   * Discovers candidate invoice matches for payments routed to REVIEW_REQUIRED or UNMATCHED.
+   * Provides non-authoritative ranking to assist human finance operators without guessing.
+   */
+  async findCandidateInvoicesForPayment(
+    organizationId: string,
+    paymentId: string,
+    tx: SqlExecutor = sql,
+  ): Promise<CandidateMatchSuggestion[]> {
+    assertTenantContext({ organizationId });
+
+    const payment = await this.findPaymentById(organizationId, paymentId, tx);
+    if (!payment) {
+      return [];
+    }
+
+    const openRows = await tx`
+      SELECT * FROM "invoices"
+      WHERE "organization_id" = ${organizationId}
+        AND "status" IN ('UNPAID', 'PARTIALLY_PAID')
+      ORDER BY "created_at" DESC
+      LIMIT 50
+    `;
+    const openInvoices = openRows.map(mapInvoiceRow);
+
+    const payRef = (payment.customerMemo || payment.reference).trim().toUpperCase();
+    const payPhone = this.normalizePhone(payment.senderPhone || '');
+    const payName = (payment.senderName || '').trim().toLowerCase();
+
+    const suggestions: CandidateMatchSuggestion[] = [];
+
+    for (const inv of openInvoices) {
+      let score = 0;
+      const reasons: string[] = [];
+      let tier = 'HEURISTIC';
+
+      // 1. Reference check
+      if (inv.referenceNumber.toUpperCase() === payRef) {
+        score += 90;
+        reasons.push('Exact reference match with payment memo');
+        tier = MatchConfidenceTier.TIER_1_EXACT_REFERENCE;
+      }
+
+      // 2. Phone check
+      const invPhone = this.normalizePhone(inv.customerPhone || '');
+      if (payPhone && invPhone && payPhone === invPhone) {
+        score += 45;
+        reasons.push('Customer phone matches payment sender');
+        if (score >= 90) {
+          tier = MatchConfidenceTier.TIER_2_CUSTOMER_IDENTIFIER;
+        }
+      }
+
+      // 3. Amount check
+      if (inv.balanceCents === payment.amountCents) {
+        score += 40;
+        reasons.push('Payment amount exactly matches open invoice balance');
+      } else if (inv.totalAmountCents === payment.amountCents) {
+        score += 25;
+        reasons.push('Payment amount matches total invoice amount');
+      }
+
+      // 4. Name check
+      const invName = (inv.customerName || '').trim().toLowerCase();
+      if (payName && invName && (payName === invName || payName.includes(invName) || invName.includes(payName))) {
+        score += 20;
+        reasons.push('Customer name matches payment sender');
+      }
+
+      if (score > 0) {
+        suggestions.push({
+          invoiceId: inv.id,
+          referenceNumber: inv.referenceNumber,
+          totalAmountCents: inv.totalAmountCents,
+          balanceCents: inv.balanceCents,
+          currency: inv.currency,
+          status: inv.status,
+          customerName: inv.customerName ?? null,
+          customerPhone: inv.customerPhone ?? null,
+          dueDate: inv.dueDate ?? null,
+          confidenceScore: Math.min(100, score),
+          confidenceTier: tier,
+          matchReasons: reasons,
+        });
+      }
+    }
+
+    return suggestions.sort((a, b) => b.confidenceScore - a.confidenceScore);
   }
 
   private normalizePhone(phone: string): string {

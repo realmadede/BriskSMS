@@ -32,10 +32,12 @@ class SmsDispatcher(
         const val ACTION_SMS_SENT = "tz.co.brisksms.SMS_SENT"
         const val ACTION_SMS_DELIVERED = "tz.co.brisksms.SMS_DELIVERED"
         const val EXTRA_DISPATCH_ID = "dispatch_id"
+        const val DEFAULT_SIM_DAILY_CAP = 400
     }
 
     /**
      * Executes atomic SMS dispatch through designated SIM slot with idempotency guard
+     * and carrier daily limit auto-failover across active SIM slots.
      */
     suspend fun dispatchMessage(
         dispatch: SmsDispatchEntity,
@@ -48,10 +50,38 @@ class SmsDispatcher(
             return DispatchOutcome.DuplicateIgnored(dispatch.id)
         }
 
-        // 2. Resolve target SIM subscription
-        val subId = simManager.resolveSubscriptionId(dispatch.simSlot)
+        // 2. Carrier Daily Quota & Smart SIM Failover
+        val startOfDay = java.util.Calendar.getInstance().apply {
+            set(java.util.Calendar.HOUR_OF_DAY, 0)
+            set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }.timeInMillis
+
+        var effectiveSlot = dispatch.simSlot
+        val sentToday = dispatchDao.countSlotSentSince(effectiveSlot, startOfDay)
+
+        if (sentToday >= DEFAULT_SIM_DAILY_CAP) {
+            val altSlot = if (effectiveSlot == 1) 2 else 1
+            val altSentToday = dispatchDao.countSlotSentSince(altSlot, startOfDay)
+            val altSubId = simManager.resolveSubscriptionId(altSlot)
+
+            if (altSubId != null && altSentToday < DEFAULT_SIM_DAILY_CAP) {
+                Log.i(TAG, "Carrier limit safeguard: SIM $effectiveSlot reached daily cap ($sentToday/$DEFAULT_SIM_DAILY_CAP). Dynamic failover to SIM $altSlot ($altSentToday sent today).")
+                effectiveSlot = altSlot
+                dispatchDao.updateSimSlot(dispatch.id, altSlot)
+            } else {
+                val quotaError = "Carrier daily limit ($DEFAULT_SIM_DAILY_CAP SMS/day) reached across all available SIM slots. Dispatch paused to protect SIM reputation."
+                Log.w(TAG, quotaError)
+                dispatchDao.markFailed(dispatch.id, quotaError)
+                return DispatchOutcome.Failed(dispatch.id, quotaError)
+            }
+        }
+
+        // 3. Resolve target SIM subscription
+        val subId = simManager.resolveSubscriptionId(effectiveSlot)
         if (subId == null) {
-            val err = "Designated SIM slot ${dispatch.simSlot} is absent or inactive"
+            val err = "Designated SIM slot $effectiveSlot is absent or inactive"
             Log.e(TAG, err)
             dispatchDao.markFailed(dispatch.id, err)
             return DispatchOutcome.Failed(dispatch.id, err)
@@ -113,8 +143,8 @@ class SmsDispatcher(
             }
 
             dispatchDao.updateStatus(dispatch.id, DispatchState.SUBMITTED.name, "cell_${System.currentTimeMillis()}")
-            Log.i(TAG, "Successfully submitted SMS [${dispatch.id}] to SIM slot ${dispatch.simSlot} (${parts.size} parts)")
-            DispatchOutcome.Submitted(dispatch.id, parts.size, dispatch.simSlot)
+            Log.i(TAG, "Successfully submitted SMS [${dispatch.id}] to SIM slot $effectiveSlot (${parts.size} parts)")
+            DispatchOutcome.Submitted(dispatch.id, parts.size, effectiveSlot)
         } catch (e: SecurityException) {
             val err = "Missing SEND_SMS permission: ${e.message}"
             Log.e(TAG, err)

@@ -81,6 +81,24 @@ export function registerReconciliationRoutes(router: Router): void {
     };
   });
 
+  // 2b. Get Candidate Invoices for Review Queue Payment
+  router.get('/v1/reconciliation/payments/:id/candidates', async (req: RouteRequest): Promise<ApiResponse> => {
+    authenticate(req);
+    const userId = req.context.userId!;
+    const paymentId = req.params.id || '';
+    const orgId = req.query.organizationId || req.context.organizationId;
+    if (!orgId) {
+      throw new HttpException(400, 'VALIDATION_ERROR', 'organizationId is required');
+    }
+    await assertOrgAccess(orgId, userId);
+
+    const candidates = await reconciliationService.findCandidateInvoicesForPayment(orgId, paymentId);
+    return {
+      success: true,
+      data: { candidates },
+    };
+  });
+
   // 3. List Invoices
   router.get('/v1/reconciliation/invoices', async (req: RouteRequest): Promise<ApiResponse> => {
     authenticate(req);
