@@ -113,12 +113,36 @@ export function registerAuthRoutes(router: Router): void {
   });
 
   async function handleGoogleNonce(req: RouteRequest): Promise<ApiResponse> {
-    // Origin & Fetch Metadata defense against cross-site nonce generation
+    // 1. Anti-prefetch defense against browser link prefetching or search preview
+    const purpose = req.headers['purpose'] || req.headers['sec-purpose'];
+    if (purpose === 'prefetch' || purpose === 'preview') {
+      throw new HttpException(400, 'PREFETCH_FORBIDDEN', 'Nonce prefetching is strictly prohibited');
+    }
+
+    // 2. Anti-navigation defense: Nonce issuance must be a programmatic API call, never top-level document navigation
+    if (req.headers['sec-fetch-mode'] === 'navigate') {
+      throw new HttpException(403, 'NAVIGATION_FORBIDDEN', 'Top-level navigation to nonce endpoint is prohibited');
+    }
+
+    // 3. Origin & Fetch Metadata defense against cross-site nonce generation
     if (req.headers.origin && !isAllowedOrigin(req.headers.origin as string)) {
       throw new HttpException(403, 'CSRF_ORIGIN_MISMATCH', `Request origin '${req.headers.origin}' is not authorized`);
     }
     if (req.headers['sec-fetch-site'] === 'cross-site') {
       throw new HttpException(403, 'CSRF_CROSS_SITE_FORBIDDEN', 'Cross-site request blocked by Fetch Metadata policy');
+    }
+
+    // 4. Strict Referer check for requests without Origin (e.g. GET requests in certain user agents)
+    if (!req.headers.origin && req.headers.referer) {
+      try {
+        const refOrigin = new URL(req.headers.referer as string).origin;
+        if (!isAllowedOrigin(refOrigin)) {
+          throw new HttpException(403, 'CSRF_ORIGIN_MISMATCH', `Referer origin '${refOrigin}' is not authorized`);
+        }
+      } catch (err) {
+        if (err instanceof HttpException) throw err;
+        throw new HttpException(403, 'CSRF_ORIGIN_MISMATCH', 'Malformed referer URL');
+      }
     }
 
     const clientIp = extractClientIp(req);
@@ -132,7 +156,7 @@ export function registerAuthRoutes(router: Router): void {
       {
         name: GOOGLE_NONCE_COOKIE_NAME,
         value: result.nonceHash,
-        options: getGoogleNonceCookieOptions(),
+        options: getGoogleNonceCookieOptions(result.expiresIn),
       },
     ];
 
@@ -141,6 +165,11 @@ export function registerAuthRoutes(router: Router): void {
       data: {
         nonce: result.nonce,
         expiresIn: result.expiresIn,
+      },
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, private',
+        'Pragma': 'no-cache',
+        'Expires': '0',
       },
       cookies,
     };

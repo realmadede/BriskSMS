@@ -6,6 +6,7 @@ import { sql, withTransaction, redisClient, isSimulatedRedisOutage, RedisUnavail
 import { randomUUID, createHash, timingSafeEqual } from 'node:crypto';
 import { GoogleTokenVerifier, googleTokenVerifier } from './providers/google.provider.js';
 import { EmailService, emailService } from './services/email.service.js';
+import { getGoogleNonceTtl } from '../../core/cookies.js';
 
 export interface RegisterDto {
   email: string;
@@ -86,7 +87,7 @@ export class AuthService {
   }> {
     const rawNonce = generateSecureToken('bsk_gn', 32);
     const nonceHash = hashToken(rawNonce);
-    const ttlSec = parseInt(process.env.GOOGLE_NONCE_TTL_SECONDS || '300', 10);
+    const ttlSec = getGoogleNonceTtl();
     const expiresAt = Date.now() + ttlSec * 1000;
     const isProdOrStaging = process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'staging';
 

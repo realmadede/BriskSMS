@@ -2580,10 +2580,17 @@
           return;
         }
 
-        // 3. Fallback dialog for headless or manual testing environments
+        // 3. Fallback handling when Google Identity Services SDK is not loaded
+        const isLocalDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.endsWith('.local');
+        if (!isLocalDev) {
+          // Strictly fail closed in production runtime without displaying raw nonces or manual token dialogs
+          throw new Error('Google Identity Services is unavailable. Please verify your internet connection or ad-blocker and reload.');
+        }
+
+        // Local development/test double fallback only
         const token = await showBriskDialog({
-          title: 'Google Identity Sign-In',
-          message: `Active Server Nonce: ${serverNonce}\nProvide your Google ID token with matching nonce claim:`,
+          title: 'Google Identity Sign-In (Local Dev Double)',
+          message: 'Provide your test Google ID token with matching nonce claim to simulate Google SSO in local development:',
           inputPlaceholder: 'eyJhbGciOiJSUzI1NiIsImtpZCI...',
           confirmText: 'Sign In with Google'
         });

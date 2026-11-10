@@ -16,6 +16,7 @@ export interface ApiResponse<T = unknown> {
   data?: T;
   meta?: Record<string, unknown>;
   cookies?: CookieToSet[];
+  headers?: Record<string, string>;
   error?: {
     code: string;
     message: string;
@@ -231,10 +232,16 @@ export class Router {
         res.setHeader('Set-Cookie', serialized);
       }
 
+      if (response && response.headers) {
+        for (const [hName, hVal] of Object.entries(response.headers)) {
+          res.setHeader(hName, hVal);
+        }
+      }
+
       if (response) {
         const defaultStatus = method === 'POST' && pathname.endsWith('/register') ? 201 : 200;
         const status = response.statusCode ?? defaultStatus;
-        const { statusCode: _omit, cookies: _omitCookies, ...payload } = response;
+        const { statusCode: _omit, cookies: _omitCookies, headers: _omitHeaders, ...payload } = response;
         res.writeHead(status);
         res.end(
           JSON.stringify(payload, (_key, value) =>

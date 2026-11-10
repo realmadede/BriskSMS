@@ -14,6 +14,9 @@ import {
   REFRESH_COOKIE_NAME,
   CSRF_COOKIE_NAME,
   GOOGLE_NONCE_COOKIE_NAME,
+  GOOGLE_NONCE_LIFETIME_SECONDS,
+  getGoogleNonceTtl,
+  getGoogleNonceCookieOptions,
 } from '../src/core/cookies.js';
 import { sql, redisClient, setSimulatedRedisOutage } from '@brisksms/db';
 import { runMaintenanceCleanup, MaintenanceRunner } from '@brisksms/worker';
@@ -565,7 +568,7 @@ describe('Google Sign-In & Resend Email Verification Security Suite', () => {
       assert.ok(cookieRaw.includes('Max-Age=300'), 'bsk_g_nonce must have Max-Age=300');
     });
 
-    it('supports GET /v1/auth/google/nonce for client pre-flight handshake', async () => {
+    it('supports GET /v1/auth/google/nonce for client pre-flight handshake with no-store cache headers', async () => {
       const res = await makeRequest(
         'GET',
         '/v1/auth/google/nonce',
@@ -578,6 +581,89 @@ describe('Google Sign-In & Resend Email Verification Security Suite', () => {
       assert.equal(res.json.data.expiresIn, 300);
       const cookie = extractCookie(res.setCookies, GOOGLE_NONCE_COOKIE_NAME);
       assert.ok(cookie);
+
+      // Verify anti-caching headers
+      const cacheControl = res.headers['cache-control'];
+      assert.ok(typeof cacheControl === 'string' && cacheControl.includes('no-store'), 'Must include Cache-Control: no-store');
+      assert.ok(typeof cacheControl === 'string' && cacheControl.includes('no-cache'), 'Must include Cache-Control: no-cache');
+      assert.equal(res.headers['pragma'], 'no-cache');
+    });
+
+    it('rejects accidental prefetching on GET /v1/auth/google/nonce with 400 PREFETCH_FORBIDDEN', async () => {
+      // 1. purpose: prefetch
+      const prefetchRes = await makeRequest(
+        'GET',
+        '/v1/auth/google/nonce',
+        { host: 'localhost:3000', purpose: 'prefetch' },
+      );
+      assert.equal(prefetchRes.statusCode, 400);
+      assert.equal(prefetchRes.json.error.code, 'PREFETCH_FORBIDDEN');
+
+      // 2. sec-purpose: prefetch
+      const secPurposeRes = await makeRequest(
+        'GET',
+        '/v1/auth/google/nonce',
+        { host: 'localhost:3000', 'sec-purpose': 'prefetch' },
+      );
+      assert.equal(secPurposeRes.statusCode, 400);
+      assert.equal(secPurposeRes.json.error.code, 'PREFETCH_FORBIDDEN');
+    });
+
+    it('rejects top-level browser navigation on GET /v1/auth/google/nonce with 403 NAVIGATION_FORBIDDEN', async () => {
+      const navRes = await makeRequest(
+        'GET',
+        '/v1/auth/google/nonce',
+        { host: 'localhost:3000', 'sec-fetch-mode': 'navigate' },
+      );
+      assert.equal(navRes.statusCode, 403);
+      assert.equal(navRes.json.error.code, 'NAVIGATION_FORBIDDEN');
+    });
+
+    it('rejects untrusted referer on GET /v1/auth/google/nonce with 403 CSRF_ORIGIN_MISMATCH', async () => {
+      const refRes = await makeRequest(
+        'GET',
+        '/v1/auth/google/nonce',
+        { host: 'localhost:3000', referer: 'https://evil-phishing.com/login' },
+      );
+      assert.equal(refRes.statusCode, 403);
+      assert.equal(refRes.json.error.code, 'CSRF_ORIGIN_MISMATCH');
+    });
+
+    it('validates GOOGLE_NONCE_TTL_SECONDS against unsafe or out-of-range values and synchronizes cookie Max-Age', () => {
+      const origEnv = process.env.GOOGLE_NONCE_TTL_SECONDS;
+      try {
+        // 1. Unset: defaults to fixed 300 seconds
+        delete process.env.GOOGLE_NONCE_TTL_SECONDS;
+        assert.equal(GOOGLE_NONCE_LIFETIME_SECONDS, 300);
+        assert.equal(getGoogleNonceTtl(), 300);
+        assert.equal(getGoogleNonceCookieOptions().maxAge, 300);
+
+        // 2. Unsafe NaN: falls back safely to 300
+        process.env.GOOGLE_NONCE_TTL_SECONDS = 'invalid-nan-value';
+        assert.equal(getGoogleNonceTtl(), 300);
+        assert.equal(getGoogleNonceCookieOptions().maxAge, 300);
+
+        // 3. Unsafe negative or zero value: falls back safely to 300
+        process.env.GOOGLE_NONCE_TTL_SECONDS = '-100';
+        assert.equal(getGoogleNonceTtl(), 300);
+        process.env.GOOGLE_NONCE_TTL_SECONDS = '0';
+        assert.equal(getGoogleNonceTtl(), 300);
+
+        // 4. Excessively large value (> 900s / 15m): falls back safely to 300
+        process.env.GOOGLE_NONCE_TTL_SECONDS = '86400';
+        assert.equal(getGoogleNonceTtl(), 300);
+
+        // 5. Valid bounded value (e.g. 180s): accepted and synchronized to cookie
+        process.env.GOOGLE_NONCE_TTL_SECONDS = '180';
+        assert.equal(getGoogleNonceTtl(), 180);
+        assert.equal(getGoogleNonceCookieOptions().maxAge, 180);
+      } finally {
+        if (origEnv !== undefined) {
+          process.env.GOOGLE_NONCE_TTL_SECONDS = origEnv;
+        } else {
+          delete process.env.GOOGLE_NONCE_TTL_SECONDS;
+        }
+      }
     });
 
     it('rejects unauthorized origin on nonce creation with 403 CSRF_ORIGIN_MISMATCH', async () => {

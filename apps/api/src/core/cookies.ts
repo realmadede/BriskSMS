@@ -28,7 +28,22 @@ export const GOOGLE_NONCE_COOKIE_NAME = 'bsk_g_nonce';
 export const SESSION_COOKIE_MAX_AGE = 900; // 15 minutes (matches JWT access token)
 export const REFRESH_COOKIE_MAX_AGE = 30 * 86400; // 30 days
 export const CSRF_COOKIE_MAX_AGE = 86400; // 24 hours
-export const GOOGLE_NONCE_COOKIE_MAX_AGE = 300; // 5 minutes
+export const GOOGLE_NONCE_LIFETIME_SECONDS = 300; // Fixed 5-minute OpenID Connect nonce lifetime
+export const GOOGLE_NONCE_COOKIE_MAX_AGE = GOOGLE_NONCE_LIFETIME_SECONDS; // Deprecated alias for backwards compatibility
+
+/**
+ * Returns effective Google OpenID Connect nonce TTL, validating against unsafe or out-of-bounds values.
+ * Enforces bounds: positive integer between 30 and 900 seconds (defaults to fixed 300 seconds).
+ */
+export function getGoogleNonceTtl(): number {
+  const envVal = process.env.GOOGLE_NONCE_TTL_SECONDS;
+  if (!envVal) return GOOGLE_NONCE_LIFETIME_SECONDS;
+  const parsed = parseInt(envVal, 10);
+  if (!Number.isFinite(parsed) || parsed < 30 || parsed > 900) {
+    return GOOGLE_NONCE_LIFETIME_SECONDS;
+  }
+  return parsed;
+}
 
 export function getSessionCookieOptions(): CookieOptions {
   return {
@@ -60,13 +75,13 @@ export function getCsrfCookieOptions(): CookieOptions {
   };
 }
 
-export function getGoogleNonceCookieOptions(): CookieOptions {
+export function getGoogleNonceCookieOptions(ttlSeconds: number = getGoogleNonceTtl()): CookieOptions {
   return {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'Lax',
     path: '/v1/auth/google',
-    maxAge: GOOGLE_NONCE_COOKIE_MAX_AGE,
+    maxAge: ttlSeconds,
   };
 }
 
