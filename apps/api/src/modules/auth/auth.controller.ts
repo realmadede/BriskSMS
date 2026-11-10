@@ -280,12 +280,16 @@ export function registerAuthRoutes(router: Router): void {
       // Allow clean logout even if session was expired
     }
 
-    // Revoke refresh token in database if present in cookies
-    const rawRefresh = req.cookies[REFRESH_COOKIE_NAME];
+    // Revoke refresh token and its entire session family in database if present in cookies or body
+    const rawRefresh = req.cookies[REFRESH_COOKIE_NAME] || (req.body?.refreshToken as string);
     if (rawRefresh) {
       const refreshHash = hashToken(rawRefresh);
       await sql`
-        UPDATE "refresh_tokens" SET "revoked_at" = NOW() WHERE "token_hash" = ${refreshHash}
+        UPDATE "refresh_tokens"
+        SET "revoked_at" = NOW()
+        WHERE "family_id" IN (
+          SELECT "family_id" FROM "refresh_tokens" WHERE "token_hash" = ${refreshHash}
+        ) AND "revoked_at" IS NULL
       `;
     }
 

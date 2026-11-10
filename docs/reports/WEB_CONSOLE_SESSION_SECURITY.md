@@ -63,6 +63,24 @@ In Login CSRF, an attacker crafts a malicious webpage that submits credentials f
 - **Replay Attack Resistance:** Subsequent attempts to reuse an old, revoked refresh token fail with `401 INVALID_TOKEN`.
 - **Concurrency Safety:** Parallel requests attempting to consume the same refresh token are serialized by the `FOR UPDATE` row lock. Exactly one request acquires the lock and succeeds; the second request unblocks, detects that `revoked_at` is now set, and terminates with `401 INVALID_TOKEN`. Branching of valid sessions is physically prevented.
 
+### 3.4 Refresh Token Family Revocation & Compromise Defense
+- **Stable Token Family Identity:** Every refresh token chain originates with a stable UUID `family_id` (migration `20261111000000_refresh_token_family_revocation`).
+- **Rotation Inheritance:** When a token is successfully rotated via `POST /v1/auth/refresh`, the newly minted child token inherits the identical `family_id` from its parent.
+- **Atomic Replay & Theft Detection:** When an already-consumed or revoked token (`record.revoked_at !== null`) is presented:
+  1. The API immediately recognizes a potential replay / credential theft condition.
+  2. The server durably revokes **all** active tokens belonging to that `family_id`:
+     ```sql
+     UPDATE "refresh_tokens"
+     SET "revoked_at" = NOW()
+     WHERE "family_id" = $1 AND "revoked_at" IS NULL
+     ```
+  3. The associated access token JTI is blacklisted in Redis.
+  4. The request terminates with HTTP `401 INVALID_TOKEN`.
+- **Descendant Invalidation:** If an attacker replays token $T_1$ after the legitimate client rotated to $T_2$ and $T_3$, the family revocation instantly invalidates $T_2$ and $T_3$. Any subsequent attempt by the legitimate client or attacker using $T_3$ fails with HTTP `401 INVALID_TOKEN`.
+- **Session Logout Semantics:** Explicit logout via `POST /v1/auth/logout` atomically revokes all tokens within the associated `family_id`, ensuring no orphaned descendants can be used to mint new access tokens.
+- **Family Isolation:** Revocation of one token family (e.g. from a compromised device or logout) has zero impact on independent token families for the same user (e.g. active sessions on another device or browser).
+- **Test Evidence:** Verified by 10 comprehensive regression tests in `apps/api/test/refresh-token-family.test.ts`.
+
 ---
 
 ## 4. Cryptographic CSRF Implementation & Malformed Token Defense

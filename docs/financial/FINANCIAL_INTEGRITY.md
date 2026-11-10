@@ -216,8 +216,8 @@ Audit records are strictly read-only and indexed by `organization_id`, `resource
 | `PENDING` | Credit deducted and `sms_messages(QUEUED)` committed in one transaction. Gateway **definitely not contacted**. | Deducted | Safe to dispatch: a retry with the same key, or `recoverStaleDispatches()`, claims and dispatches it. |
 | `DISPATCHING` | Claimed by exactly one dispatcher under a 60 s lease (PostgreSQL clock). Gateway **may have been contacted**. | Deducted | Never re-dispatched. Lease expiry moves it to `UNCERTAIN`. |
 | `COMPLETED` | Gateway accepted the request (2xx). Message `SUBMITTED`; webhooks track delivery. | Deducted | None. |
-| `FAILED` | Definitive rejection (HTTP 400, 401, 403, 404, 413, 422, 429, or a pre-flight validation failure). | Refunded **in the same transaction** as the status change, keyed `refund_<messageId>`. | None; refund is reference-idempotent. |
-| `UNCERTAIN` | Outcome unknowable: timeout, connection reset, 5xx, 408/409, unreadable 2xx body, expired lease. Message stays `QUEUED`, no provider id. | **Kept** | **No automatic refund and no re-dispatch.** Listed by `listUncertainDispatches(orgId)` for operator reconciliation. |
+| `FAILED` | Definitive rejection (HTTP 400, 401, 403, 404, 413, 422, or a pre-flight validation failure). | Refunded **in the same transaction** as the status change, keyed `refund_<messageId>`. | None; refund is reference-idempotent. |
+| `UNCERTAIN` | Outcome unknowable: timeout, connection reset, 5xx, 408/409/429 (rate-limited upstream where cellular queue acceptance state is ambiguous), unreadable 2xx body, expired lease. Message stays `QUEUED`, no provider id. | **Kept** | **No automatic refund and no re-dispatch.** Listed by `listUncertainDispatches(orgId)` for operator reconciliation. |
 
 Invariants:
 

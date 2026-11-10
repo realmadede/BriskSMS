@@ -641,10 +641,10 @@ describe('Durable Message Dispatch Idempotency & Gateway Outcome Reconciliation'
     };
 
     assert.equal(await run(async () => new Response(JSON.stringify({ id: 'm1' }), { status: 202 })), 'DISPATCHED');
-    for (const status of [400, 401, 403, 404, 422, 429]) {
+    for (const status of [400, 401, 403, 404, 422]) {
       assert.equal(await run(async () => new Response('no', { status })), 'FAILED', `HTTP ${status} is a definitive rejection`);
     }
-    for (const status of [408, 409, 500, 502, 503, 504]) {
+    for (const status of [408, 409, 429, 500, 502, 503, 504]) {
       assert.equal(await run(async () => new Response('?', { status })), 'UNCERTAIN', `HTTP ${status} is uncertain`);
     }
     assert.equal(await run(async () => { throw new Error('ECONNRESET'); }), 'UNCERTAIN');

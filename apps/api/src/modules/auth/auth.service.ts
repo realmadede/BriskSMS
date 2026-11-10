@@ -248,11 +248,12 @@ export class AuthService {
 
       const rawRefreshToken = generateSecureToken('bsk_ref');
       const refreshHash = hashToken(rawRefreshToken);
+      const familyId = randomUUID();
       const refreshExpiresAt = new Date(Date.now() + 30 * 86400 * 1000);
 
       await tx`
-        INSERT INTO "refresh_tokens" ("token_hash", "user_id", "jti", "expires_at")
-        VALUES (${refreshHash}, ${user.id}, ${jti}, ${refreshExpiresAt})
+        INSERT INTO "refresh_tokens" ("token_hash", "user_id", "family_id", "jti", "expires_at")
+        VALUES (${refreshHash}, ${user.id}, ${familyId}, ${jti}, ${refreshExpiresAt})
       `;
 
       // 2. Generate and persist single-use email verification token
@@ -351,11 +352,12 @@ export class AuthService {
 
     const rawRefreshToken = generateSecureToken('bsk_ref');
     const refreshHash = hashToken(rawRefreshToken);
+    const familyId = randomUUID();
     const expiresAt = new Date(Date.now() + 30 * 86400 * 1000);
 
     await sql`
-      INSERT INTO "refresh_tokens" ("token_hash", "user_id", "jti", "expires_at")
-      VALUES (${refreshHash}, ${user.id}, ${jti}, ${expiresAt})
+      INSERT INTO "refresh_tokens" ("token_hash", "user_id", "family_id", "jti", "expires_at")
+      VALUES (${refreshHash}, ${user.id}, ${familyId}, ${jti}, ${expiresAt})
     `;
 
     const { passwordHash: _, ...userSafe } = user;
@@ -509,11 +511,12 @@ export class AuthService {
 
           const rawRefreshToken = generateSecureToken('bsk_ref');
           const refreshHash = hashToken(rawRefreshToken);
+          const familyId = randomUUID();
           const expiresAt = new Date(Date.now() + 30 * 86400 * 1000);
 
           await tx`
-            INSERT INTO "refresh_tokens" ("token_hash", "user_id", "jti", "expires_at")
-            VALUES (${refreshHash}, ${user.id}, ${jti}, ${expiresAt})
+            INSERT INTO "refresh_tokens" ("token_hash", "user_id", "family_id", "jti", "expires_at")
+            VALUES (${refreshHash}, ${user.id}, ${familyId}, ${jti}, ${expiresAt})
           `;
 
           const { passwordHash: _, ...userSafe } = user;
@@ -670,7 +673,31 @@ export class AuthService {
       `;
       const record = tokenRows[0];
 
-      if (!record || record.revoked_at || new Date(record.expires_at) < new Date()) {
+      if (!record) {
+        throw new HttpException(401, 'INVALID_TOKEN', 'Refresh token is expired or invalid');
+      }
+
+      // Replay Detection: If the token was already consumed or revoked, revoke its entire family!
+      if (record.revoked_at) {
+        // Durably revoke all active tokens in the same family in PostgreSQL
+        await sql`
+          UPDATE "refresh_tokens"
+          SET "revoked_at" = NOW()
+          WHERE "family_id" = ${record.family_id}
+            AND "revoked_at" IS NULL
+        `;
+        if (record.jti) {
+          tokenBlacklist.add(record.jti);
+          await sql`
+            INSERT INTO "revoked_sessions" ("jti", "user_id", "expires_at", "revoked_at")
+            VALUES (${record.jti}, ${record.user_id}, NOW() + INTERVAL '1 day', NOW())
+            ON CONFLICT ("jti") DO UPDATE SET "revoked_at" = NOW()
+          `;
+        }
+        throw new HttpException(401, 'INVALID_TOKEN', 'Refresh token is expired or invalid (consumed; entire session family revoked)');
+      }
+
+      if (new Date(record.expires_at) < new Date()) {
         throw new HttpException(401, 'INVALID_TOKEN', 'Refresh token is expired or invalid');
       }
 
@@ -704,9 +731,10 @@ export class AuthService {
       const newRefreshHash = hashToken(newRawRefreshToken);
       const expiresAt = new Date(Date.now() + 30 * 86400 * 1000);
 
+      // Child token inherits the exact same family_id
       await tx`
-        INSERT INTO "refresh_tokens" ("token_hash", "user_id", "jti", "expires_at")
-        VALUES (${newRefreshHash}, ${user.id}, ${newJti}, ${expiresAt})
+        INSERT INTO "refresh_tokens" ("token_hash", "user_id", "family_id", "jti", "expires_at")
+        VALUES (${newRefreshHash}, ${user.id}, ${record.family_id}, ${newJti}, ${expiresAt})
       `;
 
       return {
@@ -724,7 +752,15 @@ export class AuthService {
       await sql`
         INSERT INTO "revoked_sessions" ("jti", "user_id", "expires_at", "revoked_at")
         VALUES (${jti}, ${userId ?? null}, ${expiresAt}, NOW())
-        ON CONFLICT ("jti") DO NOTHING
+        ON CONFLICT ("jti") DO UPDATE SET "revoked_at" = NOW()
+      `;
+      // Revoke any refresh token family bound to this jti
+      await sql`
+        UPDATE "refresh_tokens"
+        SET "revoked_at" = NOW()
+        WHERE "family_id" IN (
+          SELECT "family_id" FROM "refresh_tokens" WHERE "jti" = ${jti}
+        ) AND "revoked_at" IS NULL
       `;
     }
   }

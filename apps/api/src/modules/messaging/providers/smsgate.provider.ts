@@ -22,9 +22,12 @@ const SMSGATE_REQUEST_TIMEOUT_MS = 15_000;
  *   - 404: Not Found; route or device does not exist.
  *   - 413: Payload Too Large; body exceeds max size rejected before queue.
  *   - 422: Unprocessable Entity; invalid recipient format or unroutable number.
- *   - 429: Rate Limit Error; rejected before queue with backoff signal.
  *
- * CRITICAL FINANCIAL INVARIANT:
+ * CRITICAL FINANCIAL & PROTOCOL INVARIANTS:
+ * - HTTP 429 (Too Many Requests / Rate Limit): Without authoritative vendor documentation guaranteeing that
+ *   SMSGate rejects the request strictly prior to cellular queuing, HTTP 429 is treated as UNCERTAIN.
+ *   Credits are NEVER automatically refunded and the message is NEVER blindly re-dispatched.
+ *   Live staging validation is required to determine if 429 can ever be treated as definitive rejection.
  * - HTTP 409 (Conflict): Returned when a resource or message already exists in a conflicting/non-pending state.
  *   The gateway DOES NOT guarantee the message was not accepted or will not be transmitted.
  * - HTTP 408 (Request Timeout): Upstream or proxy timeout; message may have reached the gateway.
@@ -33,7 +36,7 @@ const SMSGATE_REQUEST_TIMEOUT_MS = 15_000;
  *
  * All of these are strictly classified as UNCERTAIN: NEVER blindly refunded, NEVER re-dispatched.
  */
-const SMSGATE_DEFINITIVE_REJECTION_STATUSES = new Set([400, 401, 403, 404, 413, 422, 429]);
+const SMSGATE_DEFINITIVE_REJECTION_STATUSES = new Set([400, 401, 403, 404, 413, 422]);
 
 export interface WebhookVerificationResult {
   isValid: boolean;

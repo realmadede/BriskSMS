@@ -95,7 +95,7 @@ Commit Signature:    ED25519 (Key ID: SHA256:9lhgsJOaPG2FrX2fmo8XrZxX8z9UvmwwxGH
 | **Token Representation** | Earlier design contemplated signed JWT refresh tokens. | **Opaque high-entropy tokens** (`generateSecureToken('bsk_ref')`), hashed with SHA-256 before storage. | Stored in PostgreSQL `refresh_tokens.token_hash`. `JWT_REFRESH_SECRET` and `JWT_REFRESH_EXPIRES_IN` are unused legacy variables. | `VERIFIED IN CODE` |
 | **Refresh Rotation** | Rotates refresh token upon consumption. | Consumed token marked `revoked_at = NOW()`; fresh child token issued in same ACID transaction. | `UPDATE refresh_tokens SET revoked_at = NOW() WHERE token_hash = ... FOR UPDATE`. | `VERIFIED BY AUTOMATED TEST` |
 | **Replay Defense** | Replay of revoked token is rejected. | Replayed token fails with HTTP 401 `INVALID_TOKEN`. | Row-level locking (`SELECT ... FOR UPDATE`) prevents concurrent branch split. | `VERIFIED BY AUTOMATED TEST` |
-| **Family Revocation** | Described in generic threat models. | **Not implemented.** If an old token is replayed, only that attempt fails; descendant active tokens for the family are not retroactively revoked. | No recursive `family_id` column in schema. | `NOT IMPLEMENTED` |
+| **Family Revocation** | Token replay triggers revocation of entire token family. | **Implemented & Verified.** Presenting an already-consumed or revoked token atomically revokes all tokens matching `family_id` (`UPDATE refresh_tokens SET revoked_at = NOW() WHERE family_id = ... AND revoked_at IS NULL`), blacklists JTI in Redis, and rejects with HTTP 401 `INVALID_TOKEN`. Descendant tokens are invalidated. | `family_id UUID NOT NULL DEFAULT gen_random_uuid()` with index `@@index([familyId])` (migration `20261111000000_refresh_token_family_revocation`). | `VERIFIED BY AUTOMATED TEST` |
 
 > [!NOTE]
 > **Resolution of Refresh Lifetime Discrepancy:**  
@@ -126,21 +126,22 @@ Definitive Rejection Statuses (FAILED):
   - 404: Route or device not found
   - 413: Payload too large
   - 422: Unprocessable entity (unroutable phone number)
-  - 429: Rate limit exceeded (See audit disclosure below)
 
 Ambiguous Statuses (UNCERTAIN):
   - 408: Request timeout
   - 409: Conflict (Resource state conflict; cellular transmission status unknowable)
+  - 429: Rate limit exceeded (Upstream rate limit; cellular queue acceptance state ambiguous; credits preserved, no refund, no redispatch)
   - 500, 502, 503, 504: Gateway crash or upstream timeout
   - Network errors: ECONNRESET, TimeoutError, socket drop, malformed 2xx JSON
   - Lease expiration: Dispatch worker crash while status was DISPATCHING
 ```
 
-### Critical Financial Audit Finding on HTTP 429
-- **Actual Code Behavior:** Status 429 is present in `SMSGATE_DEFINITIVE_REJECTION_STATUSES` (line 36). When SMSGate returns 429, the provider returns `status: 'FAILED'`, causing `messaging.service.ts` to execute `this.refundCredits(...)`.
-- **Factual Discrepancy in Previous Audit:** The earlier report stated that 429 was classified as `UNCERTAIN`. That statement was factually inaccurate against the code and test suite (`durable-message-idempotency.test.ts` line 645 verifies that status 429 returns `FAILED`).
-- **Protocol Ambiguity & Risk:** The repository contains no authoritative SMSGate specification guaranteeing that an HTTP 429 response is strictly pre-acceptance (i.e., that the message was not accepted into a hardware/cellular transmit queue prior to rate-limiter rejection). If SMSGate ever buffers or transmits a message that received a 429 response, refunding the credit creates a double-spending financial vulnerability.
-- **Evidence Status:** `UNRESOLVED`. Requires live staging validation against a physical SMSGate instance under rate-limiting conditions to observe whether messages receiving 429 are ever delivered. If any ambiguity exists in production, 429 must be moved to `UNCERTAIN` to prevent premature refunds.
+### Critical Financial Audit Finding & Resolution on HTTP 429
+- **Resolution & Code Implementation:** In `apps/api/src/modules/messaging/providers/smsgate.provider.ts`, status 429 was surgically removed from `SMSGATE_DEFINITIVE_REJECTION_STATUSES`. Status 429 now strictly resolves as `status: 'UNCERTAIN'`.
+- **Financial Protection:** When SMSGate returns 429, `messaging.service.ts` marks the message as `QUEUED` with `GATEWAY_UNCERTAIN: Rate limit exceeded`, records `status: 'UNCERTAIN'` in `message_idempotency_records`, and **does NOT call `refundCredits()`**. The credit reservation remains held, eliminating double-spending financial exposure if SMSGate buffers or transmits the message.
+- **Idempotency & Dispatch Recovery:** Replaying the request returns the existing `UNCERTAIN` result without contacting the gateway. The background `DispatchRecoveryRunner` skips `UNCERTAIN` records, ensuring that no blind redispatch occurs.
+- **Evidence Status:** `VERIFIED BY AUTOMATED TEST` (7/7 tests passing in `apps/api/test/smsgate-429-safety.test.ts` and 20/20 in `apps/api/test/durable-message-idempotency.test.ts`).
+- **Live Staging Prerequisite:** Live staging validation against physical SMSGate hardware under rate limiting remains required to establish whether upstream carrier delivery ever occurs post-429. If definitive pre-acceptance rejection is ever proven with authoritative carrier documentation, this classification can be re-evaluated.
 
 ### TCRA Curfew: Implementation vs. Regulatory Status
 
@@ -200,7 +201,7 @@ Ambiguous Statuses (UNCERTAIN):
 
 ## 6. Authoritative Database Migrations
 
-Inspection of `packages/db/prisma/migrations/` and PostgreSQL schema history confirms **6 sequential migrations**:
+Inspection of `packages/db/prisma/migrations/` and PostgreSQL schema history confirms **7 sequential migrations**:
 
 ```text
 1. 20261107000000_init_foundation
@@ -215,20 +216,22 @@ Inspection of `packages/db/prisma/migrations/` and PostgreSQL schema history con
    - email_verification_tokens table, google_subject column, and scrypt password isolation.
 6. 20261110010000_stk_push_transactions
    - stk_push_transactions table with StkPushStatus enum, carrier routing, and invoice relations.
+7. 20261111000000_refresh_token_family_revocation
+   - refresh_tokens table family_id column (UUID NOT NULL DEFAULT gen_random_uuid()) and family_id index.
 ```
 
-- **Applied Status in Database:** Verified via `bun run db:status` — all 6 migrations are applied and active in the local PostgreSQL database.
+- **Applied Status in Database:** Verified via `bun run db:status` — all 7 migrations are applied and active in the local PostgreSQL database.
 - **Migration Execution Duration:** < 1.8 seconds on fresh PostgreSQL 16 cluster.
 
 ---
 
 ## 7. Automated Test Evidence Summary
 
-### Fresh Execution on Current HEAD (`5f590ac`)
+### Fresh Execution on Current HEAD
 - **Execution Date:** 2026-11-11
 - **Command:** `bun run test` (`bun test packages/shared/test/ packages/parser-engine/test/ packages/ui/test/ apps/api/test/ packages/zapier-app/test/`)
 - **Services:** Local PostgreSQL (port 54322) and Redis (port 6379)
-- **Results:** **342 passed, 0 failed, 0 skipped across 26 test files** (103.50s execution time).
+- **Results:** **359 passed, 0 failed, 0 skipped across 28 test files** (187.23s execution time).
 - **Typecheck:** `tsc -b` passed with 0 compiler errors.
 - **Build:** `bun run build` cleanly bundled all 6 workspace packages into `dist/`.
 
@@ -237,11 +240,12 @@ Inspection of `packages/db/prisma/migrations/` and PostgreSQL schema history con
 | Verification Tier | Commit Checked | Test Count | Test Files | Status |
 |---|---|---|---|---|
 | **Remote CI Run #19** | `c7b4a50ab8ad636996f328645be2d18517230bd2` | 259 passed, 0 failed | 23 test files | `VERIFIED IN REMOTE CI` |
-| **Fresh Local Execution** | `5f590acbce6e4ef11a852f3c687e5aa3066d9775` | 342 passed, 0 failed | 26 test files | `VERIFIED BY AUTOMATED TEST` |
-| **Delta (Added Tests)** | `a80f998`..`5f590ac` (13 commits) | +83 tests (Auth, Nonce, STK Push, Phone Utils) | +3 test files | `VERIFIED BY AUTOMATED TEST` (Pending Remote CI Push) |
+| **Pre-Audit Baseline** | `5f590acbce6e4ef11a852f3c687e5aa3066d9775` | 342 passed, 0 failed | 26 test files | `VERIFIED BY AUTOMATED TEST` |
+| **Current Working HEAD** | Token Family & 429 Safety | 359 passed, 0 failed | 28 test files | `VERIFIED BY AUTOMATED TEST` |
+| **Delta (Added Tests)** | `a80f998`..HEAD | +100 tests (Auth, Nonce, STK Push, Family Revocation, 429 Safety) | +5 test files | `VERIFIED BY AUTOMATED TEST` (Pending Remote CI Push) |
 
 > [!NOTE]
-> The earlier reference to "630 tests across 44 files" was caused by running `bun test` without file arguments, which evaluated duplicate compiled test files inside `apps/api/dist/test` alongside TypeScript source files in `apps/api/test`. The authoritative monorepo test corpus contains **342 unique tests across 26 files**.
+> The earlier reference to "630 tests across 44 files" was caused by running `bun test` without file arguments, which evaluated duplicate compiled test files inside `apps/api/dist/test` alongside TypeScript source files in `apps/api/test`. The authoritative monorepo test corpus contains **359 unique tests across 28 files**.
 
 ---
 
@@ -269,7 +273,7 @@ flowchart TD
         end
 
         subgraph Data Layer
-            PG[("PostgreSQL 16+<br/>6 Migrations Applied (:5432)")]
+            PG[("PostgreSQL 16+<br/>7 Migrations Applied (:5432)")]
             Redis[("Redis 7+<br/>Atomic Lua Broker (:6379)<br/>[No TLS: VPC Isolated]")]
         end
     end
@@ -296,12 +300,12 @@ flowchart TD
 Before BriskSMS staging deployment can be executed, the following gates must be satisfied:
 
 1. [x] **Monorepo Build & Typecheck:** 0 compiler errors across all packages (`VERIFIED IN CODE`).
-2. [x] **Fresh Automated Test Suite:** 342/342 tests passing on HEAD `5f590ac` (`VERIFIED BY AUTOMATED TEST`).
-3. [ ] **Remote CI Push Synchronization:** Push local commits `a80f998` through `5f590ac` to `origin/main` and verify GitHub Actions green (`REQUIRES EXTERNAL CONFIGURATION`).
+2. [x] **Fresh Automated Test Suite:** 359/359 tests passing on HEAD (`VERIFIED BY AUTOMATED TEST`).
+3. [ ] **Remote CI Push Synchronization:** Push local commits to `origin/main` and verify GitHub Actions green (`REQUIRES EXTERNAL CONFIGURATION`).
 4. [ ] **Reverse Proxy Header Sanitization:** Ensure proxy overwrites `X-Forwarded-For` with `$remote_addr` (`REQUIRES EXTERNAL CONFIGURATION`).
 5. [ ] **Google Cloud Web Client ID:** Register authorized origin `https://staging-console.brisksms.com` (`REQUIRES EXTERNAL CONFIGURATION`).
 6. [ ] **Resend DNS Setup:** Configure DKIM, SPF, and DMARC for `staging.brisksms.com` (`REQUIRES EXTERNAL CONFIGURATION`).
 7. [ ] **Private VPC Redis:** Ensure Redis runs within private network without public exposure (`REQUIRES EXTERNAL CONFIGURATION`).
-8. [ ] **PostgreSQL 16 Deployment:** Apply all 6 migrations to staging database (`REQUIRES EXTERNAL CONFIGURATION`).
+8. [ ] **PostgreSQL 16 Deployment:** Apply all 7 migrations to staging database (`REQUIRES EXTERNAL CONFIGURATION`).
 9. [ ] **Android Companion Test:** Install debug APK and pair via QR Keystore handshake (`REQUIRES LIVE STAGING TEST`).
 10. [ ] **Carrier STK Push & SMSGate Live Test:** Validate telco push and verify SMSGate 429 rate-limiting behavior (`REQUIRES LIVE STAGING TEST`).
