@@ -1,4 +1,4 @@
-import { createPublicKey, verify } from 'node:crypto';
+import { createPublicKey, verify, timingSafeEqual } from 'node:crypto';
 
 export interface GoogleTokenPayload {
   iss: string;
@@ -9,10 +9,11 @@ export interface GoogleTokenPayload {
   name?: string;
   picture?: string;
   exp: number;
+  nonce?: string;
 }
 
 export interface GoogleTokenVerifier {
-  verifyIdToken(idToken: string): Promise<GoogleTokenPayload>;
+  verifyIdToken(idToken: string, expectedNonce?: string): Promise<GoogleTokenPayload>;
 }
 
 interface GoogleJwk {
@@ -35,7 +36,7 @@ export class DefaultGoogleTokenVerifier implements GoogleTokenVerifier {
 
   constructor(private readonly clientId: string = process.env.GOOGLE_CLIENT_ID || '') {}
 
-  async verifyIdToken(idToken: string): Promise<GoogleTokenPayload> {
+  async verifyIdToken(idToken: string, expectedNonce?: string): Promise<GoogleTokenPayload> {
     if (!idToken || typeof idToken !== 'string') {
       throw new Error('Google ID token is required');
     }
@@ -143,6 +144,18 @@ export class DefaultGoogleTokenVerifier implements GoogleTokenVerifier {
       throw new Error('Google ID token cryptographic signature verification failed');
     }
 
+    // 6. Verify Nonce Claim (if expectedNonce is supplied)
+    if (expectedNonce !== undefined) {
+      if (!payload.nonce || typeof payload.nonce !== 'string') {
+        throw new Error('Google ID token is missing required nonce claim');
+      }
+      const tokenNonceBuf = Buffer.from(payload.nonce, 'utf-8');
+      const expectedNonceBuf = Buffer.from(expectedNonce, 'utf-8');
+      if (tokenNonceBuf.length !== expectedNonceBuf.length || !timingSafeEqual(tokenNonceBuf, expectedNonceBuf)) {
+        throw new Error('Google ID token nonce does not match expected nonce');
+      }
+    }
+
     return {
       iss: payload.iss,
       sub: payload.sub,
@@ -152,6 +165,7 @@ export class DefaultGoogleTokenVerifier implements GoogleTokenVerifier {
       name: payload.name,
       picture: payload.picture,
       exp: payload.exp,
+      nonce: payload.nonce,
     };
   }
 
@@ -218,7 +232,7 @@ export class MockGoogleTokenVerifier implements GoogleTokenVerifier {
     this.mockUsers.set(idToken, payload);
   }
 
-  async verifyIdToken(idToken: string): Promise<GoogleTokenPayload> {
+  async verifyIdToken(idToken: string, expectedNonce?: string): Promise<GoogleTokenPayload> {
     if (this.failureMode) {
       throw new Error(`Simulated Google verification failure: ${this.failureMode}`);
     }
@@ -255,6 +269,18 @@ export class MockGoogleTokenVerifier implements GoogleTokenVerifier {
     // Check email_verified
     if (!payload.email_verified) {
       throw new Error('Google account email is not verified by Google');
+    }
+
+    // Check nonce if expectedNonce is supplied
+    if (expectedNonce !== undefined) {
+      if (!payload.nonce || typeof payload.nonce !== 'string') {
+        throw new Error('Google ID token is missing required nonce claim');
+      }
+      const tokenNonceBuf = Buffer.from(payload.nonce, 'utf-8');
+      const expectedNonceBuf = Buffer.from(expectedNonce, 'utf-8');
+      if (tokenNonceBuf.length !== expectedNonceBuf.length || !timingSafeEqual(tokenNonceBuf, expectedNonceBuf)) {
+        throw new Error('Google ID token nonce does not match expected nonce');
+      }
     }
 
     return { ...payload };

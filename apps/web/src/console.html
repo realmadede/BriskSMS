@@ -2536,21 +2536,59 @@
     }
 
     async function triggerGoogleSignIn() {
-      let token = null;
-      if (window.google?.accounts?.id) {
-        window.google.accounts.id.prompt();
-        return;
-      }
-      token = await showBriskDialog({
-        title: 'Google Identity Sign-In',
-        message: 'Provide your Google ID token to authenticate with Google SSO:',
-        inputPlaceholder: 'eyJhbGciOiJSUzI1NiIsImtpZCI...',
-        confirmText: 'Sign In with Google'
-      });
-      if (!token) return;
-
       try {
         await ensureCsrfToken();
+        // 1. Obtain server-issued cryptographic nonce and bind session cookie
+        const nonceRes = await apiFetch('/v1/auth/google/nonce', {
+          method: 'POST'
+        });
+        const serverNonce = nonceRes?.data?.nonce || nonceRes?.nonce;
+        if (!serverNonce) {
+          throw new Error('Failed to obtain authentication nonce from server');
+        }
+
+        // 2. Initialize Google Identity Services if loaded in browser
+        if (window.google?.accounts?.id) {
+          window.google.accounts.id.initialize({
+            client_id: window.GOOGLE_CLIENT_ID || '829471928374-brisksms.apps.googleusercontent.com',
+            nonce: serverNonce,
+            callback: async (response) => {
+              try {
+                const cred = response?.credential;
+                if (!cred) throw new Error('No credential returned by Google');
+                const res = await apiFetch('/v1/auth/google', {
+                  method: 'POST',
+                  body: JSON.stringify({ credential: cred })
+                });
+                closeAuthModal();
+                await bootstrapMerchantSession();
+                updateOrgDisplay();
+                showToast(`Signed in as ${res?.user?.email || res?.data?.user?.email || 'Google User'}`, 'success');
+                await Promise.allSettled([
+                  loadReconciliationFeed(),
+                  loadReviewQueue(),
+                  loadDeviceFleet(),
+                  loadMessagingData(),
+                  updateKpis()
+                ]);
+              } catch (err) {
+                showToast(err.message || 'Google authentication failed', 'error');
+              }
+            }
+          });
+          window.google.accounts.id.prompt();
+          return;
+        }
+
+        // 3. Fallback dialog for headless or manual testing environments
+        const token = await showBriskDialog({
+          title: 'Google Identity Sign-In',
+          message: `Active Server Nonce: ${serverNonce}\nProvide your Google ID token with matching nonce claim:`,
+          inputPlaceholder: 'eyJhbGciOiJSUzI1NiIsImtpZCI...',
+          confirmText: 'Sign In with Google'
+        });
+        if (!token) return;
+
         const res = await apiFetch('/v1/auth/google', {
           method: 'POST',
           body: JSON.stringify({ idToken: token })
@@ -2558,7 +2596,7 @@
         closeAuthModal();
         await bootstrapMerchantSession();
         updateOrgDisplay();
-        showToast(`Signed in as ${res?.user?.email || 'Google User'}`, 'success');
+        showToast(`Signed in as ${res?.user?.email || res?.data?.user?.email || 'Google User'}`, 'success');
         await Promise.allSettled([
           loadReconciliationFeed(),
           loadReviewQueue(),

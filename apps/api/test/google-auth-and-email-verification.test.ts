@@ -13,6 +13,7 @@ import {
   SESSION_COOKIE_NAME,
   REFRESH_COOKIE_NAME,
   CSRF_COOKIE_NAME,
+  GOOGLE_NONCE_COOKIE_NAME,
 } from '../src/core/cookies.js';
 import { sql, redisClient, setSimulatedRedisOutage } from '@brisksms/db';
 import { runMaintenanceCleanup, MaintenanceRunner } from '@brisksms/worker';
@@ -94,6 +95,28 @@ describe('Google Sign-In & Resend Email Verification Security Suite', () => {
     return found.split(';')[0]?.slice(prefix.length);
   }
 
+  async function issueGoogleAuthNonce(headers: Record<string, string> = {}): Promise<{
+    nonce: string;
+    nonceHash: string;
+    cookieHeader: string;
+  }> {
+    const res = await makeRequest(
+      'POST',
+      '/v1/auth/google/nonce',
+      { host: 'localhost:3000', ...headers },
+    );
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.json.success, true);
+    assert.ok(res.json.data.nonce);
+    const cookie = extractCookie(res.setCookies, GOOGLE_NONCE_COOKIE_NAME);
+    assert.ok(cookie, 'bsk_g_nonce cookie must be set');
+    return {
+      nonce: res.json.data.nonce,
+      nonceHash: cookie,
+      cookieHeader: `${GOOGLE_NONCE_COOKIE_NAME}=${cookie}`,
+    };
+  }
+
   function extractTokenFromSentEmail(index: number = 0): string {
     const sent = mockEmail.sentEmails[index];
     if (!sent?.text) throw new Error(`Expected sent email at index ${index} with text`);
@@ -124,6 +147,7 @@ describe('Google Sign-In & Resend Email Verification Security Suite', () => {
   // ==========================================
   describe('1. Google Identity Sign-In (POST /v1/auth/google)', () => {
     it('provisions a new user with verified email, default workspace, and HttpOnly session cookies', async () => {
+      const { nonce, cookieHeader } = await issueGoogleAuthNonce();
       const idToken = 'valid.google.token.user1';
       mockGoogle.registerToken(idToken, {
         iss: 'https://accounts.google.com',
@@ -134,12 +158,13 @@ describe('Google Sign-In & Resend Email Verification Security Suite', () => {
         name: 'John Merchant',
         picture: 'https://lh3.googleusercontent.com/a/avatar123',
         exp: Math.floor(Date.now() / 1000) + 3600,
+        nonce,
       });
 
       const res = await makeRequest(
         'POST',
         '/v1/auth/google',
-        { 'content-type': 'application/json', host: 'localhost:3000' },
+        { 'content-type': 'application/json', host: 'localhost:3000', cookie: cookieHeader },
         { idToken },
       );
 
@@ -157,10 +182,12 @@ describe('Google Sign-In & Resend Email Verification Security Suite', () => {
       const sessionCookie = extractCookie(res.setCookies, SESSION_COOKIE_NAME);
       const refreshCookie = extractCookie(res.setCookies, REFRESH_COOKIE_NAME);
       const csrfCookie = extractCookie(res.setCookies, CSRF_COOKIE_NAME);
+      const clearedNonceCookie = extractCookie(res.setCookies, GOOGLE_NONCE_COOKIE_NAME);
 
       assert.ok(sessionCookie, 'Session cookie must be set');
       assert.ok(refreshCookie, 'Refresh cookie must be set');
       assert.ok(csrfCookie, 'CSRF cookie must be set');
+      assert.equal(clearedNonceCookie, '', 'bsk_g_nonce cookie must be cleared on successful authentication');
 
       // Verify database record
       const dbUser = await dbStore.findUserByGoogleId('google_sub_1001');
@@ -177,6 +204,7 @@ describe('Google Sign-In & Resend Email Verification Security Suite', () => {
     });
 
     it('supports standard Google Identity credential field in payload', async () => {
+      const { nonce, cookieHeader } = await issueGoogleAuthNonce();
       const idToken = 'valid.google.token.cred_field';
       mockGoogle.registerToken(idToken, {
         iss: 'https://accounts.google.com',
@@ -186,12 +214,13 @@ describe('Google Sign-In & Resend Email Verification Security Suite', () => {
         email_verified: true,
         name: 'Credential User',
         exp: Math.floor(Date.now() / 1000) + 3600,
+        nonce,
       });
 
       const res = await makeRequest(
         'POST',
         '/v1/auth/google',
-        { 'content-type': 'application/json', host: 'localhost:3000' },
+        { 'content-type': 'application/json', host: 'localhost:3000', cookie: cookieHeader },
         { credential: idToken },
       );
 
@@ -201,10 +230,11 @@ describe('Google Sign-In & Resend Email Verification Security Suite', () => {
     });
 
     it('rejects invalid or forged token signature with 401 INVALID_GOOGLE_TOKEN', async () => {
+      const { cookieHeader } = await issueGoogleAuthNonce();
       const res = await makeRequest(
         'POST',
         '/v1/auth/google',
-        { 'content-type': 'application/json', host: 'localhost:3000' },
+        { 'content-type': 'application/json', host: 'localhost:3000', cookie: cookieHeader },
         { idToken: 'forged.signature.token' },
       );
 
@@ -214,6 +244,7 @@ describe('Google Sign-In & Resend Email Verification Security Suite', () => {
     });
 
     it('rejects expired Google token with 401 INVALID_GOOGLE_TOKEN', async () => {
+      const { nonce, cookieHeader } = await issueGoogleAuthNonce();
       const expiredToken = 'expired.google.token';
       mockGoogle.registerToken(expiredToken, {
         iss: 'accounts.google.com',
@@ -222,12 +253,13 @@ describe('Google Sign-In & Resend Email Verification Security Suite', () => {
         email: 'expired@example.com',
         email_verified: true,
         exp: Math.floor(Date.now() / 1000) - 100, // Expired 100s ago
+        nonce,
       });
 
       const res = await makeRequest(
         'POST',
         '/v1/auth/google',
-        { 'content-type': 'application/json', host: 'localhost:3000' },
+        { 'content-type': 'application/json', host: 'localhost:3000', cookie: cookieHeader },
         { idToken: expiredToken },
       );
 
@@ -237,6 +269,7 @@ describe('Google Sign-In & Resend Email Verification Security Suite', () => {
     });
 
     it('rejects audience mismatch with 401 INVALID_GOOGLE_TOKEN', async () => {
+      const { nonce, cookieHeader } = await issueGoogleAuthNonce();
       const mismatchAudToken = 'aud.mismatch.token';
       mockGoogle.registerToken(mismatchAudToken, {
         iss: 'accounts.google.com',
@@ -245,12 +278,13 @@ describe('Google Sign-In & Resend Email Verification Security Suite', () => {
         email: 'aud@example.com',
         email_verified: true,
         exp: Math.floor(Date.now() / 1000) + 3600,
+        nonce,
       });
 
       const res = await makeRequest(
         'POST',
         '/v1/auth/google',
-        { 'content-type': 'application/json', host: 'localhost:3000' },
+        { 'content-type': 'application/json', host: 'localhost:3000', cookie: cookieHeader },
         { idToken: mismatchAudToken },
       );
 
@@ -260,6 +294,7 @@ describe('Google Sign-In & Resend Email Verification Security Suite', () => {
     });
 
     it('rejects issuer mismatch with 401 INVALID_GOOGLE_TOKEN', async () => {
+      const { nonce, cookieHeader } = await issueGoogleAuthNonce();
       const issuerToken = 'issuer.mismatch.token';
       mockGoogle.registerToken(issuerToken, {
         iss: 'https://evil-auth-provider.com',
@@ -268,12 +303,13 @@ describe('Google Sign-In & Resend Email Verification Security Suite', () => {
         email: 'iss@example.com',
         email_verified: true,
         exp: Math.floor(Date.now() / 1000) + 3600,
+        nonce,
       });
 
       const res = await makeRequest(
         'POST',
         '/v1/auth/google',
-        { 'content-type': 'application/json', host: 'localhost:3000' },
+        { 'content-type': 'application/json', host: 'localhost:3000', cookie: cookieHeader },
         { idToken: issuerToken },
       );
 
@@ -283,6 +319,7 @@ describe('Google Sign-In & Resend Email Verification Security Suite', () => {
     });
 
     it('rejects unverified Google email with 400 GOOGLE_EMAIL_NOT_VERIFIED', async () => {
+      const { nonce, cookieHeader } = await issueGoogleAuthNonce();
       const unverifiedToken = 'unverified.email.token';
       mockGoogle.registerToken(unverifiedToken, {
         iss: 'accounts.google.com',
@@ -291,12 +328,13 @@ describe('Google Sign-In & Resend Email Verification Security Suite', () => {
         email: 'unverified@example.com',
         email_verified: false,
         exp: Math.floor(Date.now() / 1000) + 3600,
+        nonce,
       });
 
       const res = await makeRequest(
         'POST',
         '/v1/auth/google',
-        { 'content-type': 'application/json', host: 'localhost:3000' },
+        { 'content-type': 'application/json', host: 'localhost:3000', cookie: cookieHeader },
         { idToken: unverifiedToken },
       );
 
@@ -315,6 +353,7 @@ describe('Google Sign-In & Resend Email Verification Security Suite', () => {
       assert.equal(existing.user.isEmailVerified, false);
 
       // 2. Log in with Google matching the same email
+      const { nonce, cookieHeader } = await issueGoogleAuthNonce();
       const linkToken = 'valid.google.token.link';
       mockGoogle.registerToken(linkToken, {
         iss: 'accounts.google.com',
@@ -325,12 +364,13 @@ describe('Google Sign-In & Resend Email Verification Security Suite', () => {
         name: 'Existing Merchant (Google)',
         picture: 'https://lh3.googleusercontent.com/avatar/linked.png',
         exp: Math.floor(Date.now() / 1000) + 3600,
+        nonce,
       });
 
       const res = await makeRequest(
         'POST',
         '/v1/auth/google',
-        { 'content-type': 'application/json', host: 'localhost:3000' },
+        { 'content-type': 'application/json', host: 'localhost:3000', cookie: cookieHeader },
         { idToken: linkToken },
       );
 
@@ -347,6 +387,7 @@ describe('Google Sign-In & Resend Email Verification Security Suite', () => {
     });
 
     it('rejects suspended accounts with 403 ACCOUNT_DEACTIVATED', async () => {
+      const { nonce, cookieHeader } = await issueGoogleAuthNonce();
       const suspendedToken = 'suspended.user.token';
       mockGoogle.registerToken(suspendedToken, {
         iss: 'accounts.google.com',
@@ -355,6 +396,7 @@ describe('Google Sign-In & Resend Email Verification Security Suite', () => {
         email: 'suspended@business.co.tz',
         email_verified: true,
         exp: Math.floor(Date.now() / 1000) + 3600,
+        nonce,
       });
 
       // Pre-create suspended user in DB
@@ -369,7 +411,7 @@ describe('Google Sign-In & Resend Email Verification Security Suite', () => {
       const res = await makeRequest(
         'POST',
         '/v1/auth/google',
-        { 'content-type': 'application/json', host: 'localhost:3000' },
+        { 'content-type': 'application/json', host: 'localhost:3000', cookie: cookieHeader },
         { idToken: suspendedToken },
       );
 
@@ -417,6 +459,7 @@ describe('Google Sign-In & Resend Email Verification Security Suite', () => {
       });
 
       // 2. Attempt Google login with same email but DIFFERENT Google subject
+      const { nonce, cookieHeader } = await issueGoogleAuthNonce();
       const conflictToken = 'conflict.google.token';
       mockGoogle.registerToken(conflictToken, {
         iss: 'accounts.google.com',
@@ -426,12 +469,13 @@ describe('Google Sign-In & Resend Email Verification Security Suite', () => {
         email_verified: true,
         name: 'Hijack Attempt',
         exp: Math.floor(Date.now() / 1000) + 3600,
+        nonce,
       });
 
       const res = await makeRequest(
         'POST',
         '/v1/auth/google',
-        { 'content-type': 'application/json', host: 'localhost:3000' },
+        { 'content-type': 'application/json', host: 'localhost:3000', cookie: cookieHeader },
         { idToken: conflictToken },
       );
 
@@ -494,6 +538,334 @@ describe('Google Sign-In & Resend Email Verification Security Suite', () => {
       assert.equal(res.statusCode, 401);
       assert.equal(res.json.error.code, 'INVALID_CREDENTIALS');
       assert.equal(res.json.error.message, 'Invalid email or password');
+    });
+  });
+
+  // ==========================================
+  // SECTION 1B: GOOGLE OPENID CONNECT NONCE REPLAY & SESSION BINDING SUITE
+  // ==========================================
+  describe('1B. Google OpenID Connect Nonce Replay & Session Binding Protection', () => {
+    it('issues cryptographically random nonce with 300s TTL and binds to HttpOnly Lax cookie via POST /v1/auth/google/nonce', async () => {
+      const res = await makeRequest(
+        'POST',
+        '/v1/auth/google/nonce',
+        { host: 'localhost:3000' },
+      );
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.json.success, true);
+      assert.ok(res.json.data.nonce.startsWith('bsk_gn_'));
+      assert.equal(res.json.data.expiresIn, 300);
+
+      const cookieRaw = res.setCookies.find((c) => c.startsWith(`${GOOGLE_NONCE_COOKIE_NAME}=`));
+      assert.ok(cookieRaw, 'bsk_g_nonce cookie must be set');
+      assert.ok(cookieRaw.includes('HttpOnly'), 'bsk_g_nonce must be HttpOnly');
+      assert.ok(cookieRaw.includes('Path=/v1/auth/google'), 'bsk_g_nonce must be scoped to /v1/auth/google');
+      assert.ok(cookieRaw.includes('SameSite=Lax'), 'bsk_g_nonce must be SameSite=Lax');
+      assert.ok(cookieRaw.includes('Max-Age=300'), 'bsk_g_nonce must have Max-Age=300');
+    });
+
+    it('supports GET /v1/auth/google/nonce for client pre-flight handshake', async () => {
+      const res = await makeRequest(
+        'GET',
+        '/v1/auth/google/nonce',
+        { host: 'localhost:3000' },
+      );
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.json.success, true);
+      assert.ok(res.json.data.nonce.startsWith('bsk_gn_'));
+      assert.equal(res.json.data.expiresIn, 300);
+      const cookie = extractCookie(res.setCookies, GOOGLE_NONCE_COOKIE_NAME);
+      assert.ok(cookie);
+    });
+
+    it('rejects unauthorized origin on nonce creation with 403 CSRF_ORIGIN_MISMATCH', async () => {
+      const res = await makeRequest(
+        'POST',
+        '/v1/auth/google/nonce',
+        { host: 'localhost:3000', origin: 'https://evil-hacker.com' },
+      );
+
+      assert.equal(res.statusCode, 403);
+      assert.equal(res.json.error.code, 'CSRF_ORIGIN_MISMATCH');
+    });
+
+    it('rejects sec-fetch-site cross-site on nonce creation with 403 CSRF_CROSS_SITE_FORBIDDEN', async () => {
+      const res = await makeRequest(
+        'POST',
+        '/v1/auth/google/nonce',
+        { host: 'localhost:3000', 'sec-fetch-site': 'cross-site' },
+      );
+
+      assert.equal(res.statusCode, 403);
+      assert.equal(res.json.error.code, 'CSRF_CROSS_SITE_FORBIDDEN');
+    });
+
+    it('enforces IP rate limiting on rapid repeated nonce requests', async () => {
+      const testIp = '198.51.100.99';
+      // 30 allowed attempts
+      for (let i = 0; i < 30; i++) {
+        const res = await makeRequest(
+          'POST',
+          '/v1/auth/google/nonce',
+          { host: 'localhost:3000', 'x-forwarded-for': testIp },
+        );
+        assert.equal(res.statusCode, 200);
+      }
+
+      // 31st request must be rate limited
+      const rateLimitedRes = await makeRequest(
+        'POST',
+        '/v1/auth/google/nonce',
+        { host: 'localhost:3000', 'x-forwarded-for': testIp },
+      );
+      assert.equal(rateLimitedRes.statusCode, 429);
+      assert.equal(rateLimitedRes.json.error.code, 'TOO_MANY_REQUESTS');
+    });
+
+    it('rejects Google authentication when bsk_g_nonce cookie is completely missing with 401 INVALID_GOOGLE_NONCE', async () => {
+      const idToken = 'valid.google.token.no_cookie';
+      mockGoogle.registerToken(idToken, {
+        iss: 'https://accounts.google.com',
+        sub: 'sub_no_cookie_1',
+        aud: 'test-client-id-brisksms.apps.googleusercontent.com',
+        email: 'nocookie@example.com',
+        email_verified: true,
+        exp: Math.floor(Date.now() / 1000) + 3600,
+        nonce: 'bsk_gn_some_client_nonce_123',
+      });
+
+      const res = await makeRequest(
+        'POST',
+        '/v1/auth/google',
+        { 'content-type': 'application/json', host: 'localhost:3000' },
+        { idToken },
+      );
+
+      assert.equal(res.statusCode, 401);
+      assert.equal(res.json.error.code, 'INVALID_GOOGLE_NONCE');
+      assert.ok(res.json.error.message.includes('Authentication nonce cookie missing'));
+    });
+
+    it('rejects Google authentication when Google ID token has no nonce claim with 401 INVALID_GOOGLE_NONCE', async () => {
+      const { cookieHeader } = await issueGoogleAuthNonce();
+      const idToken = 'valid.google.token.missing_claim';
+      mockGoogle.registerToken(idToken, {
+        iss: 'https://accounts.google.com',
+        sub: 'sub_missing_claim_1',
+        aud: 'test-client-id-brisksms.apps.googleusercontent.com',
+        email: 'missingclaim@example.com',
+        email_verified: true,
+        exp: Math.floor(Date.now() / 1000) + 3600,
+        // Omit nonce claim
+      });
+
+      const res = await makeRequest(
+        'POST',
+        '/v1/auth/google',
+        { 'content-type': 'application/json', host: 'localhost:3000', cookie: cookieHeader },
+        { idToken },
+      );
+
+      assert.equal(res.statusCode, 401);
+      assert.equal(res.json.error.code, 'INVALID_GOOGLE_NONCE');
+      assert.ok(res.json.error.message.includes('missing required nonce claim'));
+    });
+
+    it('rejects Google authentication when nonce in token does not match cookie hash with 401 INVALID_GOOGLE_NONCE', async () => {
+      const { cookieHeader } = await issueGoogleAuthNonce();
+      const idToken = 'valid.google.token.mismatched_nonce';
+      mockGoogle.registerToken(idToken, {
+        iss: 'https://accounts.google.com',
+        sub: 'sub_mismatched_1',
+        aud: 'test-client-id-brisksms.apps.googleusercontent.com',
+        email: 'mismatch@example.com',
+        email_verified: true,
+        exp: Math.floor(Date.now() / 1000) + 3600,
+        nonce: 'bsk_gn_completely_different_nonce_456',
+      });
+
+      const res = await makeRequest(
+        'POST',
+        '/v1/auth/google',
+        { 'content-type': 'application/json', host: 'localhost:3000', cookie: cookieHeader },
+        { idToken },
+      );
+
+      assert.equal(res.statusCode, 401);
+      assert.equal(res.json.error.code, 'INVALID_GOOGLE_NONCE');
+      assert.ok(res.json.error.message.includes('does not match browser session nonce'));
+    });
+
+    it('strictly isolates sessions: nonce issued to Browser Session A cannot authenticate Browser Session B', async () => {
+      // Browser A performs handshake
+      const sessionA = await issueGoogleAuthNonce();
+      // Browser B performs handshake
+      const sessionB = await issueGoogleAuthNonce();
+
+      // Token is minted for Browser Session A's nonce
+      const tokenForA = 'valid.google.token.for_session_a';
+      mockGoogle.registerToken(tokenForA, {
+        iss: 'https://accounts.google.com',
+        sub: 'sub_session_a',
+        aud: 'test-client-id-brisksms.apps.googleusercontent.com',
+        email: 'sessiona@example.com',
+        email_verified: true,
+        exp: Math.floor(Date.now() / 1000) + 3600,
+        nonce: sessionA.nonce,
+      });
+
+      // Browser B attempts to authenticate with token minted for Session A
+      const res = await makeRequest(
+        'POST',
+        '/v1/auth/google',
+        { 'content-type': 'application/json', host: 'localhost:3000', cookie: sessionB.cookieHeader },
+        { idToken: tokenForA },
+      );
+
+      assert.equal(res.statusCode, 401);
+      assert.equal(res.json.error.code, 'INVALID_GOOGLE_NONCE');
+      assert.ok(res.json.error.message.includes('does not match browser session nonce'));
+    });
+
+    it('strictly rejects replay of the same token/nonce after successful authentication', async () => {
+      const { nonce, cookieHeader } = await issueGoogleAuthNonce();
+      const replayToken = 'valid.google.token.replay_test';
+      mockGoogle.registerToken(replayToken, {
+        iss: 'https://accounts.google.com',
+        sub: 'sub_replay_1',
+        aud: 'test-client-id-brisksms.apps.googleusercontent.com',
+        email: 'replay@example.com',
+        email_verified: true,
+        exp: Math.floor(Date.now() / 1000) + 3600,
+        nonce,
+      });
+
+      // First authentication attempt: succeeds
+      const firstRes = await makeRequest(
+        'POST',
+        '/v1/auth/google',
+        { 'content-type': 'application/json', host: 'localhost:3000', cookie: cookieHeader },
+        { idToken: replayToken },
+      );
+      assert.equal(firstRes.statusCode, 200);
+      assert.equal(firstRes.json.success, true);
+
+      // Second authentication attempt (replay): must be rejected with 401
+      const secondRes = await makeRequest(
+        'POST',
+        '/v1/auth/google',
+        { 'content-type': 'application/json', host: 'localhost:3000', cookie: cookieHeader },
+        { idToken: replayToken },
+      );
+      assert.equal(secondRes.statusCode, 401);
+      assert.equal(secondRes.json.error.code, 'INVALID_GOOGLE_NONCE');
+      assert.ok(secondRes.json.error.message.includes('already been consumed or expired'));
+    });
+
+    it('handles concurrent authentication race condition: exactly 1 request succeeds and 1 is rejected', async () => {
+      const { nonce, cookieHeader } = await issueGoogleAuthNonce();
+      const concurrentToken = 'valid.google.token.concurrency_test';
+      mockGoogle.registerToken(concurrentToken, {
+        iss: 'https://accounts.google.com',
+        sub: 'sub_concurrent_race_1',
+        aud: 'test-client-id-brisksms.apps.googleusercontent.com',
+        email: 'race@example.com',
+        email_verified: true,
+        exp: Math.floor(Date.now() / 1000) + 3600,
+        nonce,
+      });
+
+      // Fire 2 concurrent requests with the identical token and cookie
+      const [res1, res2] = await Promise.all([
+        makeRequest(
+          'POST',
+          '/v1/auth/google',
+          { 'content-type': 'application/json', host: 'localhost:3000', cookie: cookieHeader },
+          { idToken: concurrentToken },
+        ),
+        makeRequest(
+          'POST',
+          '/v1/auth/google',
+          { 'content-type': 'application/json', host: 'localhost:3000', cookie: cookieHeader },
+          { idToken: concurrentToken },
+        ),
+      ]);
+
+      const statusCodes = [res1.statusCode, res2.statusCode].sort();
+      assert.deepEqual(statusCodes, [200, 401], 'Exactly one request must succeed (200) and one must be rejected (401)');
+
+      const rejectedRes = res1.statusCode === 401 ? res1 : res2;
+      assert.equal(rejectedRes.json.error.code, 'INVALID_GOOGLE_NONCE');
+      assert.ok(rejectedRes.json.error.message.includes('already been consumed or expired'));
+    });
+
+    it('rejects expired nonces (> 300s) with 401 INVALID_GOOGLE_NONCE', async () => {
+      const { nonce, nonceHash, cookieHeader } = await issueGoogleAuthNonce();
+      // Simulate TTL expiration in Redis by removing key
+      await redisClient.del(`auth:google_nonce:${nonceHash}`);
+      // Fast-forward or artificially expire the nonce in in-memory store
+      (authService as any).googleNonceStore.set(nonceHash, {
+        expiresAt: Date.now() - 5000, // Expired 5 seconds ago
+      });
+
+      const expiredNonceToken = 'valid.google.token.expired_nonce';
+      mockGoogle.registerToken(expiredNonceToken, {
+        iss: 'https://accounts.google.com',
+        sub: 'sub_expired_nonce_1',
+        aud: 'test-client-id-brisksms.apps.googleusercontent.com',
+        email: 'expirednonce@example.com',
+        email_verified: true,
+        exp: Math.floor(Date.now() / 1000) + 3600,
+        nonce,
+      });
+
+      const res = await makeRequest(
+        'POST',
+        '/v1/auth/google',
+        { 'content-type': 'application/json', host: 'localhost:3000', cookie: cookieHeader },
+        { idToken: expiredNonceToken },
+      );
+
+      assert.equal(res.statusCode, 401);
+      assert.equal(res.json.error.code, 'INVALID_GOOGLE_NONCE');
+      assert.ok(res.json.error.message.includes('already been consumed or expired'));
+    });
+
+    it('failure during token signature verification does not consume or destroy the valid nonce', async () => {
+      const { nonce, cookieHeader } = await issueGoogleAuthNonce();
+
+      // 1. Send forged token with invalid signature
+      const badSigRes = await makeRequest(
+        'POST',
+        '/v1/auth/google',
+        { 'content-type': 'application/json', host: 'localhost:3000', cookie: cookieHeader },
+        { idToken: 'forged.signature.token' },
+      );
+      assert.equal(badSigRes.statusCode, 401);
+      assert.equal(badSigRes.json.error.code, 'INVALID_GOOGLE_TOKEN');
+
+      // 2. Now submit legitimate token with the valid nonce and same cookie
+      const validToken = 'valid.google.token.after_bad_sig';
+      mockGoogle.registerToken(validToken, {
+        iss: 'https://accounts.google.com',
+        sub: 'sub_legit_after_bad',
+        aud: 'test-client-id-brisksms.apps.googleusercontent.com',
+        email: 'legit.user@example.com',
+        email_verified: true,
+        exp: Math.floor(Date.now() / 1000) + 3600,
+        nonce,
+      });
+
+      const validRes = await makeRequest(
+        'POST',
+        '/v1/auth/google',
+        { 'content-type': 'application/json', host: 'localhost:3000', cookie: cookieHeader },
+        { idToken: validToken },
+      );
+      assert.equal(validRes.statusCode, 200);
+      assert.equal(validRes.json.success, true);
     });
   });
 
@@ -1318,6 +1690,106 @@ describe('Google Sign-In & Resend Email Verification Security Suite', () => {
       await assert.rejects(
         verifier.verifyIdToken(`${hB64}.${pB64}.${sig}`),
         /Google token is expired/,
+      );
+    });
+
+    it('validates RS256 token and verifies matching nonce claim', async () => {
+      const { publicKey, privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+      const jwk = publicKey.export({ format: 'jwk' });
+      jwk.kid = 'nonce-kid-01';
+      jwk.alg = 'RS256';
+      jwk.use = 'sig';
+
+      const verifier = new DefaultGoogleTokenVerifier('my-client-id');
+      (verifier as any).jwksCache = { keys: [jwk], expiresAt: Date.now() + 3600_000 };
+
+      const testNonce = 'bsk_gn_valid_nonce_claim_123';
+      const header = { alg: 'RS256', kid: 'nonce-kid-01', typ: 'JWT' };
+      const payload = {
+        iss: 'accounts.google.com',
+        sub: 'nonce_sub_1',
+        aud: 'my-client-id',
+        email: 'nonce.user@example.com',
+        email_verified: true,
+        exp: Math.floor(Date.now() / 1000) + 3600,
+        nonce: testNonce,
+      };
+
+      const hB64 = Buffer.from(JSON.stringify(header)).toString('base64url');
+      const pB64 = Buffer.from(JSON.stringify(payload)).toString('base64url');
+      const signer = createSign('RSA-SHA256');
+      signer.update(`${hB64}.${pB64}`);
+      const sig = signer.sign(privateKey, 'base64url');
+
+      const verified = await verifier.verifyIdToken(`${hB64}.${pB64}.${sig}`, testNonce);
+      assert.equal(verified.sub, 'nonce_sub_1');
+      assert.equal(verified.email, 'nonce.user@example.com');
+      assert.equal(verified.nonce, testNonce);
+    });
+
+    it('rejects RS256 token when expectedNonce is supplied but nonce claim is missing', async () => {
+      const { publicKey, privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+      const jwk = publicKey.export({ format: 'jwk' });
+      jwk.kid = 'nonce-kid-02';
+      jwk.alg = 'RS256';
+      jwk.use = 'sig';
+
+      const verifier = new DefaultGoogleTokenVerifier('my-client-id');
+      (verifier as any).jwksCache = { keys: [jwk], expiresAt: Date.now() + 3600_000 };
+
+      const header = { alg: 'RS256', kid: 'nonce-kid-02', typ: 'JWT' };
+      const payload = {
+        iss: 'accounts.google.com',
+        sub: 'nonce_sub_missing',
+        aud: 'my-client-id',
+        email: 'missingnonce@example.com',
+        email_verified: true,
+        exp: Math.floor(Date.now() / 1000) + 3600,
+        // Omit nonce
+      };
+
+      const hB64 = Buffer.from(JSON.stringify(header)).toString('base64url');
+      const pB64 = Buffer.from(JSON.stringify(payload)).toString('base64url');
+      const signer = createSign('RSA-SHA256');
+      signer.update(`${hB64}.${pB64}`);
+      const sig = signer.sign(privateKey, 'base64url');
+
+      await assert.rejects(
+        verifier.verifyIdToken(`${hB64}.${pB64}.${sig}`, 'bsk_gn_expected_nonce'),
+        /Google ID token is missing required nonce claim/,
+      );
+    });
+
+    it('rejects RS256 token when nonce claim does not match expectedNonce', async () => {
+      const { publicKey, privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+      const jwk = publicKey.export({ format: 'jwk' });
+      jwk.kid = 'nonce-kid-03';
+      jwk.alg = 'RS256';
+      jwk.use = 'sig';
+
+      const verifier = new DefaultGoogleTokenVerifier('my-client-id');
+      (verifier as any).jwksCache = { keys: [jwk], expiresAt: Date.now() + 3600_000 };
+
+      const header = { alg: 'RS256', kid: 'nonce-kid-03', typ: 'JWT' };
+      const payload = {
+        iss: 'accounts.google.com',
+        sub: 'nonce_sub_mismatch',
+        aud: 'my-client-id',
+        email: 'mismatchnonce@example.com',
+        email_verified: true,
+        exp: Math.floor(Date.now() / 1000) + 3600,
+        nonce: 'bsk_gn_actual_nonce_claim',
+      };
+
+      const hB64 = Buffer.from(JSON.stringify(header)).toString('base64url');
+      const pB64 = Buffer.from(JSON.stringify(payload)).toString('base64url');
+      const signer = createSign('RSA-SHA256');
+      signer.update(`${hB64}.${pB64}`);
+      const sig = signer.sign(privateKey, 'base64url');
+
+      await assert.rejects(
+        verifier.verifyIdToken(`${hB64}.${pB64}.${sig}`, 'bsk_gn_different_expected_nonce'),
+        /Google ID token nonce does not match expected nonce/,
       );
     });
   });

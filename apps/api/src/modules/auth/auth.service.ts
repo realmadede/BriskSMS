@@ -3,7 +3,7 @@ import { hashPassword, verifyPassword, signJwt, generateSecureToken, hashToken }
 import { HttpException } from '../../core/http.js';
 import { tokenBlacklist } from '../../core/guards.js';
 import { sql, withTransaction, redisClient, isSimulatedRedisOutage, RedisUnavailableError } from '@brisksms/db';
-import { randomUUID, createHash } from 'node:crypto';
+import { randomUUID, createHash, timingSafeEqual } from 'node:crypto';
 import { GoogleTokenVerifier, googleTokenVerifier } from './providers/google.provider.js';
 import { EmailService, emailService } from './services/email.service.js';
 
@@ -31,10 +31,16 @@ interface RateLimitBucket {
   resetAt: number;
 }
 
+interface GoogleNonceRecord {
+  expiresAt: number;
+  clientIp?: string;
+}
+
 export class AuthService {
   private googleVerifier: GoogleTokenVerifier = googleTokenVerifier;
   private emailService: EmailService = emailService;
   private rateLimitBuckets = new Map<string, RateLimitBucket>();
+  private googleNonceStore = new Map<string, GoogleNonceRecord>();
 
   setGoogleVerifier(verifier: GoogleTokenVerifier): void {
     this.googleVerifier = verifier;
@@ -46,6 +52,7 @@ export class AuthService {
 
   async clearRateLimits(): Promise<void> {
     this.rateLimitBuckets.clear();
+    await this.clearGoogleNonces();
     try {
       if (!isSimulatedRedisOutage()) {
         const keys = await redisClient.keys('ratelimit:auth:*');
@@ -56,6 +63,83 @@ export class AuthService {
     } catch {
       // Ignore cleanup error if Redis unavailable in tests
     }
+  }
+
+  async clearGoogleNonces(): Promise<void> {
+    this.googleNonceStore.clear();
+    try {
+      if (!isSimulatedRedisOutage()) {
+        const keys = await redisClient.keys('auth:google_nonce:*');
+        for (const k of keys) {
+          await redisClient.del(k);
+        }
+      }
+    } catch {
+      // Ignore cleanup error if Redis unavailable in tests
+    }
+  }
+
+  async createGoogleNonce(clientIp?: string): Promise<{
+    nonce: string;
+    nonceHash: string;
+    expiresIn: number;
+  }> {
+    const rawNonce = generateSecureToken('bsk_gn', 32);
+    const nonceHash = hashToken(rawNonce);
+    const ttlSec = parseInt(process.env.GOOGLE_NONCE_TTL_SECONDS || '300', 10);
+    const expiresAt = Date.now() + ttlSec * 1000;
+    const isProdOrStaging = process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'staging';
+
+    try {
+      if (!isSimulatedRedisOutage()) {
+        await redisClient.set(
+          `auth:google_nonce:${nonceHash}`,
+          JSON.stringify({ ip: clientIp, createdAt: Date.now() }),
+          ttlSec,
+        );
+      }
+    } catch (err) {
+      if (isProdOrStaging) {
+        throw new RedisUnavailableError('Google nonce store is unavailable in production.', err);
+      }
+    }
+
+    // Always register in memory fallback for dev/test resilience
+    this.googleNonceStore.set(nonceHash, { expiresAt, clientIp });
+
+    return {
+      nonce: rawNonce,
+      nonceHash,
+      expiresIn: ttlSec,
+    };
+  }
+
+  async consumeGoogleNonce(nonceHash: string): Promise<boolean> {
+    const isProdOrStaging = process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'staging';
+
+    try {
+      if (!isSimulatedRedisOutage()) {
+        const deleted = await redisClient.del(`auth:google_nonce:${nonceHash}`);
+        if (deleted > 0) {
+          this.googleNonceStore.delete(nonceHash);
+          return true;
+        }
+        return false;
+      }
+    } catch (err) {
+      if (isProdOrStaging) {
+        throw new RedisUnavailableError('Google nonce store is unavailable in production.', err);
+      }
+    }
+
+    const record = this.googleNonceStore.get(nonceHash);
+    if (!record) return false;
+    if (record.expiresAt <= Date.now()) {
+      this.googleNonceStore.delete(nonceHash);
+      return false;
+    }
+    this.googleNonceStore.delete(nonceHash);
+    return true;
   }
 
   async checkRateLimit(key: string, maxAttempts: number, windowMs: number): Promise<void> {
@@ -285,7 +369,11 @@ export class AuthService {
     };
   }
 
-  async loginWithGoogle(idToken: string, clientIp?: string): Promise<{
+  async loginWithGoogle(
+    idToken: string,
+    clientIp?: string,
+    expectedNonceHash?: string,
+  ): Promise<{
     user: Omit<UserRecord, 'passwordHash'>;
     organizationId?: string;
     organizations: { id: string; name: string; role: string }[];
@@ -298,6 +386,17 @@ export class AuthService {
     // Rate limit: max 10 attempts per minute per IP
     if (clientIp) {
       await this.checkRateLimit(`google_auth_${clientIp}`, 10, 60_000);
+    }
+
+    const isProdOrStaging = process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'staging';
+    if (!expectedNonceHash && isProdOrStaging) {
+      throw new HttpException(401, 'INVALID_GOOGLE_NONCE', 'Authentication nonce is required in production');
+    }
+
+    if (expectedNonceHash) {
+      if (!/^[0-9a-f]{64}$/i.test(expectedNonceHash)) {
+        throw new HttpException(401, 'INVALID_GOOGLE_NONCE', 'Authentication nonce format is invalid');
+      }
     }
 
     let payload;
@@ -313,6 +412,25 @@ export class AuthService {
 
     if (!payload.email_verified) {
       throw new HttpException(400, 'GOOGLE_EMAIL_NOT_VERIFIED', 'Google account email is not verified');
+    }
+
+    // Validate nonce claim and atomically consume nonce
+    if (expectedNonceHash) {
+      if (!payload.nonce || typeof payload.nonce !== 'string') {
+        throw new HttpException(401, 'INVALID_GOOGLE_NONCE', 'Google ID token is missing required nonce claim');
+      }
+
+      const tokenNonceHash = hashToken(payload.nonce);
+      const h1 = Buffer.from(tokenNonceHash, 'hex');
+      const h2 = Buffer.from(expectedNonceHash, 'hex');
+      if (h1.length !== h2.length || !timingSafeEqual(h1, h2)) {
+        throw new HttpException(401, 'INVALID_GOOGLE_NONCE', 'Google ID token nonce does not match browser session nonce');
+      }
+
+      const consumed = await this.consumeGoogleNonce(expectedNonceHash);
+      if (!consumed) {
+        throw new HttpException(401, 'INVALID_GOOGLE_NONCE', 'Authentication nonce has already been consumed or expired');
+      }
     }
 
     const maxAttempts = 2;

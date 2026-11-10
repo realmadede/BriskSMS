@@ -8,9 +8,11 @@ import {
   SESSION_COOKIE_NAME,
   REFRESH_COOKIE_NAME,
   CSRF_COOKIE_NAME,
+  GOOGLE_NONCE_COOKIE_NAME,
   getSessionCookieOptions,
   getRefreshCookieOptions,
   getCsrfCookieOptions,
+  getGoogleNonceCookieOptions,
   getClearedCookieOptions,
   generateCsrfToken,
   isAllowedOrigin,
@@ -110,6 +112,43 @@ export function registerAuthRoutes(router: Router): void {
     };
   });
 
+  async function handleGoogleNonce(req: RouteRequest): Promise<ApiResponse> {
+    // Origin & Fetch Metadata defense against cross-site nonce generation
+    if (req.headers.origin && !isAllowedOrigin(req.headers.origin as string)) {
+      throw new HttpException(403, 'CSRF_ORIGIN_MISMATCH', `Request origin '${req.headers.origin}' is not authorized`);
+    }
+    if (req.headers['sec-fetch-site'] === 'cross-site') {
+      throw new HttpException(403, 'CSRF_CROSS_SITE_FORBIDDEN', 'Cross-site request blocked by Fetch Metadata policy');
+    }
+
+    const clientIp = extractClientIp(req);
+    if (clientIp) {
+      await authService.checkRateLimit(`google_nonce_${clientIp}`, 30, 60_000);
+    }
+
+    const result = await authService.createGoogleNonce(clientIp);
+
+    const cookies: CookieToSet[] = [
+      {
+        name: GOOGLE_NONCE_COOKIE_NAME,
+        value: result.nonceHash,
+        options: getGoogleNonceCookieOptions(),
+      },
+    ];
+
+    return {
+      success: true,
+      data: {
+        nonce: result.nonce,
+        expiresIn: result.expiresIn,
+      },
+      cookies,
+    };
+  }
+
+  router.post('/v1/auth/google/nonce', handleGoogleNonce);
+  router.get('/v1/auth/google/nonce', handleGoogleNonce);
+
   router.post('/v1/auth/google', async (req: RouteRequest): Promise<ApiResponse> => {
     // Origin & Fetch Metadata defense against Login CSRF
     if (req.headers.origin && !isAllowedOrigin(req.headers.origin as string)) {
@@ -124,14 +163,20 @@ export function registerAuthRoutes(router: Router): void {
       validateCsrf(req);
     }
 
+    const cookieNonceHash = req.cookies[GOOGLE_NONCE_COOKIE_NAME];
+    if (!cookieNonceHash) {
+      throw new HttpException(401, 'INVALID_GOOGLE_NONCE', 'Authentication nonce cookie missing from browser session');
+    }
+
     const idToken = ((req.body.idToken || req.body.credential) as string) || '';
-    const result = await authService.loginWithGoogle(idToken, extractClientIp(req));
+    const result = await authService.loginWithGoogle(idToken, extractClientIp(req), cookieNonceHash);
     const csrfToken = generateCsrfToken();
 
     const cookies: CookieToSet[] = [
       { name: SESSION_COOKIE_NAME, value: result.tokens.accessToken, options: getSessionCookieOptions() },
       { name: REFRESH_COOKIE_NAME, value: result.tokens.refreshToken, options: getRefreshCookieOptions() },
       { name: CSRF_COOKIE_NAME, value: csrfToken, options: getCsrfCookieOptions() },
+      { name: GOOGLE_NONCE_COOKIE_NAME, value: '', options: getClearedCookieOptions('/v1/auth/google') },
     ];
 
     return {

@@ -23,10 +23,12 @@ export interface CookieToSet {
 export const SESSION_COOKIE_NAME = 'bsk_session';
 export const REFRESH_COOKIE_NAME = 'bsk_refresh';
 export const CSRF_COOKIE_NAME = 'bsk_csrf';
+export const GOOGLE_NONCE_COOKIE_NAME = 'bsk_g_nonce';
 
 export const SESSION_COOKIE_MAX_AGE = 900; // 15 minutes (matches JWT access token)
 export const REFRESH_COOKIE_MAX_AGE = 30 * 86400; // 30 days
 export const CSRF_COOKIE_MAX_AGE = 86400; // 24 hours
+export const GOOGLE_NONCE_COOKIE_MAX_AGE = 300; // 5 minutes
 
 export function getSessionCookieOptions(): CookieOptions {
   return {
@@ -55,6 +57,16 @@ export function getCsrfCookieOptions(): CookieOptions {
     sameSite: 'Lax',
     path: '/',
     maxAge: CSRF_COOKIE_MAX_AGE,
+  };
+}
+
+export function getGoogleNonceCookieOptions(): CookieOptions {
+  return {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'Lax',
+    path: '/v1/auth/google',
+    maxAge: GOOGLE_NONCE_COOKIE_MAX_AGE,
   };
 }
 
