@@ -188,7 +188,7 @@ The device pairing implementation adheres to a **cryptographic, single-use, 5-mi
 | **STG-AUTH-08** | Non-Enumerating Email Verification Resend (Dual Limits) | `POST /v1/auth/resend-verification` | Throttled by IP (5 requests / 15 min) and privacy-preserving recipient hash (3 requests / 15 min). Invalidates old tokens. Returns identical generic success response for missing, unverified, already-verified, or invalid syntax accounts (anti-enumeration). |
 | **STG-AUTH-09** | Conflicting Google Identity Account Protection | `POST /v1/auth/google` with matching email but conflicting Google `sub` | Rejects hijack attempt with `409 GOOGLE_ACCOUNT_CONFLICT`. Existing account credentials, Google ID, and workspace associations remain untouched. |
 | **STG-AUTH-10** | Google Multi-Audience & Authorized Party (`azp`) Enforcement | `POST /v1/auth/google` with multi-audience token | Rejects array `aud` tokens when `azp` is missing or mismatched. Rejects string `aud` when `azp` conflicts with configured `GOOGLE_CLIENT_ID`. Accepts validly matched `azp`. |
-| **STG-AUTH-11** | Google Identity Nonce Replay & Browser Session Binding | `POST /v1/auth/google/nonce` & `POST /v1/auth/google` | Server issues 32-byte cryptographic nonce with 300s TTL and binds to HttpOnly `bsk_g_nonce` cookie. Validates `hash(token.nonce) === cookieHash`, atomically consumes nonce via Redis `DEL`, clears cookie, and rejects replayed or expired nonces with `401 INVALID_GOOGLE_NONCE`. |
+| **STG-AUTH-11** | Google Identity Nonce Replay & Browser Session Binding | `POST /v1/auth/google/nonce` & `POST /v1/auth/google` | Server issues 32-byte cryptographic nonce with 300s default TTL (configurable 30–900s via `GOOGLE_NONCE_TTL_SECONDS`) and binds to HttpOnly `bsk_g_nonce` cookie. Validates `hash(token.nonce) === cookieHash`, atomically consumes nonce via Redis `DEL`, clears cookie, and rejects replayed or expired nonces with `401 INVALID_GOOGLE_NONCE`. |
 | **STG-AUTH-12** | Cross-Session Nonce Replay Isolation | Authenticate Browser Session B with Token minted for Browser Session A | Rejects with `401 INVALID_GOOGLE_NONCE` ("Google ID token nonce does not match browser session nonce"). Rejects missing cookie or missing token nonce claim. |
 
 ### Workstream 2: Product A — Payment Intelligence & Companion Ingestion
@@ -269,7 +269,7 @@ flowchart TD
 
 1. **Step 1: Live Google Sign-In Flow:**
    - Access `https://staging-console.brisksms.com` and trigger Google Sign-In.
-   - Frontend requests `POST /v1/auth/google/nonce` to obtain server-issued nonce (`bsk_gn_...`) and sets HttpOnly cookie `bsk_g_nonce` (300s TTL).
+   - Frontend requests `POST /v1/auth/google/nonce` to obtain server-issued nonce (`bsk_gn_...`) and sets HttpOnly cookie `bsk_g_nonce` (300s default TTL, configurable via `GOOGLE_NONCE_TTL_SECONDS`).
    - Frontend initializes Google Identity Services passing `nonce: serverNonce`.
    - Merchant selects Google Account; frontend receives real Google ID token and posts to `/v1/auth/google`.
    - Backend fetches live Google certs from `https://www.googleapis.com/oauth2/v3/certs`, verifies RS256 signature, validates `aud`, `azp`, and `iss`.

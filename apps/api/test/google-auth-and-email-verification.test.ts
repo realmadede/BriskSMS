@@ -666,6 +666,69 @@ describe('Google Sign-In & Resend Email Verification Security Suite', () => {
       }
     });
 
+    it('synchronizes GOOGLE_NONCE_TTL_SECONDS across HTTP response expiresIn and cookie Max-Age on /v1/auth/google/nonce', async () => {
+      const origEnv = process.env.GOOGLE_NONCE_TTL_SECONDS;
+      try {
+        // 1. Valid custom TTL within bounds (120s)
+        process.env.GOOGLE_NONCE_TTL_SECONDS = '120';
+        const resCustom = await makeRequest(
+          'POST',
+          '/v1/auth/google/nonce',
+          { host: 'localhost:3000' },
+        );
+        assert.equal(resCustom.statusCode, 200);
+        assert.equal(resCustom.json.data.expiresIn, 120);
+        const cookie120 = resCustom.setCookies.find((c) => c.startsWith(`${GOOGLE_NONCE_COOKIE_NAME}=`));
+        assert.ok(cookie120);
+        assert.ok(cookie120.includes('Max-Age=120'), 'Cookie Max-Age must be 120');
+
+        // 2. Out-of-bounds lower value (15s < 30s min) falls back to 300s
+        process.env.GOOGLE_NONCE_TTL_SECONDS = '15';
+        const resLower = await makeRequest(
+          'POST',
+          '/v1/auth/google/nonce',
+          { host: 'localhost:3000' },
+        );
+        assert.equal(resLower.statusCode, 200);
+        assert.equal(resLower.json.data.expiresIn, 300);
+        const cookieLower = resLower.setCookies.find((c) => c.startsWith(`${GOOGLE_NONCE_COOKIE_NAME}=`));
+        assert.ok(cookieLower);
+        assert.ok(cookieLower.includes('Max-Age=300'), 'Cookie Max-Age must fall back to 300');
+
+        // 3. Out-of-bounds upper value (1200s > 900s max) falls back to 300s
+        process.env.GOOGLE_NONCE_TTL_SECONDS = '1200';
+        const resUpper = await makeRequest(
+          'POST',
+          '/v1/auth/google/nonce',
+          { host: 'localhost:3000' },
+        );
+        assert.equal(resUpper.statusCode, 200);
+        assert.equal(resUpper.json.data.expiresIn, 300);
+        const cookieUpper = resUpper.setCookies.find((c) => c.startsWith(`${GOOGLE_NONCE_COOKIE_NAME}=`));
+        assert.ok(cookieUpper);
+        assert.ok(cookieUpper.includes('Max-Age=300'), 'Cookie Max-Age must fall back to 300');
+
+        // 4. Invalid non-numeric value falls back to 300s
+        process.env.GOOGLE_NONCE_TTL_SECONDS = 'invalid-ttl';
+        const resInvalid = await makeRequest(
+          'POST',
+          '/v1/auth/google/nonce',
+          { host: 'localhost:3000' },
+        );
+        assert.equal(resInvalid.statusCode, 200);
+        assert.equal(resInvalid.json.data.expiresIn, 300);
+        const cookieInvalid = resInvalid.setCookies.find((c) => c.startsWith(`${GOOGLE_NONCE_COOKIE_NAME}=`));
+        assert.ok(cookieInvalid);
+        assert.ok(cookieInvalid.includes('Max-Age=300'), 'Cookie Max-Age must fall back to 300');
+      } finally {
+        if (origEnv !== undefined) {
+          process.env.GOOGLE_NONCE_TTL_SECONDS = origEnv;
+        } else {
+          delete process.env.GOOGLE_NONCE_TTL_SECONDS;
+        }
+      }
+    });
+
     it('rejects unauthorized origin on nonce creation with 403 CSRF_ORIGIN_MISMATCH', async () => {
       const res = await makeRequest(
         'POST',
