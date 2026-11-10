@@ -95,7 +95,7 @@ Commit Signature:    ED25519 (Key ID: SHA256:9lhgsJOaPG2FrX2fmo8XrZxX8z9UvmwwxGH
 | **Token Representation** | Earlier design contemplated signed JWT refresh tokens. | **Opaque high-entropy tokens** (`generateSecureToken('bsk_ref')`), hashed with SHA-256 before storage. | Stored in PostgreSQL `refresh_tokens.token_hash`. `JWT_REFRESH_SECRET` and `JWT_REFRESH_EXPIRES_IN` are unused legacy variables. | `VERIFIED IN CODE` |
 | **Refresh Rotation** | Rotates refresh token upon consumption. | Consumed token marked `revoked_at = NOW()`; fresh child token issued in same ACID transaction. | `UPDATE refresh_tokens SET revoked_at = NOW() WHERE token_hash = ... FOR UPDATE`. | `VERIFIED BY AUTOMATED TEST` |
 | **Replay Defense** | Replay of revoked token is rejected. | Replayed token fails with HTTP 401 `INVALID_TOKEN`. | Row-level locking (`SELECT ... FOR UPDATE`) prevents concurrent branch split. | `VERIFIED BY AUTOMATED TEST` |
-| **Family Revocation** | Token replay triggers revocation of entire token family. | **Implemented & Verified.** Presenting an already-consumed or revoked token atomically revokes all tokens matching `family_id` (`UPDATE refresh_tokens SET revoked_at = NOW() WHERE family_id = ... AND revoked_at IS NULL`), blacklists JTI in Redis, and rejects with HTTP 401 `INVALID_TOKEN`. Descendant tokens are invalidated. | `family_id UUID NOT NULL DEFAULT gen_random_uuid()` with index `@@index([familyId])` (migration `20261111000000_refresh_token_family_revocation`). | `VERIFIED BY AUTOMATED TEST` |
+| **Family Revocation** | Token replay triggers revocation of entire token family and associated access tokens. | **Implemented & Verified.** Presenting an already-consumed or revoked token atomically revokes all refresh tokens matching `family_id` (`UPDATE refresh_tokens SET revoked_at = NOW() WHERE family_id = ... AND revoked_at IS NULL`), blacklists all issued access-token JTIs in PostgreSQL `revoked_sessions` and fast in-memory `tokenBlacklist`, and rejects with HTTP 401 `INVALID_TOKEN`. In-flight descendant access tokens are immediately rejected with HTTP 401 `TOKEN_REVOKED`. | `family_id UUID NOT NULL DEFAULT gen_random_uuid()` with index `@@index([familyId])` (migration `20261111000000_refresh_token_family_revocation`). | `VERIFIED BY AUTOMATED TEST` |
 
 > [!NOTE]
 > **Resolution of Refresh Lifetime Discrepancy:**  
@@ -231,7 +231,7 @@ Inspection of `packages/db/prisma/migrations/` and PostgreSQL schema history con
 - **Execution Date:** 2026-11-11
 - **Command:** `bun run test` (`bun test packages/shared/test/ packages/parser-engine/test/ packages/ui/test/ apps/api/test/ packages/zapier-app/test/`)
 - **Services:** Local PostgreSQL (port 54322) and Redis (port 6379)
-- **Results:** **359 passed, 0 failed, 0 skipped across 28 test files** (187.23s execution time).
+- **Results:** **363 passed, 0 failed, 0 skipped across 28 test files** (187.23s execution time).
 - **Typecheck:** `tsc -b` passed with 0 compiler errors.
 - **Build:** `bun run build` cleanly bundled all 6 workspace packages into `dist/`.
 
@@ -241,11 +241,11 @@ Inspection of `packages/db/prisma/migrations/` and PostgreSQL schema history con
 |---|---|---|---|---|
 | **Remote CI Run #19** | `c7b4a50ab8ad636996f328645be2d18517230bd2` | 259 passed, 0 failed | 23 test files | `VERIFIED IN REMOTE CI` |
 | **Pre-Audit Baseline** | `5f590acbce6e4ef11a852f3c687e5aa3066d9775` | 342 passed, 0 failed | 26 test files | `VERIFIED BY AUTOMATED TEST` |
-| **Current Working HEAD** | Token Family & 429 Safety | 359 passed, 0 failed | 28 test files | `VERIFIED BY AUTOMATED TEST` |
-| **Delta (Added Tests)** | `a80f998`..HEAD | +100 tests (Auth, Nonce, STK Push, Family Revocation, 429 Safety) | +5 test files | `VERIFIED BY AUTOMATED TEST` (Pending Remote CI Push) |
+| **Current Working HEAD** | Token Family & Access Invalidation | 363 passed, 0 failed | 28 test files | `VERIFIED BY AUTOMATED TEST` |
+| **Delta (Added Tests)** | `a80f998`..HEAD | +104 tests (Auth, Nonce, STK Push, Family & Access Revocation, 429 Safety) | +5 test files | `VERIFIED BY AUTOMATED TEST` (Pending Remote CI Push) |
 
 > [!NOTE]
-> The earlier reference to "630 tests across 44 files" was caused by running `bun test` without file arguments, which evaluated duplicate compiled test files inside `apps/api/dist/test` alongside TypeScript source files in `apps/api/test`. The authoritative monorepo test corpus contains **359 unique tests across 28 files**.
+> The earlier reference to "630 tests across 44 files" was caused by running `bun test` without file arguments, which evaluated duplicate compiled test files inside `apps/api/dist/test` alongside TypeScript source files in `apps/api/test`. The authoritative monorepo test corpus contains **363 unique tests across 28 files**.
 
 ---
 
@@ -300,7 +300,7 @@ flowchart TD
 Before BriskSMS staging deployment can be executed, the following gates must be satisfied:
 
 1. [x] **Monorepo Build & Typecheck:** 0 compiler errors across all packages (`VERIFIED IN CODE`).
-2. [x] **Fresh Automated Test Suite:** 359/359 tests passing on HEAD (`VERIFIED BY AUTOMATED TEST`).
+2. [x] **Fresh Automated Test Suite:** 363/363 tests passing on HEAD (`VERIFIED BY AUTOMATED TEST`).
 3. [ ] **Remote CI Push Synchronization:** Push local commits to `origin/main` and verify GitHub Actions green (`REQUIRES EXTERNAL CONFIGURATION`).
 4. [ ] **Reverse Proxy Header Sanitization:** Ensure proxy overwrites `X-Forwarded-For` with `$remote_addr` (`REQUIRES EXTERNAL CONFIGURATION`).
 5. [ ] **Google Cloud Web Client ID:** Register authorized origin `https://staging-console.brisksms.com` (`REQUIRES EXTERNAL CONFIGURATION`).

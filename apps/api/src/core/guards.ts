@@ -14,6 +14,16 @@ import {
 // Fast in-process cache synchronized with PostgreSQL `revoked_sessions` table
 export const tokenBlacklist = new Set<string>();
 
+export async function syncTokenBlacklistFromDb(): Promise<number> {
+  const rows = await sql<{ jti: string }>`
+    SELECT "jti" FROM "revoked_sessions" WHERE "expires_at" > NOW()
+  `;
+  for (const row of rows) {
+    tokenBlacklist.add(row.jti);
+  }
+  return rows.length;
+}
+
 export async function isTokenRevoked(jti: string): Promise<boolean> {
   if (tokenBlacklist.has(jti)) return true;
   const rows = await sql<{ jti: string }>`

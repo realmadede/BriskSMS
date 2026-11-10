@@ -12,6 +12,7 @@ import {
   REFRESH_COOKIE_NAME,
   CSRF_COOKIE_NAME,
 } from '../src/core/cookies.js';
+import { tokenBlacklist, syncTokenBlacklistFromDb } from '../src/core/guards.js';
 
 describe('Refresh-Token Family Revocation Security Suite', () => {
   const router = createApp();
@@ -473,5 +474,199 @@ describe('Refresh-Token Family Revocation Security Suite', () => {
     assert.ok(googleTokens.refreshToken);
     const childRow = (await sql<any>`SELECT * FROM "refresh_tokens" WHERE "token_hash" = ${hashToken(googleTokens.refreshToken)}`)[0];
     assert.equal(childRow.family_id, loginRow.family_id, 'Rotated token must retain family');
+  });
+
+  it('11. Immediate access-token invalidation upon replay: active descendant access token A3 is rejected with 401 TOKEN_REVOKED after T1 replay', async () => {
+    // Register: issues T1 and A1
+    const regRes = await makeRequest('POST', '/v1/auth/register', {}, {
+      email: 'accesstokenrev@brisksms.co.tz',
+      password: 'SecurePassword123!',
+      fullName: 'Access Revocation User',
+      organizationName: 'Access Rev Corp',
+    });
+    const t1 = extractCookie(regRes.setCookies, REFRESH_COOKIE_NAME)!;
+    const csrf1 = extractCookie(regRes.setCookies, CSRF_COOKIE_NAME)!;
+    const a1 = extractCookie(regRes.setCookies, SESSION_COOKIE_NAME)!;
+
+    // Rotate 1: T1 -> T2 and A2
+    const ref1 = await makeRequest('POST', '/v1/auth/refresh', {
+      cookie: `${REFRESH_COOKIE_NAME}=${t1}; ${CSRF_COOKIE_NAME}=${csrf1}`,
+      'x-csrf-token': csrf1,
+      origin: 'http://localhost:4200',
+    }, {});
+    assert.equal(ref1.statusCode, 200);
+    const t2 = extractCookie(ref1.setCookies, REFRESH_COOKIE_NAME)!;
+    const csrf2 = extractCookie(ref1.setCookies, CSRF_COOKIE_NAME)!;
+    const a2 = extractCookie(ref1.setCookies, SESSION_COOKIE_NAME)!;
+
+    // Rotate 2: T2 -> T3 and A3
+    const ref2 = await makeRequest('POST', '/v1/auth/refresh', {
+      cookie: `${REFRESH_COOKIE_NAME}=${t2}; ${CSRF_COOKIE_NAME}=${csrf2}`,
+      'x-csrf-token': csrf2,
+      origin: 'http://localhost:4200',
+    }, {});
+    assert.equal(ref2.statusCode, 200);
+    const a3 = extractCookie(ref2.setCookies, SESSION_COOKIE_NAME)!;
+
+    // Prior to replay, active access token A3 authenticates cleanly
+    const preReplayRes = await makeRequest('GET', '/v1/auth/session', {
+      cookie: `${SESSION_COOKIE_NAME}=${a3}`,
+    });
+    assert.equal(preReplayRes.statusCode, 200, 'A3 must be valid before replay detection');
+
+    // Attacker replays consumed token T1
+    const replayRes = await makeRequest('POST', '/v1/auth/refresh', {
+      cookie: `${REFRESH_COOKIE_NAME}=${t1}; ${CSRF_COOKIE_NAME}=${csrf1}`,
+      'x-csrf-token': csrf1,
+      origin: 'http://localhost:4200',
+    }, {});
+    assert.equal(replayRes.statusCode, 401, 'Replay must be rejected');
+
+    // CRITICAL SECURITY ASSERTION: Replay must immediately invalidate active access token A3!
+    const postReplayRes = await makeRequest('GET', '/v1/auth/session', {
+      cookie: `${SESSION_COOKIE_NAME}=${a3}`,
+    });
+    assert.equal(postReplayRes.statusCode, 401, 'Active access token A3 must be rejected immediately after family replay');
+    assert.equal(postReplayRes.json.error.code, 'TOKEN_REVOKED');
+
+    // Older access tokens A1 and A2 must also be revoked
+    const a1Res = await makeRequest('GET', '/v1/auth/session', {
+      cookie: `${SESSION_COOKIE_NAME}=${a1}`,
+    });
+    assert.equal(a1Res.statusCode, 401);
+    assert.equal(a1Res.json.error.code, 'TOKEN_REVOKED');
+
+    const a2Res = await makeRequest('GET', '/v1/auth/session', {
+      cookie: `${SESSION_COOKIE_NAME}=${a2}`,
+    });
+    assert.equal(a2Res.statusCode, 401);
+    assert.equal(a2Res.json.error.code, 'TOKEN_REVOKED');
+  });
+
+  it('12. Restart recovery / PostgreSQL authoritative source: revoked sessions remain rejected after in-memory cache clear', async () => {
+    // Register and rotate to issue tokens
+    const regRes = await makeRequest('POST', '/v1/auth/register', {}, {
+      email: 'restart@brisksms.co.tz',
+      password: 'SecurePassword123!',
+      fullName: 'Restart User',
+      organizationName: 'Restart Corp',
+    });
+    const t1 = extractCookie(regRes.setCookies, REFRESH_COOKIE_NAME)!;
+    const csrf1 = extractCookie(regRes.setCookies, CSRF_COOKIE_NAME)!;
+    const a1 = extractCookie(regRes.setCookies, SESSION_COOKIE_NAME)!;
+
+    const ref1 = await makeRequest('POST', '/v1/auth/refresh', {
+      cookie: `${REFRESH_COOKIE_NAME}=${t1}; ${CSRF_COOKIE_NAME}=${csrf1}`,
+      'x-csrf-token': csrf1,
+      origin: 'http://localhost:4200',
+    }, {});
+    const a2 = extractCookie(ref1.setCookies, SESSION_COOKIE_NAME)!;
+
+    // Replay T1 -> Triggers family revocation
+    await makeRequest('POST', '/v1/auth/refresh', {
+      cookie: `${REFRESH_COOKIE_NAME}=${t1}; ${CSRF_COOKIE_NAME}=${csrf1}`,
+      'x-csrf-token': csrf1,
+      origin: 'http://localhost:4200',
+    }, {});
+
+    // Simulate process cold restart: wipe in-memory tokenBlacklist Set
+    tokenBlacklist.clear();
+    assert.equal(tokenBlacklist.size, 0, 'In-memory blacklist wiped to simulate cold start');
+
+    // Cold boot reloads from PostgreSQL authoritative source
+    const reloadedCount = await syncTokenBlacklistFromDb();
+    assert.ok(reloadedCount >= 2, 'Must reload revoked JTIs from PostgreSQL revoked_sessions');
+
+    // Access tokens A1 and A2 must still be rejected with 401 TOKEN_REVOKED
+    const checkA1Res = await makeRequest('GET', '/v1/auth/session', {
+      cookie: `${SESSION_COOKIE_NAME}=${a1}`,
+    });
+    assert.equal(checkA1Res.statusCode, 401);
+    assert.equal(checkA1Res.json.error.code, 'TOKEN_REVOKED');
+
+    const checkRes = await makeRequest('GET', '/v1/auth/session', {
+      cookie: `${SESSION_COOKIE_NAME}=${a2}`,
+    });
+    assert.equal(checkRes.statusCode, 401, 'Access token must remain rejected after restart');
+    assert.equal(checkRes.json.error.code, 'TOKEN_REVOKED');
+  });
+
+  it('13. Replaying an already-revoked token is idempotent and maintains full family invalidation', async () => {
+    const regRes = await makeRequest('POST', '/v1/auth/register', {}, {
+      email: 'idempotent@brisksms.co.tz',
+      password: 'SecurePassword123!',
+      fullName: 'Idempotent User',
+      organizationName: 'Idempotent Corp',
+    });
+    const t1 = extractCookie(regRes.setCookies, REFRESH_COOKIE_NAME)!;
+    const csrf1 = extractCookie(regRes.setCookies, CSRF_COOKIE_NAME)!;
+
+    // Rotate: T1 -> T2
+    await makeRequest('POST', '/v1/auth/refresh', {
+      cookie: `${REFRESH_COOKIE_NAME}=${t1}; ${CSRF_COOKIE_NAME}=${csrf1}`,
+      'x-csrf-token': csrf1,
+      origin: 'http://localhost:4200',
+    }, {});
+
+    // First replay of T1
+    const replay1 = await makeRequest('POST', '/v1/auth/refresh', {
+      cookie: `${REFRESH_COOKIE_NAME}=${t1}; ${CSRF_COOKIE_NAME}=${csrf1}`,
+      'x-csrf-token': csrf1,
+      origin: 'http://localhost:4200',
+    }, {});
+    assert.equal(replay1.statusCode, 401);
+
+    // Second replay of T1 (already revoked family)
+    const replay2 = await makeRequest('POST', '/v1/auth/refresh', {
+      cookie: `${REFRESH_COOKIE_NAME}=${t1}; ${CSRF_COOKIE_NAME}=${csrf1}`,
+      'x-csrf-token': csrf1,
+      origin: 'http://localhost:4200',
+    }, {});
+    assert.equal(replay2.statusCode, 401);
+    assert.equal(replay2.json.error.code, 'INVALID_TOKEN');
+  });
+
+  it('14. Explicit logout revokes access tokens across the rotated family', async () => {
+    const regRes = await makeRequest('POST', '/v1/auth/register', {}, {
+      email: 'logouttokens@brisksms.co.tz',
+      password: 'SecurePassword123!',
+      fullName: 'Logout Token User',
+      organizationName: 'Logout Token Corp',
+    });
+    const t1 = extractCookie(regRes.setCookies, REFRESH_COOKIE_NAME)!;
+    const csrf1 = extractCookie(regRes.setCookies, CSRF_COOKIE_NAME)!;
+    const a1 = extractCookie(regRes.setCookies, SESSION_COOKIE_NAME)!;
+
+    // Rotate: T1 -> T2 (minting A2)
+    const ref1 = await makeRequest('POST', '/v1/auth/refresh', {
+      cookie: `${REFRESH_COOKIE_NAME}=${t1}; ${CSRF_COOKIE_NAME}=${csrf1}`,
+      'x-csrf-token': csrf1,
+      origin: 'http://localhost:4200',
+    }, {});
+    const t2 = extractCookie(ref1.setCookies, REFRESH_COOKIE_NAME)!;
+    const csrf2 = extractCookie(ref1.setCookies, CSRF_COOKIE_NAME)!;
+    const a2 = extractCookie(ref1.setCookies, SESSION_COOKIE_NAME)!;
+
+    // Logout presenting current session A2
+    const logoutRes = await makeRequest('POST', '/v1/auth/logout', {
+      cookie: `${SESSION_COOKIE_NAME}=${a2}; ${REFRESH_COOKIE_NAME}=${t2}; ${CSRF_COOKIE_NAME}=${csrf2}`,
+      'x-csrf-token': csrf2,
+      origin: 'http://localhost:4200',
+    }, {});
+    assert.equal(logoutRes.statusCode, 200);
+
+    // Current access token A2 must be revoked
+    const a2Res = await makeRequest('GET', '/v1/auth/session', {
+      cookie: `${SESSION_COOKIE_NAME}=${a2}`,
+    });
+    assert.equal(a2Res.statusCode, 401);
+    assert.equal(a2Res.json.error.code, 'TOKEN_REVOKED');
+
+    // Ancestor access token A1 from same family must also be revoked
+    const a1Res = await makeRequest('GET', '/v1/auth/session', {
+      cookie: `${SESSION_COOKIE_NAME}=${a1}`,
+    });
+    assert.equal(a1Res.statusCode, 401);
+    assert.equal(a1Res.json.error.code, 'TOKEN_REVOKED');
   });
 });

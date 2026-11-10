@@ -1,4 +1,5 @@
 import { Router } from './core/http.js';
+import { syncTokenBlacklistFromDb } from './core/guards.js';
 import {
   checkDatabaseHealth,
   checkRedisHealth,
@@ -17,6 +18,9 @@ import { registerOAuthRoutes } from './modules/oauth/oauth.controller.js';
 import { registerStkPushRoutes } from './modules/stk-push/stk-push.controller.js';
 
 export function createApp(): Router {
+  // Synchronize active revoked access tokens from PostgreSQL into in-memory fast blacklist
+  syncTokenBlacklistFromDb().catch(() => {});
+
   const router = new Router();
 
   // Production Health & Readiness Endpoint

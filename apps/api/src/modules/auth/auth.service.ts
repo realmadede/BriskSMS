@@ -686,14 +686,30 @@ export class AuthService {
           WHERE "family_id" = ${record.family_id}
             AND "revoked_at" IS NULL
         `;
-        if (record.jti) {
-          tokenBlacklist.add(record.jti);
-          await sql`
-            INSERT INTO "revoked_sessions" ("jti", "user_id", "expires_at", "revoked_at")
-            VALUES (${record.jti}, ${record.user_id}, NOW() + INTERVAL '1 day', NOW())
-            ON CONFLICT ("jti") DO UPDATE SET "revoked_at" = NOW()
-          `;
+
+        // Revoke every access token JTI issued in this family
+        const familyTokens = await sql<{ jti: string; user_id: string }>`
+          SELECT "jti", "user_id"
+          FROM "refresh_tokens"
+          WHERE "family_id" = ${record.family_id}
+            AND "jti" IS NOT NULL
+        `;
+
+        for (const token of familyTokens) {
+          if (token.jti) {
+            tokenBlacklist.add(token.jti);
+          }
         }
+
+        await sql`
+          INSERT INTO "revoked_sessions" ("jti", "user_id", "expires_at", "revoked_at")
+          SELECT "jti", "user_id", NOW() + INTERVAL '1 day', NOW()
+          FROM "refresh_tokens"
+          WHERE "family_id" = ${record.family_id}
+            AND "jti" IS NOT NULL
+          ON CONFLICT ("jti") DO UPDATE SET "revoked_at" = NOW()
+        `;
+
         throw new HttpException(401, 'INVALID_TOKEN', 'Refresh token is expired or invalid (consumed; entire session family revoked)');
       }
 
@@ -754,14 +770,43 @@ export class AuthService {
         VALUES (${jti}, ${userId ?? null}, ${expiresAt}, NOW())
         ON CONFLICT ("jti") DO UPDATE SET "revoked_at" = NOW()
       `;
-      // Revoke any refresh token family bound to this jti
-      await sql`
-        UPDATE "refresh_tokens"
-        SET "revoked_at" = NOW()
-        WHERE "family_id" IN (
-          SELECT "family_id" FROM "refresh_tokens" WHERE "jti" = ${jti}
-        ) AND "revoked_at" IS NULL
+
+      // Find the family_id bound to this jti
+      const familyRows = await sql<{ family_id: string }>`
+        SELECT "family_id" FROM "refresh_tokens" WHERE "jti" = ${jti} LIMIT 1
       `;
+      const familyId = familyRows[0]?.family_id;
+
+      if (familyId) {
+        // Revoke all refresh tokens in the family
+        await sql`
+          UPDATE "refresh_tokens"
+          SET "revoked_at" = NOW()
+          WHERE "family_id" = ${familyId}
+            AND "revoked_at" IS NULL
+        `;
+
+        // Revoke all access token JTIs in this family
+        const familyTokens = await sql<{ jti: string; user_id: string }>`
+          SELECT "jti", "user_id"
+          FROM "refresh_tokens"
+          WHERE "family_id" = ${familyId}
+            AND "jti" IS NOT NULL
+        `;
+        for (const token of familyTokens) {
+          if (token.jti) {
+            tokenBlacklist.add(token.jti);
+          }
+        }
+        await sql`
+          INSERT INTO "revoked_sessions" ("jti", "user_id", "expires_at", "revoked_at")
+          SELECT "jti", "user_id", ${expiresAt}, NOW()
+          FROM "refresh_tokens"
+          WHERE "family_id" = ${familyId}
+            AND "jti" IS NOT NULL
+          ON CONFLICT ("jti") DO UPDATE SET "revoked_at" = NOW()
+        `;
+      }
     }
   }
 

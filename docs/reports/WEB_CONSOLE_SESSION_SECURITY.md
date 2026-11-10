@@ -67,19 +67,22 @@ In Login CSRF, an attacker crafts a malicious webpage that submits credentials f
 - **Stable Token Family Identity:** Every refresh token chain originates with a stable UUID `family_id` (migration `20261111000000_refresh_token_family_revocation`).
 - **Rotation Inheritance:** When a token is successfully rotated via `POST /v1/auth/refresh`, the newly minted child token inherits the identical `family_id` from its parent.
 - **Atomic Replay & Theft Detection:** When an already-consumed or revoked token (`record.revoked_at !== null`) is presented:
-  1. The API immediately recognizes a potential replay / credential theft condition.
-  2. The server durably revokes **all** active tokens belonging to that `family_id`:
+  1. The API immediately detects token replay / credential theft.
+  2. The server durably revokes **all** active refresh tokens belonging to that `family_id`:
      ```sql
      UPDATE "refresh_tokens"
      SET "revoked_at" = NOW()
      WHERE "family_id" = $1 AND "revoked_at" IS NULL
      ```
-  3. The associated access token JTI is blacklisted in Redis.
-  4. The request terminates with HTTP `401 INVALID_TOKEN`.
-- **Descendant Invalidation:** If an attacker replays token $T_1$ after the legitimate client rotated to $T_2$ and $T_3$, the family revocation instantly invalidates $T_2$ and $T_3$. Any subsequent attempt by the legitimate client or attacker using $T_3$ fails with HTTP `401 INVALID_TOKEN`.
-- **Session Logout Semantics:** Explicit logout via `POST /v1/auth/logout` atomically revokes all tokens within the associated `family_id`, ensuring no orphaned descendants can be used to mint new access tokens.
-- **Family Isolation:** Revocation of one token family (e.g. from a compromised device or logout) has zero impact on independent token families for the same user (e.g. active sessions on another device or browser).
-- **Test Evidence:** Verified by 10 comprehensive regression tests in `apps/api/test/refresh-token-family.test.ts`.
+  3. The server retrieves all access-token JTIs issued throughout that family's lifetime and invalidates them:
+     - Populates in-process `tokenBlacklist.add(jti)` for instant synchronous rejection (`401 TOKEN_REVOKED`).
+     - Durably records them in PostgreSQL `revoked_sessions` (`expires_at = NOW() + 1 day`).
+  4. The refresh request terminates with HTTP `401 INVALID_TOKEN`.
+- **Immediate Access-Token Revocation:** Replay invalidates not only the refresh chain, but also every in-flight access token issued in that family. An active descendant access token ($A_3$) cannot continue making requests and is immediately rejected with HTTP `401 TOKEN_REVOKED`.
+- **Process Restart & Authoritative Store:** PostgreSQL `revoked_sessions` is the authoritative persistence layer. On application boot, `syncTokenBlacklistFromDb()` loads all unexpired revocations into the in-memory fast cache. Across multiple application instances, any instance that has reloaded from PostgreSQL rejects revoked sessions immediately; unsynchronized instances rely on the bounded 15-minute maximum remaining lifetime of JWT access tokens (`900s`).
+- **Session Logout Semantics:** Explicit logout via `POST /v1/auth/logout` revokes all active refresh tokens and all issued access-token JTIs in the family.
+- **Family Isolation:** Revocation of one token family has zero impact on independent token families for the same user (e.g. concurrent sessions on another browser or device).
+- **Test Evidence:** Verified by 14 comprehensive regression tests in `apps/api/test/refresh-token-family.test.ts`. Note: automated test verification confirms code and PostgreSQL contracts; multi-node distributed sync requires live staging verification.
 
 ---
 

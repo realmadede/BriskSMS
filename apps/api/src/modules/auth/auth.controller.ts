@@ -1,7 +1,7 @@
 import { Router, RouteRequest, ApiResponse, HttpException } from '../../core/http.js';
 import type { CookieToSet } from '../../core/cookies.js';
 import { authService, RegisterDto, LoginDto } from './auth.service.js';
-import { authenticate, validateCsrf } from '../../core/guards.js';
+import { authenticate, validateCsrf, tokenBlacklist } from '../../core/guards.js';
 import { hashToken } from '../../core/crypto.js';
 import { sql } from '@brisksms/db';
 import {
@@ -284,13 +284,36 @@ export function registerAuthRoutes(router: Router): void {
     const rawRefresh = req.cookies[REFRESH_COOKIE_NAME] || (req.body?.refreshToken as string);
     if (rawRefresh) {
       const refreshHash = hashToken(rawRefresh);
-      await sql`
-        UPDATE "refresh_tokens"
-        SET "revoked_at" = NOW()
-        WHERE "family_id" IN (
-          SELECT "family_id" FROM "refresh_tokens" WHERE "token_hash" = ${refreshHash}
-        ) AND "revoked_at" IS NULL
+      const familyRows = await sql<{ family_id: string }>`
+        SELECT "family_id" FROM "refresh_tokens" WHERE "token_hash" = ${refreshHash} LIMIT 1
       `;
+      const familyId = familyRows[0]?.family_id;
+      if (familyId) {
+        await sql`
+          UPDATE "refresh_tokens"
+          SET "revoked_at" = NOW()
+          WHERE "family_id" = ${familyId} AND "revoked_at" IS NULL
+        `;
+        const familyTokens = await sql<{ jti: string; user_id: string }>`
+          SELECT "jti", "user_id"
+          FROM "refresh_tokens"
+          WHERE "family_id" = ${familyId}
+            AND "jti" IS NOT NULL
+        `;
+        for (const token of familyTokens) {
+          if (token.jti) {
+            tokenBlacklist.add(token.jti);
+          }
+        }
+        await sql`
+          INSERT INTO "revoked_sessions" ("jti", "user_id", "expires_at", "revoked_at")
+          SELECT "jti", "user_id", NOW() + INTERVAL '1 day', NOW()
+          FROM "refresh_tokens"
+          WHERE "family_id" = ${familyId}
+            AND "jti" IS NOT NULL
+          ON CONFLICT ("jti") DO UPDATE SET "revoked_at" = NOW()
+        `;
+      }
     }
 
     const cookies: CookieToSet[] = [
