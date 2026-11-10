@@ -20,6 +20,7 @@ import {
   BusinessEventType,
   OutboxStatus,
   VerificationMethod,
+  StkPushStatus,
 } from '@brisksms/shared';
 import {
   assertTenantContext,
@@ -450,6 +451,28 @@ export interface InvoicePaymentRecord {
   createdAt: Date;
 }
 
+export interface StkPushTransactionRecord {
+  id: string;
+  organizationId: string;
+  provider: PaymentProvider;
+  phoneNumber: string;
+  amountCents: bigint;
+  currency: string;
+  status: StkPushStatus;
+  invoiceId?: string | null;
+  referenceNumber?: string | null;
+  memo?: string | null;
+  providerReference?: string | null;
+  resultCode?: number | null;
+  resultDescription?: string | null;
+  errorMessage?: string | null;
+  settledPaymentId?: string | null;
+  rawCallbackPayload?: Record<string, unknown> | null;
+  metadata?: Record<string, unknown> | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export interface ApiKeyRecord {
   id: string;
   organizationId: string;
@@ -713,6 +736,34 @@ export function mapOutboxRow(row: Record<string, any>): OutboxEventRecord {
     lastError: row.last_error ?? null,
     deliveredAt: row.delivered_at ? new Date(row.delivered_at) : null,
     createdAt: new Date(row.created_at),
+  };
+}
+
+export function mapStkPushTransactionRow(row: Record<string, any>): StkPushTransactionRecord {
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    provider: row.provider as PaymentProvider,
+    phoneNumber: row.phone_number,
+    amountCents: BigInt(row.amount_cents),
+    currency: row.currency,
+    status: row.status as StkPushStatus,
+    invoiceId: row.invoice_id ?? null,
+    referenceNumber: row.reference_number ?? null,
+    memo: row.memo ?? null,
+    providerReference: row.provider_reference ?? null,
+    resultCode: row.result_code !== null && row.result_code !== undefined ? Number(row.result_code) : null,
+    resultDescription: row.result_description ?? null,
+    errorMessage: row.error_message ?? null,
+    settledPaymentId: row.settled_payment_id ?? null,
+    rawCallbackPayload: typeof row.raw_callback_payload === 'string'
+      ? JSON.parse(row.raw_callback_payload)
+      : (row.raw_callback_payload ?? null),
+    metadata: typeof row.metadata === 'string'
+      ? JSON.parse(row.metadata)
+      : (row.metadata ?? null),
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at),
   };
 }
 
@@ -1918,6 +1969,164 @@ export class PostgresStore {
       ORDER BY "created_at" ASC
     `;
     return rows.map(mapNormalizedPaymentRow);
+  }
+
+  // --- STK Push Transactions ---
+  async createStkTransaction(
+    data: {
+      id: string;
+      organizationId: string;
+      provider: PaymentProvider;
+      phoneNumber: string;
+      amountCents: bigint;
+      currency?: string;
+      status?: StkPushStatus;
+      invoiceId?: string | null;
+      referenceNumber?: string | null;
+      memo?: string | null;
+      metadata?: Record<string, unknown> | null;
+    },
+    tx: SqlExecutor = sql,
+  ): Promise<StkPushTransactionRecord> {
+    assertTenantContext({ organizationId: data.organizationId });
+    const currency = data.currency || 'TZS';
+    const status = data.status || StkPushStatus.PENDING;
+
+    const rows = await tx`
+      INSERT INTO "stk_push_transactions" (
+        "id", "organization_id", "provider", "phone_number",
+        "amount_cents", "currency", "status", "invoice_id",
+        "reference_number", "memo", "metadata"
+      )
+      VALUES (
+        ${data.id},
+        ${data.organizationId},
+        ${data.provider}::"PaymentProvider",
+        ${data.phoneNumber},
+        ${data.amountCents.toString()}::bigint,
+        ${currency},
+        ${status}::"StkPushStatus",
+        ${data.invoiceId ?? null},
+        ${data.referenceNumber ?? null},
+        ${data.memo ?? null},
+        ${data.metadata ? JSON.stringify(data.metadata) : null}::jsonb
+      )
+      RETURNING *
+    `;
+    return mapStkPushTransactionRow(rows[0]!);
+  }
+
+  async getStkTransactionById(
+    id: string,
+    organizationId: string,
+    tx: SqlExecutor = sql,
+  ): Promise<StkPushTransactionRecord | null> {
+    assertTenantContext({ organizationId });
+    const rows = await tx`
+      SELECT * FROM "stk_push_transactions"
+      WHERE "id" = ${id} AND "organization_id" = ${organizationId}
+      LIMIT 1
+    `;
+    return rows[0] ? mapStkPushTransactionRow(rows[0]) : null;
+  }
+
+  async findStkTransactionByProviderRef(
+    providerReference: string,
+    organizationId: string,
+    tx: SqlExecutor = sql,
+  ): Promise<StkPushTransactionRecord | null> {
+    assertTenantContext({ organizationId });
+    const rows = await tx`
+      SELECT * FROM "stk_push_transactions"
+      WHERE "provider_reference" = ${providerReference} AND "organization_id" = ${organizationId}
+      LIMIT 1
+    `;
+    return rows[0] ? mapStkPushTransactionRow(rows[0]) : null;
+  }
+
+  async updateStkTransaction(
+    id: string,
+    organizationId: string,
+    updates: {
+      status: StkPushStatus;
+      providerReference?: string | null;
+      resultCode?: number | null;
+      resultDescription?: string | null;
+      errorMessage?: string | null;
+      settledPaymentId?: string | null;
+      rawCallbackPayload?: Record<string, unknown> | null;
+    },
+    tx: SqlExecutor = sql,
+  ): Promise<StkPushTransactionRecord> {
+    assertTenantContext({ organizationId });
+    const rows = await tx`
+      UPDATE "stk_push_transactions"
+      SET
+        "status" = ${updates.status}::"StkPushStatus",
+        "provider_reference" = COALESCE(${updates.providerReference ?? null}, "provider_reference"),
+        "result_code" = COALESCE(${updates.resultCode ?? null}, "result_code"),
+        "result_description" = COALESCE(${updates.resultDescription ?? null}, "result_description"),
+        "error_message" = COALESCE(${updates.errorMessage ?? null}, "error_message"),
+        "settled_payment_id" = COALESCE(${updates.settledPaymentId ?? null}, "settled_payment_id"),
+        "raw_callback_payload" = CASE
+          WHEN ${updates.rawCallbackPayload ? JSON.stringify(updates.rawCallbackPayload) : null}::jsonb IS NOT NULL
+          THEN ${updates.rawCallbackPayload ? JSON.stringify(updates.rawCallbackPayload) : null}::jsonb
+          ELSE "raw_callback_payload"
+        END,
+        "updated_at" = NOW()
+      WHERE "id" = ${id} AND "organization_id" = ${organizationId}
+      RETURNING *
+    `;
+    if (!rows[0]) {
+      throw new Error(`StkPushTransaction '${id}' not found in organization`);
+    }
+    return mapStkPushTransactionRow(rows[0]);
+  }
+
+  async listStkTransactions(
+    organizationId: string,
+    filter?: { status?: StkPushStatus; provider?: PaymentProvider; limit?: number },
+    tx: SqlExecutor = sql,
+  ): Promise<StkPushTransactionRecord[]> {
+    assertTenantContext({ organizationId });
+    const limit = filter?.limit ?? 50;
+
+    let rows: Record<string, any>[];
+    if (filter?.status && filter?.provider) {
+      rows = await tx`
+        SELECT * FROM "stk_push_transactions"
+        WHERE "organization_id" = ${organizationId}
+          AND "status" = ${filter.status}::"StkPushStatus"
+          AND "provider" = ${filter.provider}::"PaymentProvider"
+        ORDER BY "created_at" DESC
+        LIMIT ${limit}
+      `;
+    } else if (filter?.status) {
+      rows = await tx`
+        SELECT * FROM "stk_push_transactions"
+        WHERE "organization_id" = ${organizationId}
+          AND "status" = ${filter.status}::"StkPushStatus"
+        ORDER BY "created_at" DESC
+        LIMIT ${limit}
+      `;
+    } else if (filter?.provider) {
+      rows = await tx`
+        SELECT * FROM "stk_push_transactions"
+        WHERE "organization_id" = ${organizationId}
+          AND "provider" = ${filter.provider}::"PaymentProvider"
+        ORDER BY "created_at" DESC
+        LIMIT ${limit}
+      `;
+    } else {
+      rows = await tx`
+        SELECT * FROM "stk_push_transactions"
+        WHERE "organization_id" = ${organizationId}
+        ORDER BY "created_at" DESC
+        LIMIT ${limit}
+      `;
+    }
+
+    return rows.map(mapStkPushTransactionRow);
   }
 }
 

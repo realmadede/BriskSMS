@@ -98,10 +98,14 @@ export class IngestionService {
 
     // 4. Commit raw evidence, deduplication check, normalized payment, candidate match, and outbox events in an ACID transaction
     return withTransaction(async (tx) => {
-      // Lock/check existing normalized payment by (organization_id, deduplication_hash)
+      // Lock/check existing normalized payment by deduplication hash or exact provider reference
       const existingRows = await tx`
         SELECT * FROM "normalized_payments"
-        WHERE "organization_id" = ${dto.organizationId} AND "deduplication_hash" = ${deduplicationHash}
+        WHERE "organization_id" = ${dto.organizationId}
+          AND (
+            "deduplication_hash" = ${deduplicationHash}
+            OR ("provider" = ${parsed.provider}::"PaymentProvider" AND "reference" = ${parsed.reference})
+          )
         LIMIT 1
       `;
 

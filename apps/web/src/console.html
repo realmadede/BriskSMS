@@ -1110,6 +1110,45 @@
             </div>
           </div>
         </div>
+
+        <!-- STK PUSH GATEWAY SECTION -->
+        <div class="section-card" style="margin-top: 1.5rem;">
+          <div class="card-header-row">
+            <div>
+              <div class="card-title">Carrier STK Push &amp; USSD Gateway</div>
+              <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.2rem;">Native mobile money push prompts for Vodacom M-Pesa, Tigo Pesa (Mixx), Airtel Money, and HaloPesa</div>
+            </div>
+            <div>
+              <span class="badge" style="background: rgba(34,197,94,0.1); color: #15803D; font-weight: 600; padding: 4px 10px; border-radius: 6px; font-size: 0.75rem;">
+                ● Auto-Carrier Routing Active
+              </span>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 1.5rem; margin-top: 1rem;">
+            <div>
+              <h4 style="font-size: 0.9rem; font-weight: 700; margin-bottom: 0.5rem;">Test Push Initiation</h4>
+              <p style="font-size: 0.8rem; color: var(--text-sub); margin-bottom: 1rem;">Trigger a native prompt on customer handset with exact amount locking. Telco callbacks auto-reconcile invoices.</p>
+
+              <div style="display: flex; gap: 0.75rem; margin-bottom: 0.75rem;">
+                <input type="text" id="stkTestPhone" placeholder="Customer Phone (e.g., 0754 123 456)" class="form-input" style="flex: 1;" value="0754123456" />
+                <input type="number" id="stkTestAmount" placeholder="Amount (TZS)" class="form-input" style="width: 130px;" value="10000" />
+                <button class="btn btn-primary" onclick="triggerConsoleStkPush()">Send STK Push</button>
+              </div>
+              <div id="stkPushFeedback" style="font-size: 0.8rem; color: var(--text-muted); font-family: var(--font-mono); min-height: 24px;"></div>
+            </div>
+
+            <div style="background: var(--bg-canvas); border: 1px solid var(--border-subtle); border-radius: 10px; padding: 1.25rem;">
+              <h4 style="font-size: 0.85rem; font-weight: 700; margin-bottom: 0.5rem;">Supported Carrier Prefixes</h4>
+              <ul style="font-size: 0.775rem; color: var(--text-sub); line-height: 1.7; margin: 0; padding-left: 1.2rem;">
+                <li><strong>Vodacom M-Pesa:</strong> 074x, 075x, 076x</li>
+                <li><strong>Mixx by Yas (Tigo):</strong> 065x, 067x, 071x, 077x</li>
+                <li><strong>Airtel Money:</strong> 068x, 069x, 078x</li>
+                <li><strong>HaloPesa:</strong> 061x, 062x · <strong>TTCL:</strong> 073x</li>
+              </ul>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </main>
@@ -2438,6 +2477,53 @@
         showToast('Webhook registered with HMAC-SHA256 signature verification.', 'success');
         loadDeveloperIntegrations();
       } catch (err) {
+        showToast(err.message, 'warning');
+      }
+    }
+
+    async function triggerConsoleStkPush() {
+      const phoneInput = document.getElementById('stkTestPhone');
+      const amountInput = document.getElementById('stkTestAmount');
+      const feedbackEl = document.getElementById('stkPushFeedback');
+
+      const phone = phoneInput ? phoneInput.value.trim() : '';
+      const amount = amountInput ? Number(amountInput.value) : 0;
+
+      if (!phone) {
+        showToast('Please enter a valid customer phone number.', 'warning');
+        return;
+      }
+      if (!amount || amount <= 0) {
+        showToast('Please enter a positive payment amount.', 'warning');
+        return;
+      }
+
+      if (feedbackEl) {
+        feedbackEl.style.color = '#F59E0B';
+        feedbackEl.textContent = '⏳ Dispatching USSD / STK Push to ' + phone + '...';
+      }
+
+      try {
+        const result = await apiFetch('/v1/payments/stk-push', {
+          method: 'POST',
+          body: JSON.stringify({
+            organizationId: currentSession.org.id,
+            phoneNumber: phone,
+            amount: amount,
+            memo: 'Console Live Test'
+          })
+        });
+
+        if (feedbackEl) {
+          feedbackEl.style.color = '#22C55E';
+          feedbackEl.textContent = `✓ [${result.provider}] Prompt Dispatched! CheckoutId: ${result.checkoutId} · ${result.customerPrompt}`;
+        }
+        showToast(`STK Push dispatched to ${phone} via ${result.provider}`, 'success');
+      } catch (err) {
+        if (feedbackEl) {
+          feedbackEl.style.color = '#EF4444';
+          feedbackEl.textContent = '✗ ' + (err.message || 'Push dispatch failed');
+        }
         showToast(err.message, 'warning');
       }
     }

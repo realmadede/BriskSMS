@@ -14,6 +14,7 @@ import { registerMessagingRoutes } from './modules/messaging/messaging.controlle
 import { registerReconciliationRoutes } from './modules/reconciliation/reconciliation.controller.js';
 import { registerDeveloperRoutes } from './modules/developer/developer.controller.js';
 import { registerOAuthRoutes } from './modules/oauth/oauth.controller.js';
+import { registerStkPushRoutes } from './modules/stk-push/stk-push.controller.js';
 
 export function createApp(): Router {
   const router = new Router();
@@ -64,6 +65,7 @@ export function createApp(): Router {
   registerReconciliationRoutes(router);
   registerDeveloperRoutes(router);
   registerOAuthRoutes(router);
+  registerStkPushRoutes(router);
 
   return router;
 }

@@ -119,6 +119,14 @@ enum SenderIdStatus {
   REJECTED
 }
 
+enum StkPushStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  CANCELLED
+  EXPIRED
+}
+
 enum OutboxStatus {
   PENDING
   PROCESSING
@@ -210,6 +218,7 @@ model Organization {
   smsGateSigningKeys    SmsGateSigningKey[]
   smsGateWebhookEvents  SmsGateWebhookEvent[]
   messageIdempotencyRecords MessageIdempotencyRecord[]
+  stkPushTransactions   StkPushTransaction[]
 
   @@map("organizations")
 }
@@ -439,6 +448,7 @@ model NormalizedPayment {
   verifications   PaymentVerification[]
   invoicePayments InvoicePayment[]
   automationLogs  AutomationLog[]
+  stkPushTransactions StkPushTransaction[]
 
   @@unique([organizationId, deduplicationHash])
   @@index([organizationId, state, createdAt(sort: Desc)])
@@ -514,6 +524,7 @@ model Invoice {
   items              InvoiceItem[]
   payments           InvoicePayment[]
   normalizedPayments NormalizedPayment[]
+  stkPushTransactions StkPushTransaction[]
 
   @@unique([organizationId, referenceNumber])
   @@index([organizationId, status, dueDate])
@@ -1127,4 +1138,36 @@ model SmsGateWebhookEvent {
 
   @@index([organizationId, providerMessageId])
   @@map("smsgate_webhook_events")
+}
+
+model StkPushTransaction {
+  id                 String          @id @db.VarChar(64)
+  organizationId     String          @map("organization_id") @db.Uuid
+  provider           PaymentProvider
+  phoneNumber        String          @map("phone_number") @db.VarChar(32)
+  amountCents        BigInt          @map("amount_cents")
+  currency           String          @default("TZS") @db.VarChar(3)
+  status             StkPushStatus   @default(PENDING)
+  invoiceId          String?         @map("invoice_id") @db.Uuid
+  referenceNumber    String?         @map("reference_number") @db.VarChar(100)
+  memo               String?         @db.VarChar(255)
+  providerReference  String?         @map("provider_reference") @db.VarChar(100)
+  resultCode         Int?            @map("result_code")
+  resultDescription  String?         @map("result_description") @db.Text
+  errorMessage       String?         @map("error_message") @db.Text
+  settledPaymentId   String?         @map("settled_payment_id") @db.Uuid
+  rawCallbackPayload Json?           @map("raw_callback_payload")
+  metadata           Json?
+  createdAt          DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  invoice        Invoice?           @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  settledPayment NormalizedPayment? @relation(fields: [settledPaymentId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([status])
+  @@index([providerReference])
+  @@index([phoneNumber])
+  @@map("stk_push_transactions")
 }
