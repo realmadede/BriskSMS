@@ -62,7 +62,7 @@
 5. **Typecheck Workspace:** `tsc -b` evaluated all packages across the project without compiler errors. Status: `success`.
 6. **Build Workspace Packages:** Bundled `@brisksms/shared`, `@brisksms/db`, `@brisksms/parser-engine`, `@brisksms/ui`, `@brisksms/zapier-app`, and `@brisksms/worker` into `dist/`. Status: `success`.
 7. **Verify Service Connectivity:** TCP probes confirmed live PostgreSQL and Redis readiness in CI runner. Status: `success`.
-8. **Apply Database Migrations:** Executed `bun run packages/db/src/cli.ts migrate` applying all Prisma migrations including `20261109000000_message_idempotency_records` and `20261109010000_message_dispatch_recovery`. Status: `success`.
+8. **Apply Database Migrations:** Executed `bun run packages/db/src/cli.ts migrate` applying all Prisma migrations including `20261109000000_durable_message_idempotency` and `20261109010000_message_dispatch_recovery`. Status: `success`.
 9. **Execute Automated Test Corpus:** `bun run test` executed all test suites. Status: `success` (**259 passed, 0 failed, 0 skipped** across 23 test files in 41.46s).
 
 ---
@@ -88,7 +88,7 @@
 ## 3. Database & Financial Integrity Observations
 
 1. **Clean Database Schema Evolution:**
-   - Both new Prisma migrations (`20261109000000_message_idempotency_records` and `20261109010000_message_dispatch_recovery`) executed cleanly against an unseeded PostgreSQL 16 database.
+   - Both new Prisma migrations (`20261109000000_durable_message_idempotency` and `20261109010000_message_dispatch_recovery`) executed cleanly against an unseeded PostgreSQL 16 database.
    - Enforced database constraints:
      - `UNIQUE("organization_id", "idempotency_key")`
      - Check constraint: `CHECK ("status" IN ('PENDING', 'DISPATCHING', 'COMPLETED', 'FAILED', 'UNCERTAIN'))`

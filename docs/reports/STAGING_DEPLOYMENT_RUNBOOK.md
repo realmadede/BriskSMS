@@ -2,7 +2,7 @@
 
 **Repository:** `https://github.com/realmadede/BriskSMS`  
 **Branch:** `main`  
-**Checkpoint:** `a80f99846b0d9e7ad3c5e886982e05244ad2d363` (origin/main: `c7b4a50ab8ad636996f328645be2d18517230bd2`)  
+**Baseline Checkpoint:** `c7b4a50ab8ad636996f328645be2d18517230bd2`  
 **Scope:** Canonical, Step-by-Step Staging Deployment Runbook, Service Orchestration, Post-Deployment Verification, Rollback Protocols, and Disaster Recovery Procedures.
 
 ---
@@ -23,16 +23,17 @@ BriskSMS staging deploys as a **modular monolith** on a single isolated staging 
                                           [ apps/worker (BullMQ) ]
                                                     │
                    ┌────────────────────────────────┴───────────────────────────────┐
-                   ▼ (TLS / SSL)                                                    ▼ (TLS / Auth)
+                   ▼ (TLS / SSL)                                                    ▼ (TCP / Private VPC)
        [ Managed PostgreSQL 16+ ]                                       [ Managed Redis 7+ ]
          (Database: brisksms_staging)                                     (Namespace: staging:bullmq)
 ```
 
-### Staging Infrastructure Minimum Requirements:
-- **Compute Host:** 1x Linux Server (Ubuntu 22.04 / 24.04 LTS), 2 vCPU, 4 GB RAM.
+### Staging Infrastructure Specifications & Limitations:
+- **Compute Host (Operational Estimate):** 1x Linux Server (Ubuntu 22.04 / 24.04 LTS), 2 vCPU, 4 GB RAM. (Estimated runtime memory footprint: API ~150MB, Worker ~120MB, Web ~50MB, system overhead ~500MB).
+- **Single-Node Availability Limitation:** A single-node compute staging deployment represents a **Single Point of Failure (SPOF)** with zero multi-AZ redundancy. This is acceptable for functional and integration staging, but is not suitable for high-availability production.
 - **Runtimes:** Bun v1.4.2 (`packageManager`) and Node.js v20+ / v24+.
 - **Database:** Managed PostgreSQL 16+ with SSL enabled (`sslmode=require`).
-- **Cache & Queue:** Managed Redis 7+ with password authentication and TLS (`rediss://`).
+- **Cache & Queue:** Redis 7+ reachable over private VPC TCP network (`redis://...`) with password authentication. Note: The application runtime (`packages/db/src/redis.ts`) uses raw TCP `net.Socket` and does not perform application-level TLS handshakes. In-transit encryption must be provided by the underlying network or a secure tunnel.
 - **Object Storage:** **None required.** BriskSMS persists all payment evidence in PostgreSQL (`raw_payment_evidence` table) as native JSONB.
 
 ---
@@ -46,9 +47,6 @@ Follow this strict chronological order during deployment. Never start worker or 
 # Clone the repository
 git clone https://github.com/realmadede/BriskSMS.git /opt/brisksms
 cd /opt/brisksms
-
-# Checkout the accepted checkpoint
-git checkout a80f99846b0d9e7ad3c5e886982e05244ad2d363
 
 # Verify clean status
 git status
@@ -80,7 +78,7 @@ DATABASE_URL=postgresql://brisksms_staging_user:STRONG_STAGING_PASSWORD@postgres
 FORCE_TCP_POSTGRES=true
 ALLOW_PRODUCTION_DB_RESET=false
 
-REDIS_URL=rediss://:STRONG_REDIS_PASSWORD@redis-staging.internal:6379
+REDIS_URL=redis://:STRONG_REDIS_PASSWORD@redis-staging.internal:6379
 FORCE_TCP_REDIS=true
 
 # Cryptographic secrets: Must be independently generated 64 hex character strings
@@ -103,7 +101,7 @@ EOF
 > Ensure permissions are restricted: `chmod 600 /opt/brisksms/.env`.
 
 ### Step 4: Execute Database Migrations
-Run the transactional migration runner against the staging database:
+Run the transactional migration runner against the staging database. Exactly 4 migrations must apply:
 ```bash
 # Check current migration status
 bun run db:status
@@ -117,6 +115,7 @@ bun run db:migrate
 [BriskSMS DB] Applied migration: 20261107000000_init_foundation
 [BriskSMS DB] Applied migration: 20261107010000_smsgate_keys_and_webhook_events
 [BriskSMS DB] Applied migration: 20261109000000_durable_message_idempotency
+[BriskSMS DB] Applied migration: 20261109010000_message_dispatch_recovery
 [BriskSMS DB] Migrations up to date.
 ```
 
@@ -134,8 +133,6 @@ bun run db:seed
 ### Step 6: Start Background Queue Worker (`apps/worker`)
 The worker must be started before the API so it is ready to process outbox events and launch the `DispatchRecoveryRunner`:
 ```bash
-# Using systemd or daemon supervisor:
-# systemctl start brisksms-worker
 bun run worker:start
 ```
 *Verify Worker Logs:*
@@ -148,8 +145,6 @@ bun run worker:start
 
 ### Step 7: Start API Modular Monolith (`apps/api`)
 ```bash
-# Using systemd or daemon supervisor:
-# systemctl start brisksms-api
 bun run apps/api/src/main.ts
 ```
 *Verify API Logs:*
@@ -161,8 +156,6 @@ bun run apps/api/src/main.ts
 
 ### Step 8: Start Merchant Web Console (`apps/web`)
 ```bash
-# Using systemd or daemon supervisor:
-# systemctl start brisksms-web
 bun run apps/web/server.ts
 ```
 *Verify Web Logs:*
@@ -222,16 +215,11 @@ server {
 ## 4. Health Verification & Smoke Tests
 
 ### Health Probe Verification
-Execute an unauthenticated probe to the health endpoint:
 ```bash
 curl -s -i https://staging-api.brisksms.com/v1/health
 ```
-
 *Expected HTTP Response (200 OK):*
 ```json
-HTTP/2 200 
-content-type: application/json; charset=utf-8
-
 {
   "success": true,
   "data": {
@@ -243,31 +231,53 @@ content-type: application/json; charset=utf-8
       "postgresql": { "status": "UP" },
       "redis": { "status": "UP" },
       "worker": { "status": "UP" },
-      "queue": { "status": "UP" }
+      "queues": { "status": "UP" }
     }
   }
 }
 ```
 
-### Smoke Test: Merchant Registration & Session Security
-```bash
-# Register a test organization
-curl -s -i -X POST https://staging-api.brisksms.com/v1/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"email":"staging-admin@example.com","password":"StagingPassword2026!","orgName":"Staging Corp"}'
-```
-*Verification Check:*
-- Response status: `201 Created`
-- Header `Set-Cookie` contains `bsk_session` (`HttpOnly; Secure; SameSite=Lax`).
-- Header `Set-Cookie` contains `bsk_refresh` (`HttpOnly; Secure; SameSite=Strict; Path=/v1/auth`).
-- Header `Set-Cookie` contains `bsk_csrf` (`Secure; SameSite=Lax`).
+### Smoke Test Sequence
+1. **Merchant Registration:**
+   ```bash
+   curl -s -i -X POST https://staging-api.brisksms.com/v1/auth/register \
+     -H "Content-Type: application/json" \
+     -d '{"email":"staging-admin@example.com","password":"StagingPassword2026!","fullName":"Staging Admin","organizationName":"Staging Corp"}'
+   ```
+2. **Device QR Pairing Token:**
+   ```bash
+   curl -s -i -X POST https://staging-api.brisksms.com/v1/devices/pairing-token \
+     -H "Content-Type: application/json" \
+     -b cookies.txt
+   ```
+3. **Notification Evidence Ingestion:**
+   ```bash
+   curl -s -i -X POST https://staging-api.brisksms.com/v1/ingestion/evidence \
+     -H "Authorization: Bearer bsk_dev_TEST_TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"senderAddress":"MPESA","rawPayload":"0123456 Confirmed. Received Tsh 50,000...","simSlot":1,"deviceTimestamp":"2026-11-10T04:00:00Z"}'
+   ```
+4. **Authorized Payment Verification:**
+   ```bash
+   curl -s -i -X POST https://staging-api.brisksms.com/v1/reconciliation/verify \
+     -H "Content-Type: application/json" \
+     -b cookies.txt \
+     -d '{"paymentId":"PAYMENT_UUID","verificationMethod":"MANUAL_FINANCE_APPROVAL"}'
+   ```
+5. **SMSGate Inbound Delivery Webhook:**
+   ```bash
+   curl -s -i -X POST https://staging-api.brisksms.com/v1/messaging/webhooks/smsgate \
+     -H "X-Signature: HMAC_SIGNATURE" \
+     -H "X-Timestamp: 1794260000" \
+     -H "Content-Type: application/json" \
+     -d '{"messageId":"MSG_UUID","status":"DELIVERED"}'
+   ```
 
 ---
 
 ## 5. Rollback Protocols
 
 ### 5.1 Application Code Rollback
-If a regression is identified post-deployment:
 1. Stop API and Worker services:
    ```bash
    systemctl stop brisksms-api brisksms-worker
@@ -291,15 +301,6 @@ If a regression is identified post-deployment:
   - Draft a forward-compensating migration file in `packages/db/prisma/migrations/<timestamp>_revert_<name>/migration.sql`.
   - Apply the compensating migration with `bun run db:migrate`.
 
-### 5.3 Queue & Ephemeral State Drain
-- In the event of a worker crash or poison job in BullMQ:
-  - Active jobs are guarded by a 30-second lock renewal.
-  - Stalled jobs are automatically reclaimed by healthy worker processes.
-  - Inspect failed jobs using Redis CLI:
-    ```bash
-    redis-cli -u $REDIS_URL LLEN staging:bullmq:messaging_outbox:failed
-    ```
-
 ---
 
 ## 6. Disaster Recovery & Data Persistence
@@ -312,10 +313,19 @@ If a regression is identified post-deployment:
      pg_dump $DATABASE_URL --format=custom --file=/opt/backups/brisksms_staging_$(date +%Y%m%d_%H%M%S).dump
      ```
 2. **Redis Persistence:**
-   - Staging Redis must be configured with Append-Only File (`appendonly yes`) and RDB snapshots to ensure queue jobs and rate-limit counters survive container restarts.
+   - Staging Redis must be configured with Append-Only File (`appendonly yes`) and RDB snapshots at the Redis daemon level to ensure queue jobs and rate-limit counters survive container restarts.
 3. **Emergency Signing-Key Rotation:**
    - If an SMSGate gateway key is compromised:
      - Generate a new 32-byte hex secret.
      - Invoke `smsGateKeyService.setDeviceSigningKey(orgId, deviceId, newSecret)`.
      - The previous key remains valid for the grace window to prevent dropping in-flight delivery webhooks.
      - Once the physical device is updated, revoke the previous key.
+
+---
+
+## 7. Implementation Blockers
+
+The following items are completely absent from the codebase and block production release:
+1. **Google Sign-In:** No identity token verification endpoints or Google client libraries exist.
+2. **Resend / SMTP Email Delivery:** No email client exists to deliver registration verification or password reset tokens.
+3. **Physical Cellular Hardware:** Staging deployment is blocked pending physical Android phones and live Tanzanian carrier SIM cards.

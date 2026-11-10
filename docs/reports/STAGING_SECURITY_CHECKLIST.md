@@ -2,7 +2,7 @@
 
 **Repository:** `https://github.com/realmadede/BriskSMS`  
 **Branch:** `main`  
-**Checkpoint:** `a80f99846b0d9e7ad3c5e886982e05244ad2d363` (origin/main: `c7b4a50ab8ad636996f328645be2d18517230bd2`)  
+**Baseline Checkpoint:** `c7b4a50ab8ad636996f328645be2d18517230bd2`  
 **Scope:** Production-First Security Audit, Cryptographic Boundary Isolation, Authentication Vector Defenses, SSRF Hardening, and Multi-Tenant Isolation Verification.
 
 ---
@@ -29,7 +29,7 @@ graph TD
     end
 
     subgraph Boundary_2["2. Android Companion Devices"]
-        B2["Device Bearer Token (bsk_dev_...)<br/>Issued via 6-digit numeric pairing code<br/>Stored in Android Keystore"]
+        B2["Device Bearer Token (bsk_dev_...)<br/>5-Minute Cryptographic QR Exchange<br/>POST /v1/ingestion/evidence"]
     end
 
     subgraph Boundary_3["3. Developer API Keys"]
@@ -37,7 +37,7 @@ graph TD
     end
 
     subgraph Boundary_4["4. Cellular Gateway (SMSGate)"]
-        B4["Dual-Key HMAC-SHA256 Webhooks<br/>X-Signature + Timestamp Header<br/>Replay Protection Cache"]
+        B4["Dual-Key HMAC-SHA256 Webhooks<br/>POST /v1/messaging/webhooks/smsgate<br/>X-Signature + Timestamp Header"]
     end
 
     subgraph Boundary_5["5. OAuth 2.0 Clients"]
@@ -46,9 +46,10 @@ graph TD
 ```
 
 - [x] **No Human JWT for Developer APIs:** Human session tokens cannot call `/v1/messages/send` without an active session, and developer API keys cannot access merchant console settings.
-- [x] **No Device Token for Gateway Operations:** Android companion devices can only push payment evidence (`POST /v1/devices/evidence`); they cannot send SMS messages or modify ledger balances.
+- [x] **No Device Token for Gateway Operations:** Android companion devices can only push payment evidence (`POST /v1/ingestion/evidence`); they cannot send SMS messages or modify ledger balances.
 - [x] **SMSGate Webhook Authentication:** Requires valid HMAC-SHA256 signature (`X-Signature`) computed over `rawBody + timestamp` matching `currentKey` or `previousKey`.
 - [x] **Developer Key Plaintext Never Persisted:** API keys are hashed with `SHA-256` before persistence. The plaintext is returned only once at creation time.
+- [x] **Cryptographic Device Pairing:** 5-minute single-use token (`bsk_pair_...` via `POST /v1/devices/pairing-token`) exchanged with Android Keystore hardware public key (`POST /v1/devices/pair`) enforces atomic consumption via row-level locks.
 
 ---
 
@@ -69,7 +70,7 @@ graph TD
 
 - [x] **SMSGate Endpoint SSRF Filter:**
   - Evaluated in `apps/api/src/modules/messaging/providers/smsgate.provider.ts`.
-  - When `ALLOW_PRIVATE_GATEWAY_NETWORKS=false` (mandatory in staging/prod), resolving gateway URLs targeting loopback (`127.0.0.1`, `localhost`, `::1`), link-local (`169.254.169.254`), or RFC 1918 private subnets (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`) throws `SSRF_VIOLATION` with immediate request termination.
+  - When `ALLOW_PRIVATE_GATEWAY_NETWORKS=false` (mandatory in staging/prod), resolving gateway URLs targeting loopback (`127.0.0.1`, `localhost`, `::1`), link-local (`169.254.169.254`), or RFC 1918 private subnets (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`) throws an error with immediate request termination.
 - [x] **Outbound Webhook Delivery SSRF Filter:**
   - Outbound webhook targets must resolve to public, routable IP addresses. Internal cloud metadata services and staging VPC endpoints are blocked.
 
@@ -77,11 +78,12 @@ graph TD
 
 ## 5. Multi-Tenant Isolation & Financial Ledger Invariants
 
-- [x] **Strict Organization Scoping:** Every business entity in the database (`devices`, `invoices`, `payments`, `sms_messages`, `messaging_ledger`, `smsgate_keys`, `api_keys`) includes `organizationId` with foreign key and indexed constraints.
-- [x] **No Cross-Tenant Queries:** All API and Worker database queries include `WHERE "organizationId" = :orgId`. Multi-tenant leaks are zero-tolerance security defects.
+- [x] **Strict Organization Scoping:** Every business entity in the database (`devices`, `invoices`, `normalized_payments`, `raw_payment_evidence`, `sms_messages`, `messaging_ledger`, `smsgate_keys`, `api_keys`) includes `organizationId` with foreign key and indexed constraints.
+- [x] **No Cross-Tenant Queries:** All API and Worker database queries include `WHERE "organization_id" = :orgId`. Multi-tenant leaks are zero-tolerance security defects.
 - [x] **Immutable Raw Evidence Log:** Raw incoming payment notifications from mobile money carriers are appended immutably to `raw_payment_evidence` with raw payloads, sender MSISDN, and receipt timestamp. Records are append-only; update and delete operations are prohibited.
 - [x] **Append-Only Prepaid Ledger:** Product B messaging credits are tracked in `messaging_ledger`. Deductions and failure refunds are recorded as atomic ledger mutations with row-level locks (`SELECT ... FOR UPDATE`).
 - [x] **Non-Custodial Guarantee:** BriskSMS never holds merchant or customer funds, operates escrow accounts, or settles money transfers. It provides automated matching and intelligence on top of merchant-owned SIM and bank accounts.
+- [x] **Separation of Matching and Settlement:** Candidate invoice matching (`reconcilePayment()`) never marks an invoice paid. Financial settlement and balance updates are only committed via authorized verification (`POST /v1/reconciliation/verify`).
 
 ---
 
@@ -90,7 +92,18 @@ graph TD
 | Checkpoint | Verified By | Date | Result |
 | :--- | :--- | :--- | :--- |
 | **CI Build & Automated Tests** | GitHub Actions Run #19 (`42728702647`) | 2026-11-10 | **SUCCESS (259/259 Tests Passed)** |
+| **Local Full Workspace Tests** | `bun test` with local PostgreSQL 18 & Redis 7 | 2026-11-10 | **SUCCESS (259/259 Tests Passed in 36.74s)** |
 | **Typecheck & Monorepo Bundling** | `tsc -b && bun run build` | 2026-11-10 | **SUCCESS (0 Errors)** |
 | **Cryptographic Boundary Independence** | Pre-Flight Security Audit | 2026-11-10 | **VERIFIED** |
 | **Staging Deployment Configuration** | `STAGING_ENVIRONMENT_CONFIGURATION.md` | 2026-11-10 | **VERIFIED** |
 | **Staging Deployment Runbook** | `STAGING_DEPLOYMENT_RUNBOOK.md` | 2026-11-10 | **VERIFIED** |
+| **Staging Validation Plan** | `STAGING_VALIDATION_PLAN.md` | 2026-11-10 | **VERIFIED** |
+
+---
+
+## 7. Implementation Blockers
+
+The following items are completely absent from the codebase and represent explicit product/staging blockers:
+1. **Google Sign-In / Google Identity Token Verification:** No endpoint or validation logic exists.
+2. **Resend / Transactional Email Delivery:** No email delivery client exists for registration or password reset emails.
+3. **Physical Hardware & SIM Matrix:** Physical Android devices and Tanzanian carrier SIM cards must be provisioned for cellular testing.

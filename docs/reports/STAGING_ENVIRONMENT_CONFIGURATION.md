@@ -2,36 +2,39 @@
 
 **Repository:** `https://github.com/realmadede/BriskSMS`  
 **Branch:** `main`  
-**Checkpoint:** `a80f99846b0d9e7ad3c5e886982e05244ad2d363` (origin/main: `c7b4a50ab8ad636996f328645be2d18517230bd2`)  
+**Baseline Checkpoint:** `c7b4a50ab8ad636996f328645be2d18517230bd2`  
 **Scope:** Exhaustive Static and Dynamic Environment Variable Inventory, Validation Rules, Fail-Closed Security Invariants, and Secret Provisioning Protocols for Staging & Production.
 
 ---
 
 ## 1. Executive Summary & Configuration Governance
 
-BriskSMS operates as a high-integrity financial reconciliation and cellular messaging SaaS platform. Under our engineering governance model, configuration and secret management must strictly adhere to the following principles:
+BriskSMS enforces a strict **Production-First, Security-First** configuration governance model. All configuration and secret management must adhere to the following verified principles:
 
 1. **Fail-Closed Bootstrapping:** In `production` and `staging` (`NODE_ENV=production`), the application runtime strictly halts boot if any required secret is missing, has insufficient entropy (< 32 characters or < 64 hex characters), matches known development/CI defaults, or violates cryptographic independence.
 2. **Cryptographic Key Independence:** Distinct cryptographic boundaries must be backed by mathematically independent key material:
    - `ENCRYPTION_MASTER_KEY`: AES-256-GCM symmetric encryption for data at rest (device tokens, webhook secrets, gateway credentials).
-   - `JWT_ACCESS_SECRET`: HMAC-SHA256 signing secret for short-lived merchant JWT access tokens.
+   - `JWT_ACCESS_SECRET`: HMAC-SHA256 signing secret for short-lived merchant JWT access tokens (15-minute expiry).
    - `CSRF_SECRET`: HMAC-SHA256 signing secret for double-submit anti-CSRF cookies and headers.
    - Reusing key material across any two boundaries triggers immediate fatal application termination.
 3. **Multi-Tenant & Network Isolation:** Configuration toggles that allow private/loopback network targets (`ALLOW_PRIVATE_GATEWAY_NETWORKS`) or destructive schema manipulation (`ALLOW_PRODUCTION_DB_RESET`) must fail closed and be strictly prohibited in staging and production.
 4. **Zero Object Storage Requirement:** BriskSMS is purely database-backed. All raw payment notifications and evidence payloads are immutably stored in PostgreSQL (`raw_payment_evidence` table) as native JSONB. No S3, MinIO, Cloudflare R2, or blob storage credentials are required or supported.
-5. **Authentication Scope Clarification:**
+5. **Redis Transport & Protocol Architecture:** The application runtime (`packages/db/src/redis.ts`) utilizes a custom lightweight RESP protocol client over raw TCP `net.Socket` (or local Unix domain socket). It handles password authentication (`AUTH <password>`) and database selection (`SELECT <db>`), but does **not** implement in-transit TLS handshakes internally. Therefore, staging/production environments requiring encrypted Redis communication must enforce transport encryption via private VPC networking or an external TLS termination tunnel (e.g., stunnel/ghostunnel). Redis persistence (AOF/RDB) is a server-side daemon configuration directive, not an application client capability.
+6. **Authentication & Integration Blockers:**
    - Active merchant authentication uses custom scrypt password hashing, HMAC-signed JWTs, and secure cookies.
-   - Google OAuth and external transactional email providers (e.g., Resend) are **not** present in the active API implementation. Any references in developer roadmap notes are non-functional and require no environment configuration.
+   - **Google Sign-In / Google Identity Token Validation:** **Completely absent** in the active codebase.
+   - **Email Verification via Resend / SMTP:** **Completely absent** in the active codebase. The database includes an `is_email_verified` boolean flag, but no outbound transactional email provider client exists.
+   - These missing capabilities are **explicit staging and product blockers** for workflows that require third-party identity federation or automated transactional email delivery.
 
 ---
 
-## 2. Exhaustive Environment Variable Inventory
+## 2. Exhaustive Server-Side Environment Variable Inventory
 
-The following table documents every environment variable referenced across the BriskSMS monorepo source code:
+Static analysis of the BriskSMS codebase reveals exactly **26 server-side environment variables** consumed by backend services and CLI tools:
 
 | Variable Name | Consuming Service(s) | Required in Staging/Prod? | Sensitive / Secret? | Development Default | Fail-Closed Behavior | Expected Format & Validation Rules | Operational Purpose |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| `NODE_ENV` | All Services & CLI | **Required** | No | `development` | Defaults to `development`. Setting `production` activates strict security guards. | String: `production`, `staging`, `development`, or `test`. | Governs runtime environment, cookie security attributes, origin enforcement, and encryption guards. |
+| `NODE_ENV` | All Services & CLI | **Required** | No | `development` | Defaults to `development`. Setting `production` activates strict runtime guards. | String: `production`, `staging`, `development`, or `test`. | Governs runtime environment, cookie security attributes, origin enforcement, and encryption guards. |
 | `PORT` | `apps/api` | Optional | No | `3000` | Falls back to `3000`. | Positive integer (1-65535). | TCP listening port for the API modular monolith. |
 | `DATABASE_URL` | `apps/api`, `apps/worker`, `packages/db` | **Required** | **YES (DB Credentials)** | None | **Fatal boot termination** if missing or invalid. | Valid PostgreSQL URI: `postgresql://[user]:[password]@[host]:[port]/[db]?sslmode=require` | Authoritative PostgreSQL connection string. Must use `sslmode=require` in staging. |
 | `PGHOST` | `packages/db` | Optional | No | None | Falls back to host parsed from `DATABASE_URL`. | Valid hostname, IP, or Unix socket path (e.g. `/var/run/postgresql`). | Optional host override or explicit Unix domain socket path. |
@@ -39,7 +42,7 @@ The following table documents every environment variable referenced across the B
 | `PGPASSWORD` | `packages/db` | Optional | **YES** | None | Falls back to password parsed from `DATABASE_URL`. | High-entropy password string. | Optional database password override. |
 | `FORCE_TCP_POSTGRES` | `packages/db`, CI | Optional | No | `false` | None | Boolean string: `'true'` or `'false'`. | When `'true'`, forces TCP network connection and prevents local Unix domain socket probing. Essential in containerized staging. |
 | `ALLOW_PRODUCTION_DB_RESET` | `packages/db` | **PROHIBITED** | No | `false` | **Throws `SECURITY_GUARD_VIOLATION`** if set to `'true'` when `NODE_ENV=production`. | Must be omitted or `'false'`. | Safety guard preventing accidental execution of destructive schema drop or database reset. |
-| `REDIS_URL` | `apps/api`, `apps/worker`, `packages/db` | **Required** | **YES (Redis Auth)** | None | **Fatal boot termination** if missing or invalid. | Valid Redis URI: `redis://[:password@]host:port[/db]` or `rediss://...` (TLS). | Authoritative Redis connection URI for BullMQ queues, rate limiting, and ephemeral outbox processing. |
+| `REDIS_URL` | `apps/api`, `apps/worker`, `packages/db` | **Required** | **YES (Redis Auth)** | None | **Fatal boot termination** if missing or invalid. | Valid Redis TCP URI: `redis://[:password@]host:port[/db]`. | Authoritative Redis connection URI for BullMQ queues, rate limiting, and ephemeral outbox processing. |
 | `REDIS_SOCKET_PATH` | `packages/db` | Optional | No | None | Falls back to TCP connection. | Filesystem path to Redis socket. | Optional filesystem path to local Redis Unix domain socket. |
 | `FORCE_TCP_REDIS` | `packages/db`, CI | Optional | No | `false` | None | Boolean string: `'true'` or `'false'`. | When `'true'`, forces TCP network connection to Redis and skips local socket checks. |
 | `ENCRYPTION_MASTER_KEY` | `apps/api`, `apps/worker`, `packages/db` | **Required** | **YES (CRITICAL)** | Dev fallback | **Fatal boot termination** if missing, < 32 chars, or in `INSECURE_DEFAULT_KEYS`. | 32-byte key: 64 hexadecimal characters (`/^[0-9a-fA-F]{64}$/`) or ≥ 32-character string. | AES-256-GCM master key used to encrypt device secrets, webhook secrets, and gateway credentials at rest. |
@@ -48,17 +51,19 @@ The following table documents every environment variable referenced across the B
 | `ALLOWED_ORIGINS` | `apps/api` | **Required** | No | Localhost origins | In production, requests from unlisted origins return `403 CSRF_ORIGIN_MISMATCH`. Wildcard `*` strictly rejected. | Comma-separated list of fully qualified HTTPS origins (e.g., `https://staging-console.brisksms.com`). | Authorized browser origins permitted to communicate with API session endpoints. |
 | `CORS_ORIGIN` | `apps/api` | Optional | No | None | Merged with `ALLOWED_ORIGINS`. | Comma-separated list of HTTPS origins. | Alternative/legacy environment variable merged with `ALLOWED_ORIGINS`. |
 | `FRONTEND_URL` | `apps/api` | **Required** | No | None | Merged into allowed CORS origins; falls back to localhost in dev. | Fully qualified HTTPS URL (e.g., `https://staging-console.brisksms.com`). | Canonical base URL of the merchant web console for links and redirect validations. |
-| `API_BASE_URL` | `apps/api`, `apps/worker` | **Required** | No | `http://localhost:3000` | Falls back to localhost in development. | Fully qualified HTTPS URL (e.g., `https://staging-api.brisksms.com`). | Public canonical URL of the BriskSMS API used in webhook payloads and companion app pairing codes. |
+| `API_BASE_URL` | `apps/api`, `apps/worker` | **Required** | No | `http://localhost:3000` | Falls back to localhost in development. | Fully qualified HTTPS URL (e.g., `https://staging-api.brisksms.com`). | Public canonical URL of the BriskSMS API embedded in Android QR pairing payloads and webhook callbacks. |
 | `ALLOW_PRIVATE_GATEWAY_NETWORKS` | `apps/api` | **PROHIBITED** | No | `false` | When not `'true'`, SSRF filter strictly blocks loopback (127.0.0.1, ::1), link-local (169.254.x), and private subnets (10.x, 172.16-31.x, 192.168.x). | Must be omitted or `'false'` in staging/production. | SSRF guard toggle. Must remain `false` in staging to protect private cloud infrastructure. |
 | `PROMOTIONAL_CURFEW_ENABLED` | `apps/api`, `apps/worker` | Optional | No | `true` | When not `'false'`, promotional curfew is strictly enforced. | Boolean string: `'true'` or `'false'`. | TCRA commercial messaging curfew toggle. When true, promotional SMS are held between curfew hours. |
 | `PROMOTIONAL_CURFEW_START_HOUR_EAT` | `apps/api`, `apps/worker` | Optional | No | `20` (8:00 PM) | Falls back to 20. | Integer between 0 and 23. | Commercial curfew start hour in East Africa Time (UTC+3). Outbound promotional SMS held after this hour. |
 | `PROMOTIONAL_CURFEW_END_HOUR_EAT` | `apps/api`, `apps/worker` | Optional | No | `7` (7:00 AM) | Falls back to 7. | Integer between 0 and 23. | Commercial curfew end hour in East Africa Time (UTC+3). Held promotional SMS resume delivery at this hour. |
 | `DISPATCH_PENDING_GRACE_SECONDS` | `apps/worker` | Optional | No | `60` | Falls back to 60 seconds. | Positive integer in seconds (e.g. 60). | Grace window before a PENDING dispatch operation with no active lease is considered crashed and eligible for recovery sweep. |
 | `DISPATCH_RECOVERY_INTERVAL_MS` | `apps/worker` | Optional | No | `30000` | Falls back to 30,000 ms (30s). | Positive integer in milliseconds (e.g. 30000). | Polling interval for `DispatchRecoveryRunner` to sweep stale dispatches and expired claims across API/worker restarts. |
-| `BRISKSMS_SILENT_LOGS` | `packages/db`, Tests | Optional | No | `false` | Falls back to standard logging. | Boolean string: `'true'` or `'false'`. | When `'true'`, suppresses error logs on stdout/stderr (used in automated test runners). Leave `false` in staging. |
 | `CLIENT_ID` | `packages/zapier-app` | Optional | No | `brisksms_zapier_client` | Standard client ID. | Alphanumeric string. | OAuth 2.0 client identifier for the BriskSMS Zapier integration. |
-| `BRISKSMS_API_KEY` | Developer SDKs / Web | Optional | **YES** | None | Used only in SDK examples. | Format: `bsk_live_[32 hex]` or `bsk_test_[32 hex]`. | Developer API key example in client integration docs. Never hardcode in staging configs. |
-| `BRISKSMS_DEVICE_TOKEN` | Android Companion | Optional | **YES** | None | Issued dynamically during pairing. | Format: `bsk_dev_[32 hex]`. | Android device authentication token issued during `POST /v1/devices/pair`. Managed dynamically. |
+| `BRISKSMS_SILENT_LOGS` | `packages/db`, Tests | Optional | No | `false` | Falls back to standard logging. | Boolean string: `'true'` or `'false'`. | When `'true'`, suppresses error logs on stdout/stderr (used in automated test runners). Leave `false` in staging. |
+
+### Client-Side / Documentation Variables (Not Consumed by Backend Services):
+- `BRISKSMS_API_KEY`: Featured in developer portal code snippets (`apps/web/src/developers.html`) showing external third-party developers how to initialize client SDKs. Not consumed by the BriskSMS backend.
+- `BRISKSMS_DEVICE_TOKEN`: Featured in documentation code snippets showing companion device SDK usage. Not consumed by the BriskSMS backend.
 
 ---
 
@@ -121,8 +126,9 @@ ALLOW_PRODUCTION_DB_RESET=false
 
 # ------------------------------------------------------------------------------
 # 3. Message Queue & Ephemeral State (Redis 7+)
+# Note: packages/db/src/redis.ts uses raw TCP. Ensure private network / VPC isolation.
 # ------------------------------------------------------------------------------
-REDIS_URL=rediss://:REPLACE_WITH_STAGING_REDIS_PASSWORD@redis-staging.internal:6379
+REDIS_URL=redis://:REPLACE_WITH_STAGING_REDIS_PASSWORD@redis-staging.internal:6379
 FORCE_TCP_REDIS=true
 
 # ------------------------------------------------------------------------------

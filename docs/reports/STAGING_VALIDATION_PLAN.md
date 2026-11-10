@@ -2,10 +2,10 @@
 
 **Repository:** `https://github.com/realmadede/BriskSMS`  
 **Branch:** `main`  
-**Checkpoint:** `a80f99846b0d9e7ad3c5e886982e05244ad2d363` (origin/main: `c7b4a50ab8ad636996f328645be2d18517230bd2`)  
-**Status:** **Proposed Execution Plan (Pending staging cloud infrastructure provisioning and physical cellular hardware deployment)**  
+**Baseline Checkpoint:** `c7b4a50ab8ad636996f328645be2d18517230bd2`  
+**Status:** **Proposed Execution Plan (Pending staging infrastructure provisioning, physical hardware deployment, and resolution of authentication blockers)**  
 **Target Environment:** Isolated Staging Environment (Cloud Modular Monolith + Physical Android Test Devices + Tanzanian SIM Matrix)  
-**Scope:** End-to-End Multi-Service Topology, Workstream Test Matrices, Durable Idempotency & Lease Recovery, Cellular SIM Routing, Web Console Session Security, Developer Extensibility, and Operational Rollback Runbooks.
+**Scope:** Multi-Service Topology, Workstream Test Matrices, Strict Financial Payment Lifecycle, Durable Idempotency & Lease Recovery, Cellular SIM Routing, Web Console Session Security, Developer Extensibility, and Operational Rollback Runbooks.
 
 > [!IMPORTANT]
 > **Staging Validation Status:** Staging is **NOT** labeled as validated prior to actual deployment and live test execution on staging infrastructure. This document defines the protocol, test matrix, and verification gates that will be executed once staging infrastructure and physical test hardware are provisioned.
@@ -45,18 +45,18 @@ flowchart TD
         AndroidGateway["Product B: SMSGate Cellular Gateway<br/>(Physical Multi-SIM Android Device)"]
     end
 
-    subgraph Edge_Security["Edge & Reverse Proxy Layer (Cloudflare Staging)"]
-        CF["Cloudflare Staging Proxy / WAF<br/>(TLS 1.3, HSTS, DDoS Protection, Origin Verification)"]
+    subgraph Edge_Security["Edge & Reverse Proxy Layer (Cloudflare / Nginx Staging)"]
+        Proxy["Reverse Proxy / WAF<br/>(TLS 1.3, HSTS, DDoS Protection, Origin Verification)"]
     end
 
     subgraph Staging_Compute["Isolated Staging Compute Cluster (Single VM or VPC Group)"]
         API["BriskSMS API Modular Monolith (apps/api)<br/>Node.js 24 / Bun<br/>Port: 3000"]
-        Worker["BriskSMS Async Queue Worker (apps/worker)<br/>BullMQ Queue Consumer & Dispatch Recovery Runner<br/>Concurrency: 4"]
+        Worker["BriskSMS Async Queue Worker (apps/worker)<br/>BullMQ Queue Consumer & DispatchRecoveryRunner<br/>Concurrency: 4"]
     end
 
     subgraph Staging_Persistence["Staging Data & State Tier"]
         PG[("Managed PostgreSQL 16+<br/>(Database: brisksms_staging)<br/>Row-Level Locks, ACID Transactions, sslmode=require")]
-        Redis[("Managed Redis 7+<br/>(Namespace: staging:bullmq)<br/>Auth & TLS Enabled")]
+        Redis[("Managed Redis 7+<br/>(Namespace: staging:bullmq)<br/>Password Auth, Private VPC TCP Networking")]
     end
 
     subgraph External_Simulators["External Integration Test Sinks"]
@@ -64,19 +64,19 @@ flowchart TD
         CarrierTower["Tanzanian Cellular Networks<br/>(Vodacom, Mixx/Tigo, Airtel, Halotel)"]
     end
 
-    MerchantBrowser -->|HTTPS / WSS| CF
-    DevClient -->|HTTPS Bearer/API Key| CF
-    AndroidIngest -->|HTTPS Device HMAC| CF
-    AndroidGateway -->|HTTPS Webhook HMAC| CF
+    MerchantBrowser -->|HTTPS / WSS| Proxy
+    DevClient -->|HTTPS Bearer/API Key| Proxy
+    AndroidIngest -->|POST /v1/ingestion/evidence| Proxy
+    AndroidGateway -->|POST /v1/messaging/webhooks/smsgate| Proxy
 
-    CF -->|Host: staging-api.brisksms.com| API
-    CF -->|Host: staging-console.brisksms.com| MerchantBrowser
+    Proxy -->|Host: staging-api.brisksms.com| API
+    Proxy -->|Host: staging-console.brisksms.com| MerchantBrowser
     
     API -->|DATABASE_URL (SSL)| PG
-    API -->|REDIS_URL (TLS)| Redis
+    API -->|REDIS_URL (TCP/Auth)| Redis
     
     Worker -->|DATABASE_URL (SSL)| PG
-    Worker -->|REDIS_URL (TLS)| Redis
+    Worker -->|REDIS_URL (TCP/Auth)| Redis
     Worker -->|Outbound Webhooks| WebhookSink
     Worker -->|SMS Dispatch (HTTP)| AndroidGateway
 
@@ -85,9 +85,75 @@ flowchart TD
 
 ---
 
-## 3. Physical SIM & Android Hardware Test Matrix
+## 3. Product A: Payment Intelligence Ingestion & Settlement Lifecycle
 
-The following matrix defines the physical hardware, carrier network requirements, and operational boundaries necessary for live staging validation:
+### 3.1 Non-Custodial Core Principle & Settlement Invariant
+BriskSMS is **non-custodial**. It never holds merchant funds, operates escrow accounts, or acts as a payment clearing house. Receiving an Android payment notification is **NOT** proof of final financial settlement.
+
+### 3.2 Authoritative 6-Step Payment Lifecycle
+The actual implementation strictly separates matching from settlement across six sequential phases:
+
+```
+[ Carrier Notification ]
+        │
+        ▼
+1. EVIDENCE INGESTION        ──▶ Persisted immutably in raw_payment_evidence (status: OBSERVED)
+        │
+        ▼
+2. EVIDENCE NORMALIZATION    ──▶ Normalized to NormalizedPayment (OBSERVED -> NORMALIZED);
+        │                        Deduplicated via hash(org_id + provider + ref + amount + timestamp)
+        ▼
+3. CANDIDATE MATCHING        ──▶ reconcilePayment() finds open invoice. If exact reference + amount:
+        │                        sets state = MATCHED and candidate_invoice_id.
+        │                        CRITICAL: Invoice status is NOT marked PAID! Remains UNPAID / PARTIALLY_PAID.
+        ▼
+4. INDEPENDENT VERIFICATION  ──▶ POST /v1/reconciliation/verify creates immutable PaymentVerification;
+        │                        transitions NormalizedPayment to VERIFIED.
+        ▼
+5. AUTHORIZED SETTLEMENT     ──▶ Executes in ACID transaction with SELECT ... FOR UPDATE.
+        │                        Creates InvoicePayment, updates paid_amount_cents and balance_cents.
+        │                        Transitions invoice.status -> PARTIALLY_PAID, PAID, or OVERPAID.
+        ▼
+6. FULFILLMENT ELIGIBILITY   ──▶ Evaluates fulfillmentEligible = (status === PAID || status === OVERPAID).
+                                 Emits fulfillment.eligible event only upon verified settlement.
+```
+
+### 3.3 Authoritative Prisma Invoice Enums
+- `InvoiceStatus`: `UNPAID`, `PARTIALLY_PAID`, `PAID`, `OVERPAID`, `VOID`, `REFUNDED`.
+- `TransactionState`: `OBSERVED`, `NORMALIZED`, `DUPLICATE_REJECTED`, `UNMATCHED`, `MATCHED`, `VERIFICATION_PENDING`, `VERIFIED`, `REJECTED`, `REVIEW_REQUIRED`, `FULFILLMENT_PENDING`, `FULFILLED`, `SETTLEMENT_SUSPENDED`.
+- `VerificationMethod`: `INDEPENDENT_PROVIDER_QUERY`, `BANK_STATEMENT_RECONCILIATION`, `MANUAL_FINANCE_APPROVAL`, `MANUAL_REJECTION`.
+
+---
+
+## 4. Android Device Pairing Protocol
+
+The device pairing implementation adheres to a **cryptographic, single-use, 5-minute QR pairing exchange**:
+
+1. **Token Generation (`POST /v1/devices/pairing-token`):**
+   - Requires `OWNER` or `ADMIN` authenticated session.
+   - Enforces device quota based on active subscription tier.
+   - Generates high-entropy token: `bsk_pair_[24 random bytes]` with `ttlSeconds: 300` (**5 minutes**).
+   - Generates QR payload:
+     ```json
+     {
+       "token": "bsk_pair_...",
+       "org": "organization_uuid",
+       "endpoint": "https://staging-api.brisksms.com/v1",
+       "exp": "2026-11-10T04:00:00.000Z"
+     }
+     ```
+2. **Device Hardware Key Exchange (`POST /v1/devices/pair`):**
+   - Android Companion generates a hardware-backed cryptographic keypair in Android Keystore.
+   - Submits payload: `{ enrollmentToken, publicKeyPem, deviceModel, manufacturer, androidVersion, appVersion, ingestionMode, label }`.
+   - Backend opens PostgreSQL transaction with row-level lock (`SELECT ... FOR UPDATE` on `pairing_tokens`).
+   - Verifies: token exists, `used_at IS NULL`, and `expires_at > NOW()`.
+   - Generates raw device token: `bsk_dev_[32 random bytes]`, stores its `SHA-256` hash in `devices.device_token_hash`.
+   - Marks token consumed: `UPDATE pairing_tokens SET used_at = NOW(), used_by_device_id = :deviceId`.
+   - Returns plaintext `deviceToken` to Android companion, which stores it securely in `KeystoreSecureStorage`.
+
+---
+
+## 5. Physical SIM & Android Hardware Test Matrix
 
 | Carrier / Provider | Network Code | Test Number Prefix | Supported Ingestion (Product A) | Outbound Dispatch (Product B) | Physical SIM Slot |
 | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -100,16 +166,14 @@ The following matrix defines the physical hardware, carrier network requirements
 ### Android Companion & Gateway Hardware Profile:
 - **Product A Companion Phone:** Dedicated physical Android handset running Android 8.0+ (API 26 to API 35).
   - *Permissions Required:* `BIND_NOTIFICATION_LISTENER_SERVICE`, `POST_NOTIFICATIONS`, `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`.
-  - *OEM Battery Optimization:* White-listed from aggressive background process termination (Samsung Auto-optimization disabled, Xiaomi MIUI battery saver set to "No restrictions", Transsion/Tecno autostart enabled).
+  - *OEM Battery Optimization:* Whitelisted from aggressive background process termination (Samsung Auto-optimization disabled, Xiaomi MIUI battery saver set to "No restrictions", Transsion autostart enabled).
 - **Product B SMSGate Gateway Device:** Dedicated physical dual-SIM Android handset running the SMSGate relay application.
   - *Network Configuration:* Direct HTTPS connectivity to `staging-api.brisksms.com`.
   - *Webhook Signing:* Configured with staging HMAC-SHA256 device signing secret.
 
 ---
 
-## 4. Staging Test Matrix & Verification Protocols
-
-The staging verification process is structured into five distinct workstreams, executed sequentially:
+## 6. Staging Test Matrix & Verification Protocols
 
 ### Workstream 1: Identity, Authentication & Web Console Session Security
 | Test ID | Test Scenario | Execution Method | Expected Verifiable Result |
@@ -120,17 +184,18 @@ The staging verification process is structured into five distinct workstreams, e
 | **STG-AUTH-04** | Atomic Refresh Token Rotation & Concurrency Lock | `POST /v1/auth/refresh` using cookie | Issues new access token & rotates refresh token. Old refresh token immediately invalidated in `refresh_tokens`. Concurrent reuse blocked via `SELECT ... FOR UPDATE`. |
 | **STG-AUTH-05** | Complete Logout & Session Invalidation | `POST /v1/auth/logout` | Emits `Max-Age=0` clearing cookies. Invalids JTI in `revoked_sessions` and revokes DB refresh token. Subsequent calls with old cookie return `401`. |
 
-### Workstream 2: Product A — Payment Intelligence & Automation
+### Workstream 2: Product A — Payment Intelligence & Companion Ingestion
 | Test ID | Test Scenario | Execution Method | Expected Verifiable Result |
 | :--- | :--- | :--- | :--- |
-| **STG-PAY-01** | Android Device Pairing Workflow | `POST /v1/devices/pair` | Issues 6-digit numeric pairing code with 10-minute expiry. Companion app completes pairing, receives device-scoped auth token stored in Android Keystore. |
-| **STG-PAY-02** | Multi-Provider Notification Ingestion | Send live/fixture SMS via Companion App | Raw payload stored immutably in `raw_payment_evidence`. Normalizes Vodacom M-Pesa, Tigo Pesa, Airtel Money, Halotel, and CRDB Bank alerts. |
-| **STG-PAY-03** | Cryptographic Deduplication Verification | Re-send identical notification 5 times | Exactly 1 payment record created. 4 duplicate attempts detected via `hash(org_id + provider + ref + amount + timestamp)` and return idempotency confirmation without re-reconciling. |
+| **STG-PAY-01** | 5-Minute Cryptographic QR Pairing | `POST /v1/devices/pairing-token` & `POST /v1/devices/pair` | Issues `bsk_pair_...` (300s TTL). Companion submits Keystore `publicKeyPem`. Atomically consumes token, registers device, returns `bsk_dev_...`. Duplicate attempt fails with `401`. |
+| **STG-PAY-02** | Notification Evidence Ingestion | `POST /v1/ingestion/evidence` with `bsk_dev_...` | Persists immutably in `raw_payment_evidence` (`OBSERVED`). Normalizes M-Pesa, Tigo, Airtel, Halotel, and CRDB Bank alerts. |
+| **STG-PAY-03** | Cryptographic Deduplication Verification | Re-send identical notification 5 times | Exactly 1 payment record created. 4 duplicates detected via `hash(...)` and return idempotency confirmation without re-reconciling. |
 | **STG-PAY-04** | Offline Evidence Queue & Synchronization | Ingest payments in airplane mode, reconnect | Room database queues evidence locally; synchronizes in FIFO order upon network restoration without data loss. |
-| **STG-PAY-05** | Deterministic Invoice Matching | Payment matching outstanding invoice | Exact match: invoice transitions `PENDING` -> `PAID`. Overpayment creates `OVERPAID` invoice record. Underpayment marks `PARTIAL_PAYMENT`. Ambiguous match routes to `REVIEW_REQUIRED`. |
-| **STG-PAY-06** | Downstream Automation Dispatch | Reconciled payment with webhook configured | Outbox enqueues webhook event `payment.matched`. Background worker delivers payload with valid HMAC-SHA256 signature. |
+| **STG-PAY-05** | Candidate Invoice Matching (No Auto-Settlement) | Ingest payment matching open invoice | Candidate match marked `MATCHED`. **Invoice status remains `UNPAID` / `PARTIALLY_PAID`**. Emits `payment.matched` with `verificationRequired: true`. |
+| **STG-PAY-06** | Authorized Verification & Settlement | `POST /v1/reconciliation/verify` | Records immutable `PaymentVerification`. In ACID transaction with `SELECT ... FOR UPDATE`, creates `InvoicePayment`, updates balance, sets `InvoiceStatus` (`PARTIALLY_PAID`, `PAID`, `OVERPAID`), determines `fulfillmentEligible`. |
+| **STG-PAY-07** | Payment Rejection | `POST /v1/reconciliation/reject` | Transitions payment to `REJECTED`. Unbinds candidate invoice. Records audit trace. |
 
-### Workstream 3: Product B — Cellular Gateway, Durable Idempotency & Lease Recovery
+### Workstream 3: Product B — Cellular SMSGate Gateway, Durable Idempotency & Lease Recovery
 | Test ID | Test Scenario | Execution Method | Expected Verifiable Result |
 | :--- | :--- | :--- | :--- |
 | **STG-MSG-01** | Organization-Scoped Durable Idempotency | `POST /v1/messages/send` with `Idempotency-Key: k1` | Exactly one message operation and one credit deduction. Repeated calls with identical key return original cached response. Different organization using `k1` is isolated. |
@@ -139,16 +204,16 @@ The staging verification process is structured into five distinct workstreams, e
 | **STG-MSG-04** | Crash After Claim Window (`DISPATCHING`) | Simulate API crash while waiting for SMSGate | Lease expires after lease window. Recovery runner detects expired claim with unknowable outcome and marks status `UNCERTAIN`. **NO re-dispatch, NO refund.** Routed for operator review. |
 | **STG-MSG-05** | Definitive Rejection vs Terminal Failure Refund | Gateway returns 400 Bad Request or 422 Invalid | Classifies as definitive failure. Credit is refunded atomically to organization ledger once. Duplicate retries/webhooks never duplicate refund. |
 | **STG-MSG-06** | Gateway HTTP 409 Conflict Handling | Gateway responds with HTTP 409 Conflict | Operation classified strictly as `UNCERTAIN`. **Never blindly refunded, never re-dispatched.** Preserved in database for reconciliation audit. |
-| **STG-MSG-07** | Dual-Key Gateway Webhook Verification | Gateway sends delivery receipt | Verifies `X-Signature` HMAC-SHA256 against `currentKey` or `previousKey`. Skew > 300s rejected. Replay within 300s rejected. |
+| **STG-MSG-07** | Dual-Key Gateway Webhook Verification | `POST /v1/messaging/webhooks/smsgate` | Verifies `X-Signature` HMAC-SHA256 against `currentKey` or `previousKey`. Skew > 300s rejected. Replay within 300s rejected. |
 | **STG-MSG-08** | TCRA Promotional Curfew Compliance | Dispatch promotional SMS outside 07:00-20:00 EAT | Queued with `SCHEDULED` status until 07:00 EAT next morning. Transactional OTPs bypass curfew and dispatch immediately. |
 
 ### Workstream 4: Developer Platform & Extensibility
 | Test ID | Test Scenario | Execution Method | Expected Verifiable Result |
 | :--- | :--- | :--- | :--- |
-| **STG-DEV-01** | Developer API Key Provisioning | Web Console creates API Key | Returns `bsk_live_...` plaintext once. Database stores only `SHA-256` hash. Keys scoped to specific permissions (`payments:read`, `messages:send`). |
+| **STG-DEV-01** | Developer API Key Provisioning | `POST /v1/developer/api-keys` | Returns `bsk_live_...` plaintext once. Database stores only `SHA-256` hash. Keys scoped to specific permissions (`payments:read`, `messages:send`). |
 | **STG-DEV-02** | Developer Rate Limiting | Fire 150 requests/min with API key | Rate limiter throttles excess requests with `429 TOO_MANY_REQUESTS` and standard `Retry-After` headers. |
-| **STG-DEV-03** | OAuth 2.0 PKCE Authorization | Zapier OAuth authorization flow | Validates code challenge and verifier. Issues scoped token. Enforces tenant boundaries. |
-| **STG-DEV-04** | Outbound Webhook Retries & Backoff | Webhook endpoint responds with 500 error | BullMQ worker retries with exponential backoff (1s, 5s, 30s, 5m). Final failure logged in `webhook_deliveries` with error trace. |
+| **STG-DEV-03** | OAuth 2.0 PKCE Authorization | `GET /v1/oauth/authorize` & `POST /v1/oauth/token` | Validates code challenge and verifier. Issues scoped token. Enforces tenant boundaries. |
+| **STG-DEV-04** | Outbound Webhook Retries & Backoff | Target responds with 500 error | BullMQ worker retries with exponential backoff (1s, 5s, 30s, 5m). Final failure logged in `webhook_deliveries` with error trace. |
 
 ### Workstream 5: Merchant Web Console Experience
 | Test ID | Test Scenario | Execution Method | Expected Verifiable Result |
@@ -158,46 +223,30 @@ The staging verification process is structured into five distinct workstreams, e
 
 ---
 
-## 5. External Security Testing Protocol
+## 7. SMSGate Gateway Endpoint & Mode Specifications
 
-Before production rollout, staging undergoes external penetration testing covering the OWASP Top 10 API Security Risks:
-
-1. **BOLA / IDOR Isolation:**
-   - Attempt to access Organization B's payment record using Organization A's API key or user session (`GET /v1/payments/:id`).
-   - *Requirement:* Must return `404 NOT_FOUND` (or `403 FORBIDDEN`), never leaking evidence of existence.
-2. **SSRF Defense on Outbound Webhooks & Gateway URLs:**
-   - Attempt to register webhook URLs pointing to:
-     - `http://127.0.0.1:5432` (Loopback)
-     - `http://169.254.169.254/latest/meta-data/` (Cloud Metadata)
-     - `http://10.0.0.1/` (Private Subnet)
-   - *Requirement:* All rejected with `400 INVALID_ENDPOINT_URL` via SSRF filter.
-3. **Cache-Control Verification on Sensitive Endpoints:**
-   - Verify that all `/v1/auth/*` responses emit `Cache-Control: no-store, no-cache, must-revalidate, proxy-revalidate`, `Pragma: no-cache`, and `Expires: 0`.
+The SMSGate integration distinguishes between two modes:
+1. **SMSGate Cloud Relay (`EXTERNAL_RELAY`):**
+   - Base URL: `https://api.sms-gate.app/3rdparty/v1`
+   - Normalized Dispatch URL: `https://api.sms-gate.app/3rdparty/v1/messages`
+   - Inbound Webhook: Delivered to `POST /v1/messaging/webhooks/smsgate`
+2. **Self-Hosted / Managed Gateway (`MANAGED_GATEWAY`):**
+   - Base URL: `https://gateway.brisksms.com/api/3rdparty/v1` (or tenant-configured server)
+   - Normalized Dispatch URL: `https://gateway.brisksms.com/api/3rdparty/v1/messages`
+   - Note on URL Normalization: Native self-hosted SMSGate uses `/api/3rdparty/v1/messages`. Passing a bare `/api/v1` path will fail with HTTP 404 unless a custom reverse proxy rewrite rule explicitly maps `/api/v1` to `/api/3rdparty/v1`.
 
 ---
 
-## 6. Testing Prerequisites & Hardware Boundaries
+## 8. Explicit Staging & Product Implementation Blockers
 
-| Dependency Layer | Prerequisites | Validation Strategy in Staging |
-| :--- | :--- | :--- |
-| **Database & Queues** | PostgreSQL 16+ & Redis 7+ | Provisioned via managed cloud instances with SSL and password authentication. |
-| **Android Companion Hardware** | Physical Android phone (API 26+) | Merchant staff installs debug APK, grants `NotificationListenerService` permission, and disables battery optimization. |
-| **Tanzanian SIM Cards** | Vodacom, Mixx/Tigo, Airtel, Halotel | Real cellular test accounts loaded with small balances to test live payment and SMS transmission. |
-| **SMSGate Cellular Bridge** | Dedicated gateway Android device | Device running SMSGate relay paired to staging API with private HMAC signing key. |
-| **Regulatory & Legal Review** | TCRA & Bank of Tanzania guidelines | Aggregator registration and compliance review with TCRA for bulk messaging; BoT non-custodial reconciliation audit. |
+The following accepted product requirements are **completely absent** in the active codebase and must be addressed prior to commercial production launch:
+1. **Google Sign-In / Google Identity Token Verification:** Completely absent in backend API. No Google OAuth endpoints or token verification logic exist.
+2. **Transactional Email Delivery via Resend / SMTP:** Completely absent. The system records `is_email_verified`, but cannot send verification emails or password reset messages.
+3. **Physical Cellular Hardware & Carrier SIMs:** Staging cannot complete end-to-end cellular validation without physical Android devices and active Tanzanian carrier SIMs (Vodacom, Tigo, Airtel, Halotel).
+4. **Staging Cloud Compute & Persistence:** Staging compute VM, managed PostgreSQL 16+, and Redis 7+ are not yet provisioned.
 
 ---
 
-## 7. Incident Management & Rollback Runbook Summary
+## 9. Conclusion
 
-Detailed operational steps are documented in `docs/reports/STAGING_DEPLOYMENT_RUNBOOK.md`. Summary:
-1. **Migration Rollback:** PostgreSQL transactions ensure clean rollback of failed migration files.
-2. **Worker Recovery:** BullMQ job stalling auto-reclaims locks after 30 seconds; `DispatchRecoveryRunner` reclaims crashed PENDING dispatches after 60 seconds.
-3. **Emergency Key Rotation:** `smsgate_keys` table supports dual-key transition window (`currentKey` and `previousKey`) with zero downtime.
-4. **Cellular Hardware Disconnect:** Heartbeat monitor detects offline gateway after 120s; dispatches pause safely in queue without data loss.
-
----
-
-## 8. Conclusion
-
-This plan provides the structured test matrices, security verification gates, and hardware routing protocols necessary to execute staging testing once staging cloud infrastructure and physical Android test devices are provisioned. Staging remains pending until live cloud infrastructure and physical test devices are provisioned.
+This plan provides the corrected, verified test matrices, cryptographic pairing specifications, and financial reconciliation lifecycle necessary to govern staging execution. Staging remains pending until physical hardware and cloud infrastructure are provisioned and authentication blockers are resolved.
