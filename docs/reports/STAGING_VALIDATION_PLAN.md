@@ -185,8 +185,9 @@ The device pairing implementation adheres to a **cryptographic, single-use, 5-mi
 | **STG-AUTH-05** | Complete Logout & Session Invalidation | `POST /v1/auth/logout` | Emits `Max-Age=0` clearing cookies. Invalids JTI in `revoked_sessions` and revokes DB refresh token. Subsequent calls with old cookie return `401`. |
 | **STG-AUTH-06** | Google Identity SSO Token Verification | `POST /v1/auth/google` with RS256 token | Verifies signature, audience, issuer, expiry, and email_verified claim. Auto-provisions merchant workspace or safely links existing account without password loss. Sets HttpOnly cookies. |
 | **STG-AUTH-07** | Transactional Email Verification via Resend | `POST /v1/auth/register` & `POST /v1/auth/verify-email` | Dispatches single-use `bsk_ev_...` token via Resend adapter. User clicks `/verify-email#token=...`; frontend console extracts token from URL fragment (RFC 3986 log privacy) and submits to `POST /v1/auth/verify-email`; atomically consumes token with `SELECT ... FOR UPDATE` and sets `is_email_verified = true`. Replay rejected with `400`. |
-| **STG-AUTH-08** | Non-Enumerating Email Verification Resend | `POST /v1/auth/resend-verification` | Throttled to 3 requests per 15 min. Invalidates old tokens. Returns identical generic success response for missing or verified accounts (anti-enumeration). |
+| **STG-AUTH-08** | Non-Enumerating Email Verification Resend (Dual Limits) | `POST /v1/auth/resend-verification` | Throttled by IP (5 requests / 15 min) and privacy-preserving recipient hash (3 requests / 15 min). Invalidates old tokens. Returns identical generic success response for missing, unverified, already-verified, or invalid syntax accounts (anti-enumeration). |
 | **STG-AUTH-09** | Conflicting Google Identity Account Protection | `POST /v1/auth/google` with matching email but conflicting Google `sub` | Rejects hijack attempt with `409 GOOGLE_ACCOUNT_CONFLICT`. Existing account credentials, Google ID, and workspace associations remain untouched. |
+| **STG-AUTH-10** | Google Multi-Audience & Authorized Party (`azp`) Enforcement | `POST /v1/auth/google` with multi-audience token | Rejects array `aud` tokens when `azp` is missing or mismatched. Rejects string `aud` when `azp` conflicts with configured `GOOGLE_CLIENT_ID`. Accepts validly matched `azp`. |
 
 ### Workstream 2: Product A — Payment Intelligence & Companion Ingestion
 | Test ID | Test Scenario | Execution Method | Expected Verifiable Result |
@@ -244,13 +245,52 @@ The SMSGate integration distinguishes between two modes:
 ## 8. Explicit Staging & External Configuration Blockers
 
 The following items represent operational and physical hardware requirements prior to commercial staging and production launch:
-1. **Google Identity OAuth Credentials (Configuration Requirement):** The Google Sign-In backend implementation and RS256 token verification engine are complete and tested. Staging operation requires provisioning a Google Cloud Project with OAuth 2.0 Web Client credentials (`GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`) and authorized JavaScript origins for `staging-console.brisksms.com`.
-2. **Resend Transactional Email API Key & DNS Verification (Configuration Requirement):** The Resend transactional email provider and token lifecycle are complete and tested. Staging operation requires acquiring a live `RESEND_API_KEY` and configuring SPF/DKIM DNS records for `staging.brisksms.com`.
+1. **Google Identity OAuth Credentials (Configuration Requirement):** The Google Sign-In backend implementation and RS256 token verification engine are complete and tested with automated mock-based and local cryptographic suites. Staging operation requires provisioning a Google Cloud Project with OAuth 2.0 Web Client credentials (`GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`) and authorized JavaScript origins for `staging-console.brisksms.com`.
+2. **Resend Transactional Email API Key & DNS Verification (Configuration Requirement):** The Resend transactional email provider and token lifecycle are complete and tested with automated mock-based suites. Staging operation requires acquiring a live `RESEND_API_KEY` and configuring SPF/DKIM DNS records for `staging.brisksms.com`.
 3. **Physical Cellular Hardware & Carrier SIMs:** Staging cannot complete end-to-end cellular validation without physical Android devices and active Tanzanian carrier SIMs (Vodacom, Tigo, Airtel, Halotel).
 4. **Staging Cloud Compute & Persistence:** Staging compute VM, managed PostgreSQL 16+, and Redis 7+ are not yet provisioned.
 
 ---
 
-## 9. Conclusion
+## 9. Live External Staging Execution Protocol (Post-Provisioning Sequence)
 
-This plan provides the corrected, verified test matrices, cryptographic pairing specifications, and financial reconciliation lifecycle necessary to govern staging execution. Staging remains pending until physical hardware and cloud infrastructure are provisioned and authentication blockers are resolved.
+Once the external blockers above are provisioned, the following sequential verification protocol must be executed against live external services before declaring staging operational:
+
+```mermaid
+flowchart TD
+    Step1["1. Live Google SSO Pop-up<br/>Merchant authenticates via Google UI<br/>Inspect real ID token verification"] --> Step2["2. Negative Google Token Test<br/>Submit forged token or wrong aud<br/>Verify 401 INVALID_GOOGLE_TOKEN"]
+    Step2 --> Step3["3. Live Resend Registration<br/>Register with real email inbox<br/>Verify inbox delivery within 10s"]
+    Step3 --> Step4["4. Fragment Link Consumption<br/>Click /verify-email#token=...<br/>Verify is_email_verified = true"]
+    Step4 --> Step5["5. Replay Rejection Test<br/>Click verification link again<br/>Verify 400 INVALID_VERIFICATION_TOKEN"]
+    Step5 --> Step6["6. Live Resend Throttling<br/>Request resend 4 times<br/>Verify 4th request returns 429"]
+```
+
+1. **Step 1: Live Google Sign-In Flow:**
+   - Access `https://staging-console.brisksms.com` and trigger Google Sign-In.
+   - Merchant selects Google Account; frontend receives real Google ID token and posts to `/v1/auth/google`.
+   - Backend fetches live Google certs from `https://www.googleapis.com/oauth2/v3/certs`, verifies RS256 signature, validates `aud` and `iss`.
+   - Session cookies (`bsk_session`, `bsk_refresh`, `bsk_csrf`) are set; user enters workspace.
+2. **Step 2: Negative Google Identity Token Test:**
+   - Submit a forged JWT or token issued for an unauthorized client ID to `/v1/auth/google`.
+   - Verify strict rejection with HTTP 401 `INVALID_GOOGLE_TOKEN` without creating user records.
+3. **Step 3: Live Resend Registration & Delivery:**
+   - Register a new merchant with a real merchant email address via `POST /v1/auth/register`.
+   - Verify email delivery arrives in the merchant inbox within 10 seconds via Resend REST API.
+   - Inspect email headers: verify DKIM, SPF, and DMARC alignments for `staging.brisksms.com`.
+4. **Step 4: Verification Link Consumption:**
+   - Click the verification button in the email targeting `${FRONTEND_URL}/verify-email#token=...`.
+   - Confirm browser executes without transmitting token in query string (log privacy).
+   - Verify user account status transitions to `is_email_verified = true`.
+5. **Step 5: Replay Rejection Test:**
+   - Click the same verification button a second time.
+   - Verify web console displays an error: token already consumed (`400 INVALID_VERIFICATION_TOKEN`).
+6. **Step 6: Live Resend Verification Throttling:**
+   - Request resend verification 4 consecutive times within 15 minutes.
+   - Verify attempts 1-3 deliver email and return generic confirmation.
+   - Verify attempt 4 is throttled with HTTP 429 `TOO_MANY_REQUESTS`.
+
+---
+
+## 10. Conclusion
+
+This plan provides the verified test matrices, cryptographic specifications, and financial reconciliation lifecycle necessary to govern staging execution. Live external integrations (Google OAuth servers and Resend email delivery) are fully prepared and tested against authoritative cryptographic specifications, and are awaiting external credential and infrastructure provisioning for live end-to-end execution.

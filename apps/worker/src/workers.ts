@@ -30,8 +30,14 @@ export interface SmsCampaignJobData {
 }
 
 export interface MaintenanceCleanupJobData {
-  organizationId: string;
-  task: 'PURGE_EXPIRED_TOKENS';
+  organizationId?: string;
+  task?: 'PURGE_EXPIRED_TOKENS';
+  retentionDays?: number;
+}
+
+export interface MaintenanceRunnerOptions {
+  intervalMs?: number;
+  retentionDays?: number;
 }
 
 export interface PaymentProcessingJobData {
@@ -432,27 +438,73 @@ export async function processSmsCampaignJob(
 }
 
 /**
- * Processes maintenance cleanup jobs (purges expired unused pairing tokens and expired revoked sessions).
+ * Executes maintenance housekeeping across ephemeral and expired records.
+ * Isolated error handling ensures that a failure in one table does not halt other maintenance cleanups.
  */
-export async function processMaintenanceCleanupJob(
-  _job: BullJob<MaintenanceCleanupJobData>,
-): Promise<{ purgedPairingTokens: number; purgedRevokedSessions: number }> {
+export async function runMaintenanceCleanup(retentionDays: number = 30): Promise<{
+  purgedPairingTokens: number;
+  purgedRevokedSessions: number;
+  purgedVerificationTokens: number;
+}> {
   const now = new Date();
-  const deletedPairing = await sql<{ id: string }>`
-    DELETE FROM pairing_tokens
-    WHERE used_at IS NULL AND expires_at < ${now}
-    RETURNING id
-  `;
-  const deletedSessions = await sql<{ jti: string }>`
-    DELETE FROM revoked_sessions
-    WHERE expires_at < ${now}
-    RETURNING jti
-  `;
+  let purgedPairingTokens = 0;
+  let purgedRevokedSessions = 0;
+  let purgedVerificationTokens = 0;
+
+  try {
+    const deletedPairing = await sql<{ id: string }>`
+      DELETE FROM pairing_tokens
+      WHERE used_at IS NULL AND expires_at < ${now}
+      RETURNING id
+    `;
+    purgedPairingTokens = deletedPairing.length;
+  } catch (err) {
+    logger.error('Failed to purge expired pairing tokens', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  try {
+    const deletedSessions = await sql<{ jti: string }>`
+      DELETE FROM revoked_sessions
+      WHERE expires_at < ${now}
+      RETURNING jti
+    `;
+    purgedRevokedSessions = deletedSessions.length;
+  } catch (err) {
+    logger.error('Failed to purge revoked sessions', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  try {
+    const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
+    const deletedVerification = await sql<{ id: string }>`
+      DELETE FROM "email_verification_tokens"
+      WHERE ("expires_at" < ${cutoff} OR ("used_at" IS NOT NULL AND "used_at" < ${cutoff}))
+      RETURNING id
+    `;
+    purgedVerificationTokens = deletedVerification.length;
+  } catch (err) {
+    logger.error('Failed to purge expired/consumed verification tokens', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 
   return {
-    purgedPairingTokens: deletedPairing.length,
-    purgedRevokedSessions: deletedSessions.length,
+    purgedPairingTokens,
+    purgedRevokedSessions,
+    purgedVerificationTokens,
   };
+}
+
+/**
+ * Processes maintenance cleanup jobs from BullMQ queue.
+ */
+export async function processMaintenanceCleanupJob(
+  job: BullJob<MaintenanceCleanupJobData>,
+): Promise<{ purgedPairingTokens: number; purgedRevokedSessions: number; purgedVerificationTokens: number }> {
+  return runMaintenanceCleanup(job.data?.retentionDays ?? 30);
 }
 
 /**
@@ -1009,11 +1061,75 @@ export class DispatchRecoveryRunner {
 }
 
 /**
+ * Periodically executes maintenance housekeeping across expired pairing tokens, revoked sessions, and verification tokens.
+ * Multi-worker safe: runs idempotent DELETE statements with safe timestamp cutoffs.
+ */
+export class MaintenanceRunner {
+  private intervalTimer: ReturnType<typeof setInterval> | null = null;
+  public readonly intervalMs: number;
+  public readonly retentionDays: number;
+  private isRunning: boolean = false;
+
+  constructor(options?: MaintenanceRunnerOptions) {
+    this.intervalMs = options?.intervalMs ?? parseInt(process.env.MAINTENANCE_INTERVAL_MS || '3600000', 10);
+    this.retentionDays = options?.retentionDays ?? parseInt(process.env.MAINTENANCE_RETENTION_DAYS || '30', 10);
+  }
+
+  public async runOnce(): Promise<{
+    purgedPairingTokens: number;
+    purgedRevokedSessions: number;
+    purgedVerificationTokens: number;
+  }> {
+    if (this.isRunning) {
+      return { purgedPairingTokens: 0, purgedRevokedSessions: 0, purgedVerificationTokens: 0 };
+    }
+    this.isRunning = true;
+    try {
+      const result = await runMaintenanceCleanup(this.retentionDays);
+      if (
+        result.purgedPairingTokens > 0 ||
+        result.purgedRevokedSessions > 0 ||
+        result.purgedVerificationTokens > 0
+      ) {
+        logger.info('Maintenance cleanup cycle executed', result);
+      }
+      return result;
+    } catch (err: unknown) {
+      logger.error('Maintenance cleanup execution failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    } finally {
+      this.isRunning = false;
+    }
+  }
+
+  public start(): void {
+    if (this.intervalTimer) return;
+    this.intervalTimer = setInterval(() => {
+      this.runOnce().catch(() => {});
+    }, this.intervalMs);
+    logger.info('Maintenance runner scheduled', {
+      intervalMs: this.intervalMs,
+      retentionDays: this.retentionDays,
+    });
+  }
+
+  public stop(): void {
+    if (this.intervalTimer) {
+      clearInterval(this.intervalTimer);
+      this.intervalTimer = null;
+    }
+  }
+}
+
+/**
  * Orchestrates all BriskSMS background workers, outbox polling, Redis heartbeats, and dispatch recovery.
  */
 export class BriskWorkerRuntime {
   public readonly outboxDispatcher = new OutboxDispatcher();
   public readonly dispatchRecoveryRunner: DispatchRecoveryRunner;
+  public readonly maintenanceRunner: MaintenanceRunner;
   public readonly webhookWorker: BullWorker<WebhookDeliveryJobData>;
   public readonly campaignWorker: BullWorker<SmsCampaignJobData>;
   public readonly maintenanceWorker: BullWorker<MaintenanceCleanupJobData>;
@@ -1022,8 +1138,13 @@ export class BriskWorkerRuntime {
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   public readonly workerId = `worker_${process.pid}_${randomUUID().slice(0, 8)}`;
 
-  constructor(customFetch?: CustomFetchHandler, recoveryOptions?: DispatchRecoveryOptions) {
+  constructor(
+    customFetch?: CustomFetchHandler,
+    recoveryOptions?: DispatchRecoveryOptions,
+    maintenanceOptions?: MaintenanceRunnerOptions,
+  ) {
     this.dispatchRecoveryRunner = new DispatchRecoveryRunner(recoveryOptions, customFetch);
+    this.maintenanceRunner = new MaintenanceRunner(maintenanceOptions);
 
     this.webhookWorker = new BullWorker<WebhookDeliveryJobData>(
       QUEUE_NAMES.WEBHOOK_DELIVERY,
@@ -1091,21 +1212,24 @@ export class BriskWorkerRuntime {
 
     this.outboxDispatcher.start(1000);
     this.dispatchRecoveryRunner.start();
+    this.maintenanceRunner.start();
     this.webhookWorker.start();
     this.campaignWorker.start();
     this.maintenanceWorker.start();
     this.paymentWorker.start();
     this.retryWorker.start();
 
-    logger.info('BriskSMS background worker runtime started (all 5 queues active, dispatch recovery active)', {
+    logger.info('BriskSMS background worker runtime started (all 5 queues active, dispatch recovery active, maintenance active)', {
       workerId: this.workerId,
       recoveryIntervalMs: this.dispatchRecoveryRunner.intervalMs,
+      maintenanceIntervalMs: this.maintenanceRunner.intervalMs,
     });
   }
 
   public async stop(): Promise<void> {
     this.outboxDispatcher.stop();
     this.dispatchRecoveryRunner.stop();
+    this.maintenanceRunner.stop();
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;

@@ -3,7 +3,7 @@ import { createPublicKey, verify } from 'node:crypto';
 export interface GoogleTokenPayload {
   iss: string;
   sub: string;
-  aud: string;
+  aud: string | string[];
   email: string;
   email_verified: boolean;
   name?: string;
@@ -79,13 +79,25 @@ export class DefaultGoogleTokenVerifier implements GoogleTokenVerifier {
       throw new Error('GOOGLE_CLIENT_ID is not configured on the server');
     }
 
-    const audList = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
-    if (!audList.includes(expectedAudience)) {
-      throw new Error(`Google token audience mismatch: expected "${expectedAudience}", received "${payload.aud}"`);
-    }
-
-    if (payload.azp && payload.azp !== expectedAudience && !audList.includes(payload.azp)) {
-      throw new Error(`Google token authorized party (azp) mismatch: expected "${expectedAudience}", received "${payload.azp}"`);
+    if (typeof payload.aud === 'string') {
+      if (payload.aud !== expectedAudience) {
+        throw new Error(`Google token audience mismatch: expected "${expectedAudience}", received "${payload.aud}"`);
+      }
+      if (payload.azp && payload.azp !== expectedAudience) {
+        throw new Error(`Google token authorized party (azp) mismatch: expected "${expectedAudience}", received "${payload.azp}"`);
+      }
+    } else if (Array.isArray(payload.aud)) {
+      if (!payload.aud.includes(expectedAudience)) {
+        throw new Error(`Google token audience mismatch: expected "${expectedAudience}", received [${payload.aud.join(', ')}]`);
+      }
+      if (!payload.azp) {
+        throw new Error(`Google token with multiple audiences requires an authorized party (azp) claim`);
+      }
+      if (payload.azp !== expectedAudience) {
+        throw new Error(`Google token authorized party (azp) mismatch: expected "${expectedAudience}", received "${payload.azp}"`);
+      }
+    } else {
+      throw new Error(`Google token does not contain a valid audience (aud) claim`);
     }
 
     // 3. Verify Expiry, iat, and nbf (with 300s clock skew tolerance)

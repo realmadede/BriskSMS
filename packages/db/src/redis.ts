@@ -357,6 +357,18 @@ export class BriskRedisClient {
     return this.sendCommand<number>('EXPIRE', key, seconds);
   }
 
+  async incrWithExpire(key: string, seconds: number): Promise<number> {
+    const script = `
+      local current = redis.call('INCR', KEYS[1])
+      if current == 1 or redis.call('TTL', KEYS[1]) == -1 then
+        redis.call('EXPIRE', KEYS[1], ARGV[1])
+      end
+      return current
+    `;
+    const res = await this.eval<number>(script, [key], [seconds]);
+    return Number(res);
+  }
+
   async flushdb(): Promise<string> {
     return this.sendCommand<string>('FLUSHDB');
   }

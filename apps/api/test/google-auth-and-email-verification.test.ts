@@ -14,7 +14,8 @@ import {
   REFRESH_COOKIE_NAME,
   CSRF_COOKIE_NAME,
 } from '../src/core/cookies.js';
-import { sql } from '@brisksms/db';
+import { sql, redisClient, setSimulatedRedisOutage } from '@brisksms/db';
+import { runMaintenanceCleanup, MaintenanceRunner } from '@brisksms/worker';
 
 describe('Google Sign-In & Resend Email Verification Security Suite', () => {
   const router = createApp();
@@ -818,6 +819,135 @@ describe('Google Sign-In & Resend Email Verification Security Suite', () => {
       assert.equal(fourthRes.statusCode, 429);
       assert.equal(fourthRes.json.error.code, 'TOO_MANY_REQUESTS');
     });
+
+    it('enforces recipient-level rate limiting (3 resends / 15 min) even across distributed IPs targeting the same email', async () => {
+      const email = 'distributed.target@company.co.tz';
+      await authService.register({
+        email,
+        password: 'Password123!',
+        fullName: 'Distributed Target',
+      });
+
+      // 3 requests from 3 different IPs targeting the SAME recipient
+      for (let i = 1; i <= 3; i++) {
+        const res = await makeRequest(
+          'POST',
+          '/v1/auth/resend-verification',
+          { 'content-type': 'application/json', host: 'localhost:3000', 'x-forwarded-for': `198.51.100.${i}` },
+          { email },
+        );
+        assert.equal(res.statusCode, 200);
+      }
+
+      // 4th request from a completely novel IP 198.51.100.99 must be rejected due to recipient-level limit
+      const blockedRes = await makeRequest(
+        'POST',
+        '/v1/auth/resend-verification',
+        { 'content-type': 'application/json', host: 'localhost:3000', 'x-forwarded-for': '198.51.100.99' },
+        { email },
+      );
+      assert.equal(blockedRes.statusCode, 429);
+      assert.equal(blockedRes.json.error.code, 'TOO_MANY_REQUESTS');
+    });
+
+    it('enforces IP-level rate limiting (5 resends / 15 min) across multiple different recipients from the same IP', async () => {
+      const attackingIp = '203.0.113.42';
+
+      // 5 requests to 5 distinct recipient emails from the SAME attacking IP
+      for (let i = 1; i <= 5; i++) {
+        const res = await makeRequest(
+          'POST',
+          '/v1/auth/resend-verification',
+          { 'content-type': 'application/json', host: 'localhost:3000', 'x-forwarded-for': attackingIp },
+          { email: `victim${i}@company.co.tz` },
+        );
+        assert.equal(res.statusCode, 200);
+      }
+
+      // 6th request to victim6 from the same IP must be rejected due to IP-level limit
+      const blockedRes = await makeRequest(
+        'POST',
+        '/v1/auth/resend-verification',
+        { 'content-type': 'application/json', host: 'localhost:3000', 'x-forwarded-for': attackingIp },
+        { email: 'victim6@company.co.tz' },
+      );
+      assert.equal(blockedRes.statusCode, 429);
+      assert.equal(blockedRes.json.error.code, 'TOO_MANY_REQUESTS');
+    });
+
+    it('uses privacy-preserving SHA-256 hash for recipient key and does not store raw email addresses in Redis keys', async () => {
+      const email = 'secret.executive@corporate.co.tz';
+      await makeRequest(
+        'POST',
+        '/v1/auth/resend-verification',
+        { 'content-type': 'application/json', host: 'localhost:3000', 'x-forwarded-for': '192.0.2.11' },
+        { email },
+      );
+
+      // Inspect all rate limit keys in Redis
+      const keys = await redisClient.keys('ratelimit:auth:*');
+      assert.ok(keys.length > 0);
+      for (const key of keys) {
+        assert.ok(!key.includes('secret.executive'), `Redis key ${key} must not contain plaintext email user`);
+        assert.ok(!key.includes('corporate.co.tz'), `Redis key ${key} must not contain plaintext email domain`);
+        assert.ok(!key.includes('@'), `Redis key ${key} must not contain @ character`);
+      }
+    });
+
+    it('returns identical generic response for invalid email format without account enumeration', async () => {
+      const res = await makeRequest(
+        'POST',
+        '/v1/auth/resend-verification',
+        { 'content-type': 'application/json', host: 'localhost:3000' },
+        { email: 'malformed-email-not-valid' },
+      );
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.json.success, true);
+      assert.ok(res.json.data.message.includes('If an unverified account exists'));
+    });
+
+    it('fails closed with 503 REDIS_UNAVAILABLE in production mode when Redis is offline', async () => {
+      const originalNodeEnv = process.env.NODE_ENV;
+      try {
+        process.env.NODE_ENV = 'production';
+        setSimulatedRedisOutage(true);
+
+        const res = await makeRequest(
+          'POST',
+          '/v1/auth/resend-verification',
+          { 'content-type': 'application/json', host: 'localhost:3000' },
+          { email: 'anyuser@company.co.tz' },
+        );
+
+        assert.equal(res.statusCode, 503);
+        assert.equal(res.json.error.code, 'REDIS_UNAVAILABLE');
+      } finally {
+        setSimulatedRedisOutage(false);
+        process.env.NODE_ENV = originalNodeEnv;
+      }
+    });
+
+    it('falls back safely to in-memory rate limiting in test/development mode when Redis is offline', async () => {
+      const originalNodeEnv = process.env.NODE_ENV;
+      try {
+        process.env.NODE_ENV = 'test';
+        setSimulatedRedisOutage(true);
+
+        const res = await makeRequest(
+          'POST',
+          '/v1/auth/resend-verification',
+          { 'content-type': 'application/json', host: 'localhost:3000' },
+          { email: 'offline.fallback@company.co.tz' },
+        );
+
+        assert.equal(res.statusCode, 200);
+        assert.equal(res.json.success, true);
+      } finally {
+        setSimulatedRedisOutage(false);
+        process.env.NODE_ENV = originalNodeEnv;
+      }
+    });
   });
 
   // ==========================================
@@ -1058,6 +1188,231 @@ describe('Google Sign-In & Resend Email Verification Security Suite', () => {
       const res = await service.sendVerificationEmail('not-an-email-format', 'Test User', 'bsk_ev_test123');
       assert.equal(res.success, false);
       assert.ok(res.error?.includes("Invalid recipient email address: 'not-an-email-format'"));
+    });
+
+    it('rejects multi-audience array token when azp claim is missing', async () => {
+      const { publicKey, privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+      const jwk = publicKey.export({ format: 'jwk' });
+      jwk.kid = 'multi-aud-kid-01';
+      jwk.alg = 'RS256';
+      jwk.use = 'sig';
+
+      const verifier = new DefaultGoogleTokenVerifier('my-client-id');
+      (verifier as any).jwksCache = { keys: [jwk], expiresAt: Date.now() + 3600_000 };
+
+      const header = { alg: 'RS256', kid: 'multi-aud-kid-01', typ: 'JWT' };
+      const payload = {
+        iss: 'accounts.google.com',
+        sub: 'multi_aud_sub_1',
+        aud: ['partner-app-id', 'my-client-id'],
+        // azp is intentionally omitted
+        email: 'multiaud@example.com',
+        email_verified: true,
+        exp: Math.floor(Date.now() / 1000) + 3600,
+      };
+
+      const hB64 = Buffer.from(JSON.stringify(header)).toString('base64url');
+      const pB64 = Buffer.from(JSON.stringify(payload)).toString('base64url');
+      const signer = createSign('RSA-SHA256');
+      signer.update(`${hB64}.${pB64}`);
+      const sig = signer.sign(privateKey, 'base64url');
+
+      await assert.rejects(
+        verifier.verifyIdToken(`${hB64}.${pB64}.${sig}`),
+        /requires an authorized party \(azp\) claim/,
+      );
+    });
+
+    it('rejects multi-audience array token when azp does not match configured client ID', async () => {
+      const { publicKey, privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+      const jwk = publicKey.export({ format: 'jwk' });
+      jwk.kid = 'multi-aud-kid-02';
+      jwk.alg = 'RS256';
+      jwk.use = 'sig';
+
+      const verifier = new DefaultGoogleTokenVerifier('my-client-id');
+      (verifier as any).jwksCache = { keys: [jwk], expiresAt: Date.now() + 3600_000 };
+
+      const header = { alg: 'RS256', kid: 'multi-aud-kid-02', typ: 'JWT' };
+      const payload = {
+        iss: 'accounts.google.com',
+        sub: 'multi_aud_sub_2',
+        aud: ['partner-app-id', 'my-client-id'],
+        azp: 'unauthorized-third-party-client-id',
+        email: 'multiaud2@example.com',
+        email_verified: true,
+        exp: Math.floor(Date.now() / 1000) + 3600,
+      };
+
+      const hB64 = Buffer.from(JSON.stringify(header)).toString('base64url');
+      const pB64 = Buffer.from(JSON.stringify(payload)).toString('base64url');
+      const signer = createSign('RSA-SHA256');
+      signer.update(`${hB64}.${pB64}`);
+      const sig = signer.sign(privateKey, 'base64url');
+
+      await assert.rejects(
+        verifier.verifyIdToken(`${hB64}.${pB64}.${sig}`),
+        /authorized party \(azp\) mismatch/,
+      );
+    });
+
+    it('accepts multi-audience array token when aud contains client ID and azp matches client ID', async () => {
+      const { publicKey, privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+      const jwk = publicKey.export({ format: 'jwk' });
+      jwk.kid = 'multi-aud-kid-03';
+      jwk.alg = 'RS256';
+      jwk.use = 'sig';
+
+      const verifier = new DefaultGoogleTokenVerifier('my-client-id');
+      (verifier as any).jwksCache = { keys: [jwk], expiresAt: Date.now() + 3600_000 };
+
+      const header = { alg: 'RS256', kid: 'multi-aud-kid-03', typ: 'JWT' };
+      const payload = {
+        iss: 'accounts.google.com',
+        sub: 'multi_aud_sub_3',
+        aud: ['partner-app-id', 'my-client-id'],
+        azp: 'my-client-id',
+        email: 'multiaud3@example.com',
+        email_verified: true,
+        exp: Math.floor(Date.now() / 1000) + 3600,
+      };
+
+      const hB64 = Buffer.from(JSON.stringify(header)).toString('base64url');
+      const pB64 = Buffer.from(JSON.stringify(payload)).toString('base64url');
+      const signer = createSign('RSA-SHA256');
+      signer.update(`${hB64}.${pB64}`);
+      const sig = signer.sign(privateKey, 'base64url');
+
+      const verified = await verifier.verifyIdToken(`${hB64}.${pB64}.${sig}`);
+      assert.equal(verified.sub, 'multi_aud_sub_3');
+      assert.equal(verified.email, 'multiaud3@example.com');
+    });
+
+    it('rejects replaying an expired token beyond clock skew tolerance', async () => {
+      const { publicKey, privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+      const jwk = publicKey.export({ format: 'jwk' });
+      jwk.kid = 'replay-kid-01';
+      jwk.alg = 'RS256';
+      jwk.use = 'sig';
+
+      const verifier = new DefaultGoogleTokenVerifier('my-client-id');
+      (verifier as any).jwksCache = { keys: [jwk], expiresAt: Date.now() + 3600_000 };
+
+      const header = { alg: 'RS256', kid: 'replay-kid-01', typ: 'JWT' };
+      const nowSec = Math.floor(Date.now() / 1000);
+      const expiredPayload = {
+        iss: 'accounts.google.com',
+        sub: 'expired_replay_sub',
+        aud: 'my-client-id',
+        email: 'expired@example.com',
+        email_verified: true,
+        exp: nowSec - 600, // Expired 10 minutes ago
+      };
+
+      const hB64 = Buffer.from(JSON.stringify(header)).toString('base64url');
+      const pB64 = Buffer.from(JSON.stringify(expiredPayload)).toString('base64url');
+      const signer = createSign('RSA-SHA256');
+      signer.update(`${hB64}.${pB64}`);
+      const sig = signer.sign(privateKey, 'base64url');
+
+      await assert.rejects(
+        verifier.verifyIdToken(`${hB64}.${pB64}.${sig}`),
+        /Google token is expired/,
+      );
+    });
+  });
+
+  // ==========================================
+  // SECTION 6: BACKGROUND MAINTENANCE & HOUSEKEEPING
+  // ==========================================
+  describe('6. Scheduled Maintenance Housekeeping & Atomic Redis Primitives', () => {
+    it('runMaintenanceCleanup purges expired/consumed verification tokens while strictly preserving valid active tokens', async () => {
+      // 1. Create a valid unexpired verification token
+      await makeRequest(
+        'POST',
+        '/v1/auth/register',
+        { 'content-type': 'application/json', host: 'localhost:3000' },
+        {
+          email: 'valid.active@company.co.tz',
+          password: 'Password123!',
+          fullName: 'Valid Active User',
+        },
+      );
+      const activeToken = extractTokenFromSentEmail(0);
+
+      // 2. Create another token that expired 45 days ago
+      await makeRequest(
+        'POST',
+        '/v1/auth/register',
+        { 'content-type': 'application/json', host: 'localhost:3000' },
+        {
+          email: 'expired.old@company.co.tz',
+          password: 'Password123!',
+          fullName: 'Expired Old User',
+        },
+      );
+      const expiredToken = extractTokenFromSentEmail(1);
+      await sql`
+        UPDATE "email_verification_tokens"
+        SET "expires_at" = NOW() - INTERVAL '45 days'
+        WHERE "token_hash" = ${expiredToken} OR "id" IN (
+          SELECT "id" FROM "email_verification_tokens" ORDER BY "created_at" DESC LIMIT 1
+        )
+      `;
+
+      // 3. Create a third token consumed 45 days ago
+      await makeRequest(
+        'POST',
+        '/v1/auth/register',
+        { 'content-type': 'application/json', host: 'localhost:3000' },
+        {
+          email: 'consumed.old@company.co.tz',
+          password: 'Password123!',
+          fullName: 'Consumed Old User',
+        },
+      );
+      const consumedToken = extractTokenFromSentEmail(2);
+      await sql`
+        UPDATE "email_verification_tokens"
+        SET "used_at" = NOW() - INTERVAL '45 days'
+        WHERE "token_hash" = ${consumedToken} OR "id" IN (
+          SELECT "id" FROM "email_verification_tokens" ORDER BY "created_at" DESC LIMIT 1
+        )
+      `;
+
+      // 4. Run maintenance cleanup with 30-day retention
+      const stats = await runMaintenanceCleanup(30);
+      assert.ok(stats.purgedVerificationTokens >= 2, 'Should purge at least 2 old tokens');
+
+      // 5. Verify active unexpired token still exists in database
+      const activeRecord = await dbStore.findVerificationToken(activeToken);
+      assert.ok(activeRecord, 'Valid active unexpired token MUST NOT be deleted by maintenance cleanup');
+      assert.equal(activeRecord?.usedAt, null);
+    });
+
+    it('MaintenanceRunner executes scheduled maintenance runOnce safely', async () => {
+      const runner = new MaintenanceRunner({ intervalMs: 100, retentionDays: 30 });
+      const stats = await runner.runOnce();
+      assert.equal(typeof stats.purgedPairingTokens, 'number');
+      assert.equal(typeof stats.purgedRevokedSessions, 'number');
+      assert.equal(typeof stats.purgedVerificationTokens, 'number');
+    });
+
+    it('redisClient.incrWithExpire atomically sets TTL and increments without leaving unexpired keys', async () => {
+      const testKey = `test_atomic_rate_${Date.now()}`;
+      try {
+        const c1 = await redisClient.incrWithExpire(testKey, 10);
+        assert.equal(c1, 1);
+
+        // Verify key has an active TTL in Redis
+        const ttl = await redisClient.sendCommand<number>('TTL', testKey);
+        assert.ok(ttl > 0 && ttl <= 10, `TTL must be set between 1 and 10, got ${ttl}`);
+
+        const c2 = await redisClient.incrWithExpire(testKey, 10);
+        assert.equal(c2, 2);
+      } finally {
+        await redisClient.del(testKey);
+      }
     });
   });
 });

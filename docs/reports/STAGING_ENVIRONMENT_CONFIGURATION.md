@@ -24,7 +24,8 @@ BriskSMS enforces a strict **Production-First, Security-First** configuration go
    - Active merchant authentication uses custom scrypt password hashing, HMAC-signed JWTs, and secure cookies.
    - **Google Sign-In & OpenID Connect ID Token Verification:** Implemented natively using Node.js RS256 cryptographic verification against Google public JWKS (`https://www.googleapis.com/oauth2/v3/certs`), validating cryptographic signatures, issuer (`accounts.google.com`), audience (`GOOGLE_CLIENT_ID`), expiry timestamp, and `email_verified` claim. Includes automatic cache invalidation and live re-fetch upon unknown `kid` (supporting Google key rotation), authorized party (`azp`) checks, and multi-audience arrays. Supports auto-provisioning new merchant accounts and safe account linking for existing verified email accounts with 409 conflict detection for hijacked subjects.
    - **Transactional Email Verification via Resend:** Implemented with transactional email delivery adapter, Stitch-styled HTML/plain-text templates, single-use `bsk_ev_...` tokens stored as SHA-256 hashes in `email_verification_tokens`, atomic consumption with `SELECT ... FOR UPDATE`, and non-enumerating rate-limited resend. Links use URL fragments (`/verify-email#token=...`) in accordance with RFC 3986 to prevent verification tokens from being leaked in HTTP request lines, reverse-proxy access logs, or browser Referer headers. Outbound email dispatch occurs strictly after PostgreSQL transaction commitment to prevent connection starvation.
-   - **Durable Redis-Backed Rate Limiting:** Authentication endpoints (`/register`, `/login`, `/google`, `/resend-verification`, `/verify-email`) enforce distributed rate limits backed by Redis (`INCR` + `EXPIRE`), with automatic in-memory bucket fallback when Redis is offline or during isolated unit testing.
+   - **Durable Redis-Backed Rate Limiting & Fail-Closed Production Policy:** Authentication endpoints (`/register`, `/login`, `/google`, `/resend-verification`, `/verify-email`) enforce distributed rate limits backed by an atomic Redis Lua script (`incrWithExpire`), preventing concurrency race conditions and unexpiring keys. In production and staging (`NODE_ENV=production` or `staging`), rate-limiting failures fail closed with HTTP 503 `REDIS_UNAVAILABLE` to prevent brute-force attacks across cluster replicas, while development and testing fall back gracefully to in-memory buckets. `POST /v1/auth/resend-verification` enforces dual limits: 5 req/15 min per IP and 3 req/15 min per recipient (via privacy-preserving SHA-256 recipient hash without storing raw email addresses in Redis keys).
+   - **Scheduled Maintenance Housekeeping:** The background worker runtime registers an automated `MaintenanceRunner` (`MAINTENANCE_INTERVAL_MS=3600000`, `MAINTENANCE_RETENTION_DAYS=30`) that continuously purges expired pairing tokens, revoked session JTIs, and expired/consumed email verification tokens older than 30 days while preserving active tokens.
    - **External Staging Requirements:** Implementation is complete and covered by automated test suites. Staging operational enablement requires configuring live `GOOGLE_CLIENT_ID` in Google Cloud Console (`GOOGLE_CLIENT_SECRET` is not required for client-side ID token verification) and `RESEND_API_KEY` with verified DNS records in Resend.
 
 ---
@@ -59,6 +60,8 @@ Static analysis of the BriskSMS codebase reveals exactly **31 server-side enviro
 | `PROMOTIONAL_CURFEW_END_HOUR_EAT` | `apps/api`, `apps/worker` | Optional | No | `7` (7:00 AM) | Falls back to 7. | Integer between 0 and 23. | Commercial curfew end hour in East Africa Time (UTC+3). Held promotional SMS resume delivery at this hour. |
 | `DISPATCH_PENDING_GRACE_SECONDS` | `apps/worker` | Optional | No | `60` | Falls back to 60 seconds. | Positive integer in seconds (e.g. 60). | Grace window before a PENDING dispatch operation with no active lease is considered crashed and eligible for recovery sweep. |
 | `DISPATCH_RECOVERY_INTERVAL_MS` | `apps/worker` | Optional | No | `30000` | Falls back to 30,000 ms (30s). | Positive integer in milliseconds (e.g. 30000). | Polling interval for `DispatchRecoveryRunner` to sweep stale dispatches and expired claims across API/worker restarts. |
+| `MAINTENANCE_INTERVAL_MS` | `apps/worker` | Optional | No | `3600000` (1 hr) | Falls back to 3,600,000 ms (1 hour). | Positive integer in milliseconds (e.g. 3600000). | Periodic execution interval for `MaintenanceRunner` to sweep expired pairing tokens, revoked sessions, and verification tokens. |
+| `MAINTENANCE_RETENTION_DAYS` | `apps/worker` | Optional | No | `30` | Falls back to 30 days. | Positive integer in days (e.g. 30). | Retention window before expired or consumed verification tokens are permanently purged. Unexpired active tokens are never deleted. |
 | `CLIENT_ID` | `packages/zapier-app` | Optional | No | `brisksms_zapier_client` | Standard client ID. | Alphanumeric string. | OAuth 2.0 client identifier for the BriskSMS Zapier integration. |
 | `BRISKSMS_SILENT_LOGS` | `packages/db`, Tests | Optional | No | `false` | Falls back to standard logging. | Boolean string: `'true'` or `'false'`. | When `'true'`, suppresses error logs on stdout/stderr (used in automated test runners). Leave `false` in staging. |
 | `GOOGLE_CLIENT_ID` | `apps/api` | Required for Google SSO | No | None | When unset, Google ID token verification is rejected with 401. | Standard Google OAuth Client ID string (`*.apps.googleusercontent.com`). | Audience claim (`aud`) verification against Google OpenID Connect ID tokens. |
@@ -145,10 +148,12 @@ JWT_ACCESS_SECRET=REPLACE_WITH_64_HEX_CHAR_JWT_SECRET
 CSRF_SECRET=REPLACE_WITH_64_HEX_CHAR_CSRF_SECRET
 
 # ------------------------------------------------------------------------------
-# 5. Background Worker & Dispatch Recovery
+# 5. Background Worker, Dispatch Recovery & Maintenance Housekeeping
 # ------------------------------------------------------------------------------
 DISPATCH_PENDING_GRACE_SECONDS=60
 DISPATCH_RECOVERY_INTERVAL_MS=30000
+MAINTENANCE_INTERVAL_MS=3600000
+MAINTENANCE_RETENTION_DAYS=30
 
 # ------------------------------------------------------------------------------
 # 6. Regulatory Curfew & Security Guards

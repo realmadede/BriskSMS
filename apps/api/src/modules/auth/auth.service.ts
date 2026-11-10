@@ -2,8 +2,8 @@ import { dbStore, UserRecord, mapUserRow } from '../../core/store.js';
 import { hashPassword, verifyPassword, signJwt, generateSecureToken, hashToken } from '../../core/crypto.js';
 import { HttpException } from '../../core/http.js';
 import { tokenBlacklist } from '../../core/guards.js';
-import { sql, withTransaction, redisClient, isSimulatedRedisOutage } from '@brisksms/db';
-import { randomUUID } from 'node:crypto';
+import { sql, withTransaction, redisClient, isSimulatedRedisOutage, RedisUnavailableError } from '@brisksms/db';
+import { randomUUID, createHash } from 'node:crypto';
 import { GoogleTokenVerifier, googleTokenVerifier } from './providers/google.provider.js';
 import { EmailService, emailService } from './services/email.service.js';
 
@@ -61,21 +61,21 @@ export class AuthService {
   async checkRateLimit(key: string, maxAttempts: number, windowMs: number): Promise<void> {
     const windowSec = Math.max(1, Math.ceil(windowMs / 1000));
     const redisKey = `ratelimit:auth:${key}`;
+    const isProdOrStaging = process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'staging';
 
     try {
-      if (!isSimulatedRedisOutage()) {
-        const count = await redisClient.incr(redisKey);
-        if (count === 1) {
-          await redisClient.expire(redisKey, windowSec);
-        }
-        if (count > maxAttempts) {
-          throw new HttpException(429, 'TOO_MANY_REQUESTS', 'Rate limit exceeded. Please try again later.');
-        }
-        return;
+      const count = await redisClient.incrWithExpire(redisKey, windowSec);
+      if (count > maxAttempts) {
+        throw new HttpException(429, 'TOO_MANY_REQUESTS', 'Rate limit exceeded. Please try again later.');
       }
+      return;
     } catch (err) {
       if (err instanceof HttpException) throw err;
-      // Fallback to in-memory if Redis is offline or unavailable
+      // In production and staging, fail closed to protect distributed authentication security
+      if (isProdOrStaging) {
+        throw new RedisUnavailableError('Rate limiting broker is unavailable in production.', err);
+      }
+      // Fallback to in-memory only in development or test environments
     }
 
     const now = Date.now();
@@ -483,11 +483,23 @@ export class AuthService {
     }
 
     const emailNorm = email.trim().toLowerCase();
-    const rateLimitKey = `resend_ev_${emailNorm}_${clientIp || ''}`;
-    // Limit to 3 resend attempts per 15 minutes per email/IP (durable via Redis)
-    await this.checkRateLimit(rateLimitKey, 3, 15 * 60 * 1000);
-
     const genericMsg = 'If an unverified account exists with that email address, a new verification link has been sent.';
+
+    // 1. IP-level rate limit: max 5 resend requests per 15 minutes per IP
+    if (clientIp) {
+      await this.checkRateLimit(`resend_ip_${clientIp}`, 5, 15 * 60 * 1000);
+    }
+
+    // 2. Recipient-level rate limit: max 3 resend requests per 15 minutes per recipient
+    // Uses a privacy-preserving SHA-256 hash so raw email addresses are never stored in Redis keys
+    const recipientHash = createHash('sha256').update(`resend_recipient:${emailNorm}`).digest('hex').slice(0, 32);
+    await this.checkRateLimit(`resend_target_${recipientHash}`, 3, 15 * 60 * 1000);
+
+    // 3. Email syntax validation: return generic success for invalid email without leaking account existence
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(emailNorm)) {
+      return { success: true, message: genericMsg };
+    }
 
     const user = await dbStore.findUserByEmail(emailNorm);
     // Non-enumerating: Return identical success message if user does not exist or is already verified
