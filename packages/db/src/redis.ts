@@ -349,6 +349,14 @@ export class BriskRedisClient {
     return (await this.sendCommand<string[]>('KEYS', pattern)) ?? [];
   }
 
+  async incr(key: string): Promise<number> {
+    return this.sendCommand<number>('INCR', key);
+  }
+
+  async expire(key: string, seconds: number): Promise<number> {
+    return this.sendCommand<number>('EXPIRE', key, seconds);
+  }
+
   async flushdb(): Promise<string> {
     return this.sendCommand<string>('FLUSHDB');
   }

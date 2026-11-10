@@ -49,6 +49,12 @@ export function registerAuthRoutes(router: Router): void {
       validateCsrf(req);
     }
 
+    // IP Rate Limit: max 10 registration requests per minute per IP
+    const clientIp = extractClientIp(req);
+    if (clientIp) {
+      await authService.checkRateLimit(`register_${clientIp}`, 10, 60_000);
+    }
+
     const dto = req.body as unknown as RegisterDto;
     const result = await authService.register(dto);
     const csrfToken = generateCsrfToken();
@@ -254,6 +260,12 @@ export function registerAuthRoutes(router: Router): void {
     }
     if (req.headers['sec-fetch-site'] === 'cross-site') {
       throw new HttpException(403, 'CSRF_CROSS_SITE_FORBIDDEN', 'Cross-site request blocked by Fetch Metadata policy');
+    }
+
+    // IP Rate Limit: max 30 verification attempts per minute per IP to prevent token guessing
+    const clientIp = extractClientIp(req);
+    if (clientIp) {
+      await authService.checkRateLimit(`verify_ev_${clientIp}`, 30, 60_000);
     }
 
     const token = (req.body.token as string) || '';

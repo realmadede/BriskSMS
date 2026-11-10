@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="referrer" content="no-referrer">
   <title>BriskSMS Merchant Console — Financial Intelligence & Carrier Messaging</title>
   <link rel="icon" type="image/svg+xml" href="/assets/brand/favicon.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -2571,9 +2572,17 @@
     }
 
     async function checkUrlVerificationToken() {
-      const params = new URLSearchParams(window.location.search);
-      const token = params.get('token');
+      // 1. Extract token from URL fragment (preferred for log & referrer privacy) or query params
+      const hash = window.location.hash || '';
+      const hashParams = new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash);
+      const searchParams = new URLSearchParams(window.location.search || '');
+      const token = hashParams.get('token') || searchParams.get('token');
       if (!token) return;
+
+      // 2. Immediately strip sensitive token from URL bar and browser history
+      if (window.history && window.history.replaceState) {
+        window.history.replaceState(null, '', window.location.pathname);
+      }
 
       const modal = document.getElementById('emailVerificationModal');
       const spinner = document.getElementById('verifySpinner');

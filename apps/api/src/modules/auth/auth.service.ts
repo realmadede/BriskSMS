@@ -2,7 +2,7 @@ import { dbStore, UserRecord, mapUserRow } from '../../core/store.js';
 import { hashPassword, verifyPassword, signJwt, generateSecureToken, hashToken } from '../../core/crypto.js';
 import { HttpException } from '../../core/http.js';
 import { tokenBlacklist } from '../../core/guards.js';
-import { sql, withTransaction } from '@brisksms/db';
+import { sql, withTransaction, redisClient, isSimulatedRedisOutage } from '@brisksms/db';
 import { randomUUID } from 'node:crypto';
 import { GoogleTokenVerifier, googleTokenVerifier } from './providers/google.provider.js';
 import { EmailService, emailService } from './services/email.service.js';
@@ -44,11 +44,40 @@ export class AuthService {
     this.emailService = service;
   }
 
-  clearRateLimits(): void {
+  async clearRateLimits(): Promise<void> {
     this.rateLimitBuckets.clear();
+    try {
+      if (!isSimulatedRedisOutage()) {
+        const keys = await redisClient.keys('ratelimit:auth:*');
+        for (const k of keys) {
+          await redisClient.del(k);
+        }
+      }
+    } catch {
+      // Ignore cleanup error if Redis unavailable in tests
+    }
   }
 
-  private checkRateLimit(key: string, maxAttempts: number, windowMs: number): void {
+  async checkRateLimit(key: string, maxAttempts: number, windowMs: number): Promise<void> {
+    const windowSec = Math.max(1, Math.ceil(windowMs / 1000));
+    const redisKey = `ratelimit:auth:${key}`;
+
+    try {
+      if (!isSimulatedRedisOutage()) {
+        const count = await redisClient.incr(redisKey);
+        if (count === 1) {
+          await redisClient.expire(redisKey, windowSec);
+        }
+        if (count > maxAttempts) {
+          throw new HttpException(429, 'TOO_MANY_REQUESTS', 'Rate limit exceeded. Please try again later.');
+        }
+        return;
+      }
+    } catch (err) {
+      if (err instanceof HttpException) throw err;
+      // Fallback to in-memory if Redis is offline or unavailable
+    }
+
     const now = Date.now();
     const bucket = this.rateLimitBuckets.get(key);
 
@@ -87,7 +116,7 @@ export class AuthService {
 
     const passwordHash = hashPassword(dto.password);
 
-    return withTransaction(async (tx) => {
+    const txResult = await withTransaction(async (tx) => {
       const user = await dbStore.createUser(
         {
           email: emailNorm,
@@ -156,31 +185,40 @@ export class AuthService {
         tx,
       );
 
-      // 3. Dispatch verification email via Resend
-      let verificationEmailSent = false;
-      try {
-        const dispatchRes = await this.emailService.sendVerificationEmail(
-          user.email,
-          user.fullName,
-          rawVerificationToken,
-        );
-        verificationEmailSent = dispatchRes.success;
-      } catch (emailErr) {
-        console.error('[AuthService] Verification email delivery error:', emailErr);
-      }
-
       const { passwordHash: _, ...userSafe } = user;
       return {
-        user: userSafe,
+        userSafe,
+        userEmail: user.email,
+        userFullName: user.fullName,
+        rawVerificationToken,
         organizationId,
         tokens: {
           accessToken,
           refreshToken: rawRefreshToken,
           expiresIn: 900,
         },
-        verificationEmailSent,
       };
     });
+
+    // 3. Dispatch verification email via Resend AFTER transaction is safely committed
+    let verificationEmailSent = false;
+    try {
+      const dispatchRes = await this.emailService.sendVerificationEmail(
+        txResult.userEmail,
+        txResult.userFullName,
+        txResult.rawVerificationToken,
+      );
+      verificationEmailSent = dispatchRes.success;
+    } catch (emailErr) {
+      console.error('[AuthService] Verification email delivery error:', emailErr);
+    }
+
+    return {
+      user: txResult.userSafe,
+      organizationId: txResult.organizationId,
+      tokens: txResult.tokens,
+      verificationEmailSent,
+    };
   }
 
   async login(dto: LoginDto): Promise<{
@@ -199,7 +237,7 @@ export class AuthService {
     }
 
     if (!user.passwordHash) {
-      throw new HttpException(401, 'INVALID_CREDENTIALS', 'Account is configured for Google Sign-In. Please sign in with Google.');
+      throw new HttpException(401, 'INVALID_CREDENTIALS', 'Invalid email or password');
     }
 
     const isMatch = verifyPassword(dto.password, user.passwordHash);
@@ -259,7 +297,7 @@ export class AuthService {
 
     // Rate limit: max 10 attempts per minute per IP
     if (clientIp) {
-      this.checkRateLimit(`google_auth_${clientIp}`, 10, 60_000);
+      await this.checkRateLimit(`google_auth_${clientIp}`, 10, 60_000);
     }
 
     let payload;
@@ -277,90 +315,109 @@ export class AuthService {
       throw new HttpException(400, 'GOOGLE_EMAIL_NOT_VERIFIED', 'Google account email is not verified');
     }
 
-    return withTransaction(async (tx) => {
-      // 1. Check if user exists by google_id
-      let user = await dbStore.findUserByGoogleId(payload.sub, tx);
+    const maxAttempts = 2;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        return await withTransaction(async (tx) => {
+          // 1. Check if user exists by google_id
+          let user = await dbStore.findUserByGoogleId(payload.sub, tx);
 
-      if (user) {
-        if (!user.isActive) {
-          throw new HttpException(403, 'ACCOUNT_DEACTIVATED', 'Your account has been deactivated. Please contact support.');
-        }
-      } else {
-        // 2. Check if user exists by verified email (Safe Account Linking)
-        const existingEmailUser = await dbStore.findUserByEmail(payload.email, tx);
-        if (existingEmailUser) {
-          if (!existingEmailUser.isActive) {
-            throw new HttpException(403, 'ACCOUNT_DEACTIVATED', 'Your account has been deactivated. Please contact support.');
+          if (user) {
+            if (!user.isActive) {
+              throw new HttpException(403, 'ACCOUNT_DEACTIVATED', 'Your account has been deactivated. Please contact support.');
+            }
+          } else {
+            // 2. Check if user exists by verified email (Safe Account Linking)
+            const existingEmailUser = await dbStore.findUserByEmail(payload.email, tx);
+            if (existingEmailUser) {
+              if (!existingEmailUser.isActive) {
+                throw new HttpException(403, 'ACCOUNT_DEACTIVATED', 'Your account has been deactivated. Please contact support.');
+              }
+              if (existingEmailUser.googleId && existingEmailUser.googleId !== payload.sub) {
+                throw new HttpException(
+                  409,
+                  'GOOGLE_ACCOUNT_CONFLICT',
+                  'This email address is already linked to a different Google account.',
+                );
+              }
+              user = await dbStore.linkGoogleAccount(existingEmailUser.id, payload.sub, payload.picture, tx);
+            } else {
+              // 3. Auto-provision new user with verified email
+              const fullName = payload.name?.trim() || payload.email.split('@')[0] || 'Merchant Admin';
+              user = await dbStore.createUser(
+                {
+                  email: payload.email,
+                  fullName,
+                  googleId: payload.sub,
+                  authProvider: 'GOOGLE',
+                  avatarUrl: payload.picture,
+                  isEmailVerified: true,
+                },
+                tx,
+              );
+
+              // Create default organization
+              const orgName = `${fullName}'s Workspace`;
+              const slug = orgName
+                .toLowerCase()
+                .replace(/[^a-z0-9]+/g, '-')
+                .replace(/^-|-$/g, '') || 'workspace';
+              await dbStore.createOrganization(
+                {
+                  name: orgName,
+                  slug: `${slug}-${randomUUID().slice(0, 6)}`,
+                  creatorUserId: user.id,
+                },
+                tx,
+              );
+            }
           }
-          user = await dbStore.linkGoogleAccount(existingEmailUser.id, payload.sub, payload.picture, tx);
-        } else {
-          // 3. Auto-provision new user with verified email
-          const fullName = payload.name?.trim() || payload.email.split('@')[0] || 'Merchant Admin';
-          user = await dbStore.createUser(
+
+          const userOrgs = await dbStore.getUserOrganizations(user.id, tx);
+          const primaryOrg = userOrgs[0];
+
+          const jti = randomUUID();
+          const accessToken = signJwt(
             {
-              email: payload.email,
-              fullName,
-              googleId: payload.sub,
-              authProvider: 'GOOGLE',
-              avatarUrl: payload.picture,
-              isEmailVerified: true,
+              sub: user.id,
+              email: user.email,
+              organizationId: primaryOrg?.org.id,
+              role: primaryOrg?.role,
+              jti,
             },
-            tx,
+            900,
           );
 
-          // Create default organization
-          const orgName = `${fullName}'s Workspace`;
-          const slug = orgName
-            .toLowerCase()
-            .replace(/[^a-z0-9]+/g, '-')
-            .replace(/^-|-$/g, '') || 'workspace';
-          await dbStore.createOrganization(
-            {
-              name: orgName,
-              slug: `${slug}-${randomUUID().slice(0, 6)}`,
-              creatorUserId: user.id,
+          const rawRefreshToken = generateSecureToken('bsk_ref');
+          const refreshHash = hashToken(rawRefreshToken);
+          const expiresAt = new Date(Date.now() + 30 * 86400 * 1000);
+
+          await tx`
+            INSERT INTO "refresh_tokens" ("token_hash", "user_id", "jti", "expires_at")
+            VALUES (${refreshHash}, ${user.id}, ${jti}, ${expiresAt})
+          `;
+
+          const { passwordHash: _, ...userSafe } = user;
+          return {
+            user: userSafe,
+            organizationId: primaryOrg?.org.id,
+            organizations: userOrgs.map((o) => ({ id: o.org.id, name: o.org.name, role: o.role })),
+            tokens: {
+              accessToken,
+              refreshToken: rawRefreshToken,
+              expiresIn: 900,
             },
-            tx,
-          );
+          };
+        });
+      } catch (err: any) {
+        if (attempt < maxAttempts && (err?.code === '23505' || String(err).includes('unique'))) {
+          // Retry under concurrency conflict with a fresh transaction
+          continue;
         }
+        throw err;
       }
-
-      const userOrgs = await dbStore.getUserOrganizations(user.id, tx);
-      const primaryOrg = userOrgs[0];
-
-      const jti = randomUUID();
-      const accessToken = signJwt(
-        {
-          sub: user.id,
-          email: user.email,
-          organizationId: primaryOrg?.org.id,
-          role: primaryOrg?.role,
-          jti,
-        },
-        900,
-      );
-
-      const rawRefreshToken = generateSecureToken('bsk_ref');
-      const refreshHash = hashToken(rawRefreshToken);
-      const expiresAt = new Date(Date.now() + 30 * 86400 * 1000);
-
-      await tx`
-        INSERT INTO "refresh_tokens" ("token_hash", "user_id", "jti", "expires_at")
-        VALUES (${refreshHash}, ${user.id}, ${jti}, ${expiresAt})
-      `;
-
-      const { passwordHash: _, ...userSafe } = user;
-      return {
-        user: userSafe,
-        organizationId: primaryOrg?.org.id,
-        organizations: userOrgs.map((o) => ({ id: o.org.id, name: o.org.name, role: o.role })),
-        tokens: {
-          accessToken,
-          refreshToken: rawRefreshToken,
-          expiresIn: 900,
-        },
-      };
-    });
+    }
+    throw new HttpException(500, 'INTERNAL_SERVER_ERROR', 'Google login transaction failed');
   }
 
   async verifyEmailToken(token: string): Promise<{ userId: string; verified: boolean }> {
@@ -427,8 +484,8 @@ export class AuthService {
 
     const emailNorm = email.trim().toLowerCase();
     const rateLimitKey = `resend_ev_${emailNorm}_${clientIp || ''}`;
-    // Limit to 3 resend attempts per 15 minutes per email/IP
-    this.checkRateLimit(rateLimitKey, 3, 15 * 60 * 1000);
+    // Limit to 3 resend attempts per 15 minutes per email/IP (durable via Redis)
+    await this.checkRateLimit(rateLimitKey, 3, 15 * 60 * 1000);
 
     const genericMsg = 'If an unverified account exists with that email address, a new verification link has been sent.';
 
@@ -438,21 +495,26 @@ export class AuthService {
       return { success: true, message: genericMsg };
     }
 
-    // Invalidate existing unused tokens
-    await dbStore.revokeUserVerificationTokens(user.id);
-
     // Generate fresh verification token
     const rawVerificationToken = generateSecureToken('bsk_ev', 32);
     const tokenHash = hashToken(rawVerificationToken);
     const expiryHours = parseInt(process.env.EMAIL_VERIFICATION_EXPIRY_HOURS || '24', 10);
     const expiresAt = new Date(Date.now() + expiryHours * 3600 * 1000);
 
-    await dbStore.createEmailVerificationToken({
-      userId: user.id,
-      tokenHash,
-      expiresAt,
+    // Invalidate existing unused tokens and persist new token atomically
+    await withTransaction(async (tx) => {
+      await dbStore.revokeUserVerificationTokens(user.id, tx);
+      await dbStore.createEmailVerificationToken(
+        {
+          userId: user.id,
+          tokenHash,
+          expiresAt,
+        },
+        tx,
+      );
     });
 
+    // Dispatch email AFTER transaction commits
     try {
       await this.emailService.sendVerificationEmail(user.email, user.fullName, rawVerificationToken);
     } catch (err) {

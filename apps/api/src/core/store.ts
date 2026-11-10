@@ -790,10 +790,11 @@ export class PostgresStore {
         "is_email_verified" = true,
         "updated_at" = NOW()
       WHERE "id" = ${userId}
+        AND ("google_id" IS NULL OR "google_id" = ${googleId})
       RETURNING *
     `;
     if (!rows[0]) {
-      throw new Error(`User '${userId}' not found for Google linking`);
+      throw new Error(`User '${userId}' not found or already linked to a different Google account`);
     }
     return mapUserRow(rows[0]);
   }
@@ -855,6 +856,17 @@ export class PostgresStore {
       SET "expires_at" = NOW()
       WHERE "user_id" = ${userId} AND "used_at" IS NULL AND "expires_at" > NOW()
     `;
+  }
+
+  async purgeExpiredVerificationTokens(retentionDays: number = 30, tx: SqlExecutor = sql): Promise<number> {
+    const cutoff = new Date(Date.now() - retentionDays * 86400 * 1000);
+    const rows = await tx`
+      DELETE FROM "email_verification_tokens"
+      WHERE ("expires_at" < ${cutoff})
+         OR ("used_at" IS NOT NULL AND "used_at" < ${cutoff})
+      RETURNING "id"
+    `;
+    return rows.length;
   }
 
   // --- Organizations ---

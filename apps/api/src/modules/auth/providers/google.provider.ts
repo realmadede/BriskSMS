@@ -73,19 +73,35 @@ export class DefaultGoogleTokenVerifier implements GoogleTokenVerifier {
       throw new Error(`Invalid Google token issuer: "${payload.iss}"`);
     }
 
-    // 2. Verify Audience
+    // 2. Verify Audience & Authorized Party (azp)
     const expectedAudience = this.clientId || process.env.GOOGLE_CLIENT_ID;
     if (!expectedAudience) {
       throw new Error('GOOGLE_CLIENT_ID is not configured on the server');
     }
-    if (payload.aud !== expectedAudience) {
+
+    const audList = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
+    if (!audList.includes(expectedAudience)) {
       throw new Error(`Google token audience mismatch: expected "${expectedAudience}", received "${payload.aud}"`);
     }
 
-    // 3. Verify Expiry
+    if (payload.azp && payload.azp !== expectedAudience && !audList.includes(payload.azp)) {
+      throw new Error(`Google token authorized party (azp) mismatch: expected "${expectedAudience}", received "${payload.azp}"`);
+    }
+
+    // 3. Verify Expiry, iat, and nbf (with 300s clock skew tolerance)
     const nowSec = Math.floor(Date.now() / 1000);
-    if (typeof payload.exp !== 'number' || payload.exp <= nowSec) {
+    const clockSkewSec = 300;
+
+    if (typeof payload.exp !== 'number' || payload.exp <= nowSec - clockSkewSec) {
       throw new Error(`Google token is expired (exp: ${payload.exp}, now: ${nowSec})`);
+    }
+
+    if (typeof payload.iat === 'number' && payload.iat > nowSec + clockSkewSec) {
+      throw new Error(`Google token issued in future (iat: ${payload.iat}, now: ${nowSec})`);
+    }
+
+    if (typeof payload.nbf === 'number' && payload.nbf > nowSec + clockSkewSec) {
+      throw new Error(`Google token not yet valid (nbf: ${payload.nbf}, now: ${nowSec})`);
     }
 
     // 4. Verify Email & Email Verified Claim
@@ -128,8 +144,16 @@ export class DefaultGoogleTokenVerifier implements GoogleTokenVerifier {
   }
 
   private async getGooglePublicKey(kid: string): Promise<any | null> {
-    const keys = await this.fetchJwks();
-    const jwk = keys.find((k) => k.kid === kid);
+    let keys = await this.fetchJwks();
+    let jwk = keys.find((k) => k.kid === kid);
+
+    // If key ID not found in current cache, Google might have rotated keys. Force a fresh fetch once!
+    if (!jwk && this.jwksCache) {
+      this.jwksCache = null;
+      keys = await this.fetchJwks();
+      jwk = keys.find((k) => k.kid === kid);
+    }
+
     if (!jwk) return null;
 
     try {
@@ -205,7 +229,8 @@ export class MockGoogleTokenVerifier implements GoogleTokenVerifier {
 
     // Check audience
     const expectedAudience = process.env.GOOGLE_CLIENT_ID || 'test_google_client_id';
-    if (payload.aud !== expectedAudience) {
+    const audList = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
+    if (!audList.includes(expectedAudience)) {
       throw new Error(`Google token audience mismatch: expected "${expectedAudience}", received "${payload.aud}"`);
     }
 

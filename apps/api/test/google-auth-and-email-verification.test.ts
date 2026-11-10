@@ -107,15 +107,15 @@ describe('Google Sign-In & Resend Email Verification Security Suite', () => {
     mockEmail.clear();
     authService.setGoogleVerifier(mockGoogle);
     authService.setEmailService(customEmailService);
-    authService.clearRateLimits();
+    await authService.clearRateLimits();
     process.env.GOOGLE_CLIENT_ID = 'test-client-id-brisksms.apps.googleusercontent.com';
     process.env.RESEND_API_KEY = 're_test_mock_api_key_12345';
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     mockGoogle.clear();
     mockEmail.clear();
-    authService.clearRateLimits();
+    await authService.clearRateLimits();
   });
 
   // ==========================================
@@ -404,6 +404,96 @@ describe('Google Sign-In & Resend Email Verification Security Suite', () => {
         },
       );
     });
+
+    it('rejects account linking when existing account is already linked to a different Google subject with 409 GOOGLE_ACCOUNT_CONFLICT', async () => {
+      // 1. Create account linked to google_sub_original
+      const user = await dbStore.createUser({
+        email: 'conflict.merchant@business.co.tz',
+        fullName: 'Original Google User',
+        googleId: 'google_sub_original',
+        authProvider: 'GOOGLE',
+        isEmailVerified: true,
+      });
+
+      // 2. Attempt Google login with same email but DIFFERENT Google subject
+      const conflictToken = 'conflict.google.token';
+      mockGoogle.registerToken(conflictToken, {
+        iss: 'accounts.google.com',
+        sub: 'google_sub_hijack_attempt',
+        aud: 'test-client-id-brisksms.apps.googleusercontent.com',
+        email: 'conflict.merchant@business.co.tz',
+        email_verified: true,
+        name: 'Hijack Attempt',
+        exp: Math.floor(Date.now() / 1000) + 3600,
+      });
+
+      const res = await makeRequest(
+        'POST',
+        '/v1/auth/google',
+        { 'content-type': 'application/json', host: 'localhost:3000' },
+        { idToken: conflictToken },
+      );
+
+      assert.equal(res.statusCode, 409);
+      assert.equal(res.json.error.code, 'GOOGLE_ACCOUNT_CONFLICT');
+
+      // Verify DB record unchanged
+      const dbUser = await dbStore.findUserById(user.id);
+      assert.equal(dbUser?.googleId, 'google_sub_original');
+    });
+
+    it('safely handles concurrent first-time Google sign-in attempts for the same user', async () => {
+      const concurrentToken = 'concurrent.google.token';
+      mockGoogle.registerToken(concurrentToken, {
+        iss: 'accounts.google.com',
+        sub: 'google_sub_concurrent_42',
+        aud: 'test-client-id-brisksms.apps.googleusercontent.com',
+        email: 'concurrent.google@business.co.tz',
+        email_verified: true,
+        name: 'Concurrent User',
+        exp: Math.floor(Date.now() / 1000) + 3600,
+      });
+
+      // Fire 2 concurrent login requests
+      const [res1, res2] = await Promise.all([
+        authService.loginWithGoogle(concurrentToken, '192.0.2.1'),
+        authService.loginWithGoogle(concurrentToken, '192.0.2.2'),
+      ]);
+
+      assert.ok(res1.tokens.accessToken);
+      assert.ok(res2.tokens.accessToken);
+      assert.equal(res1.user.id, res2.user.id);
+      assert.equal(res1.user.email, 'concurrent.google@business.co.tz');
+
+      // Verify exactly 1 user and 1 workspace exists in DB
+      const dbUser = await dbStore.findUserByGoogleId('google_sub_concurrent_42');
+      assert.ok(dbUser);
+      const orgs = await dbStore.getUserOrganizations(dbUser.id);
+      assert.equal(orgs.length, 1);
+    });
+
+    it('strictly rejects password login for Google-only users without password leakage (Anti-Enumeration)', async () => {
+      // Create Google-only user with NULL password
+      await dbStore.createUser({
+        email: 'google.only@company.co.tz',
+        fullName: 'Google Only',
+        googleId: 'google_sub_only_1',
+        authProvider: 'GOOGLE',
+        isEmailVerified: true,
+      });
+
+      // Attempt login via POST /v1/auth/login with password
+      const res = await makeRequest(
+        'POST',
+        '/v1/auth/login',
+        { 'content-type': 'application/json', host: 'localhost:3000' },
+        { email: 'google.only@company.co.tz', password: 'AnyPassword123!' },
+      );
+
+      assert.equal(res.statusCode, 401);
+      assert.equal(res.json.error.code, 'INVALID_CREDENTIALS');
+      assert.equal(res.json.error.message, 'Invalid email or password');
+    });
   });
 
   // ==========================================
@@ -431,8 +521,8 @@ describe('Google Sign-In & Resend Email Verification Security Suite', () => {
       const sent = mockEmail.sentEmails[0]!;
       assert.equal(sent.to, 'newmerchant@company.co.tz');
       assert.ok(sent.subject.includes('Verify your email address'));
-      assert.ok(sent.html?.includes('/verify-email?token=bsk_ev_'));
-      assert.ok(sent.text?.includes('/verify-email?token=bsk_ev_'));
+      assert.ok(sent.html?.includes('/verify-email#token=bsk_ev_'));
+      assert.ok(sent.text?.includes('/verify-email#token=bsk_ev_'));
 
       const rawToken = extractTokenFromSentEmail(0);
 
@@ -587,6 +677,34 @@ describe('Google Sign-In & Resend Email Verification Security Suite', () => {
 
       assert.equal(res.statusCode, 400);
       assert.equal(res.json.error.code, 'INVALID_VERIFICATION_TOKEN');
+    });
+
+    it('purges expired and consumed verification tokens via dbStore.purgeExpiredVerificationTokens', async () => {
+      await makeRequest(
+        'POST',
+        '/v1/auth/register',
+        { 'content-type': 'application/json', host: 'localhost:3000' },
+        {
+          email: 'purge.test@company.co.tz',
+          password: 'StrongPassword123!',
+          fullName: 'Purge Target',
+        },
+      );
+
+      const rawToken = extractTokenFromSentEmail(0);
+
+      // Force token expiration 40 days ago
+      await sql`
+        UPDATE "email_verification_tokens"
+        SET "expires_at" = NOW() - INTERVAL '40 days'
+      `;
+
+      const purgedCount = await dbStore.purgeExpiredVerificationTokens(30);
+      assert.ok(purgedCount >= 1, 'Should purge at least 1 token');
+
+      // Purged token should no longer exist
+      const tokenRecord = await dbStore.findVerificationToken(rawToken);
+      assert.equal(tokenRecord, null, 'Purged token should no longer exist in DB');
     });
   });
 
@@ -789,6 +907,157 @@ describe('Google Sign-In & Resend Email Verification Security Suite', () => {
         verifier.verifyIdToken(tamperedToken),
         /cryptographic signature verification failed/,
       );
+    });
+
+    it('supports multi-audience array and verifies kid rotation with cache refresh', async () => {
+      const kp1 = generateKeyPairSync('rsa', { modulusLength: 2048 });
+      const jwk1 = kp1.publicKey.export({ format: 'jwk' });
+      jwk1.kid = 'key-initial-01';
+      jwk1.alg = 'RS256';
+      jwk1.use = 'sig';
+
+      const kp2 = generateKeyPairSync('rsa', { modulusLength: 2048 });
+      const jwk2 = kp2.publicKey.export({ format: 'jwk' });
+      jwk2.kid = 'key-rotated-02';
+      jwk2.alg = 'RS256';
+      jwk2.use = 'sig';
+
+      const clientId = 'expected-client-id-123';
+      const verifier = new DefaultGoogleTokenVerifier(clientId);
+
+      // Verifier starts with only key1 in cache
+      (verifier as any).jwksCache = {
+        keys: [jwk1],
+        expiresAt: Date.now() + 3600_000,
+      };
+
+      // Mock fetchJwks to simulate Google having rotated keys
+      let fetchCount = 0;
+      (verifier as any).fetchJwks = async () => {
+        fetchCount++;
+        return [jwk1, jwk2];
+      };
+
+      // Token signed with rotated key2, using array audience and valid azp
+      const header = { alg: 'RS256', kid: 'key-rotated-02', typ: 'JWT' };
+      const payload = {
+        iss: 'https://accounts.google.com',
+        sub: 'rotated_user_sub',
+        aud: ['mobile-client-id', clientId],
+        azp: clientId,
+        email: 'rotated@example.com',
+        email_verified: true,
+        exp: Math.floor(Date.now() / 1000) + 3600,
+      };
+
+      const headerB64 = Buffer.from(JSON.stringify(header)).toString('base64url');
+      const payloadB64 = Buffer.from(JSON.stringify(payload)).toString('base64url');
+      const signingInput = `${headerB64}.${payloadB64}`;
+
+      const signer = createSign('RSA-SHA256');
+      signer.update(signingInput);
+      const signatureB64 = signer.sign(kp2.privateKey, 'base64url');
+      const token = `${signingInput}.${signatureB64}`;
+
+      const verified = await verifier.verifyIdToken(token);
+      assert.equal(verified.sub, 'rotated_user_sub');
+      assert.equal(verified.email, 'rotated@example.com');
+      assert.equal(fetchCount, 1, 'Should have triggered live JWKS refresh on cache miss');
+    });
+
+    it('rejects tokens with issued-in-future iat or not-yet-valid nbf', async () => {
+      const { publicKey, privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+      const jwk = publicKey.export({ format: 'jwk' });
+      jwk.kid = 'time-check-kid';
+      jwk.alg = 'RS256';
+      jwk.use = 'sig';
+
+      const verifier = new DefaultGoogleTokenVerifier('test-client-id');
+      (verifier as any).jwksCache = { keys: [jwk], expiresAt: Date.now() + 3600_000 };
+
+      const nowSec = Math.floor(Date.now() / 1000);
+
+      // 1. Future iat (> 300s clock skew)
+      const futureIatPayload = {
+        iss: 'accounts.google.com',
+        sub: 'future_iat_sub',
+        aud: 'test-client-id',
+        email: 'future@example.com',
+        email_verified: true,
+        iat: nowSec + 600,
+        exp: nowSec + 3600,
+      };
+      const header = { alg: 'RS256', kid: 'time-check-kid', typ: 'JWT' };
+      const hB64 = Buffer.from(JSON.stringify(header)).toString('base64url');
+      const pB64 = Buffer.from(JSON.stringify(futureIatPayload)).toString('base64url');
+      const s1 = createSign('RSA-SHA256');
+      s1.update(`${hB64}.${pB64}`);
+      const sig1 = s1.sign(privateKey, 'base64url');
+
+      await assert.rejects(
+        verifier.verifyIdToken(`${hB64}.${pB64}.${sig1}`),
+        /Google token issued in future/,
+      );
+
+      // 2. Not yet valid nbf (> 300s clock skew)
+      const futureNbfPayload = {
+        iss: 'accounts.google.com',
+        sub: 'future_nbf_sub',
+        aud: 'test-client-id',
+        email: 'notyet@example.com',
+        email_verified: true,
+        nbf: nowSec + 600,
+        exp: nowSec + 3600,
+      };
+      const p2B64 = Buffer.from(JSON.stringify(futureNbfPayload)).toString('base64url');
+      const s2 = createSign('RSA-SHA256');
+      s2.update(`${hB64}.${p2B64}`);
+      const sig2 = s2.sign(privateKey, 'base64url');
+
+      await assert.rejects(
+        verifier.verifyIdToken(`${hB64}.${p2B64}.${sig2}`),
+        /Google token not yet valid/,
+      );
+    });
+
+    it('rejects tokens when azp does not match expected client ID', async () => {
+      const { publicKey, privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+      const jwk = publicKey.export({ format: 'jwk' });
+      jwk.kid = 'azp-check-kid';
+      jwk.alg = 'RS256';
+      jwk.use = 'sig';
+
+      const verifier = new DefaultGoogleTokenVerifier('my-client-id');
+      (verifier as any).jwksCache = { keys: [jwk], expiresAt: Date.now() + 3600_000 };
+
+      const header = { alg: 'RS256', kid: 'azp-check-kid', typ: 'JWT' };
+      const payload = {
+        iss: 'accounts.google.com',
+        sub: 'azp_mismatch_sub',
+        aud: 'my-client-id',
+        azp: 'malicious-unauthorized-app-id',
+        email: 'azp@example.com',
+        email_verified: true,
+        exp: Math.floor(Date.now() / 1000) + 3600,
+      };
+
+      const hB64 = Buffer.from(JSON.stringify(header)).toString('base64url');
+      const pB64 = Buffer.from(JSON.stringify(payload)).toString('base64url');
+      const signer = createSign('RSA-SHA256');
+      signer.update(`${hB64}.${pB64}`);
+      const sig = signer.sign(privateKey, 'base64url');
+
+      await assert.rejects(
+        verifier.verifyIdToken(`${hB64}.${pB64}.${sig}`),
+        /Google token authorized party \(azp\) mismatch/,
+      );
+    });
+
+    it('rejects email delivery when recipient email format is invalid in EmailService', async () => {
+      const service = new EmailService(mockEmail);
+      const res = await service.sendVerificationEmail('not-an-email-format', 'Test User', 'bsk_ev_test123');
+      assert.equal(res.success, false);
+      assert.ok(res.error?.includes("Invalid recipient email address: 'not-an-email-format'"));
     });
   });
 });

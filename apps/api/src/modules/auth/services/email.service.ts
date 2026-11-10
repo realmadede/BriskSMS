@@ -17,8 +17,14 @@ export class EmailService {
   }
 
   async sendVerificationEmail(to: string, fullName: string, token: string): Promise<EmailDeliveryResult> {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!to || !emailRegex.test(to.trim())) {
+      return { success: false, error: `Invalid recipient email address: '${to}'` };
+    }
+
     const frontendBase = (process.env.FRONTEND_URL || 'https://console.brisksms.com').replace(/\/+$/, '');
-    const verificationUrl = `${frontendBase}/verify-email?token=${encodeURIComponent(token)}`;
+    // Use URL fragment (#token=...) to prevent token leakage in HTTP request lines & reverse proxy access logs (RFC 3986)
+    const verificationUrl = `${frontendBase}/verify-email#token=${encodeURIComponent(token)}`;
     const expiryHours = parseInt(process.env.EMAIL_VERIFICATION_EXPIRY_HOURS || '24', 10);
 
     const subject = 'Verify your email address - BriskSMS';
