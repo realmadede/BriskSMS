@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { hashToken } from './crypto.js';
 import {
   UserRole,
   DeviceStatus,
@@ -32,15 +33,27 @@ import {
 export interface UserRecord {
   id: string;
   email: string;
-  passwordHash: string;
+  passwordHash?: string;
   fullName: string;
   phoneNumber?: string;
   isEmailVerified: boolean;
   isActive: boolean;
   twoFactorSecret?: string;
   twoFactorEnabled?: boolean;
+  googleId?: string;
+  authProvider?: string;
+  avatarUrl?: string;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export interface EmailVerificationTokenRecord {
+  id: string;
+  userId: string;
+  tokenHash: string;
+  expiresAt: Date;
+  usedAt?: Date | null;
+  createdAt: Date;
 }
 
 export interface OrganizationRecord {
@@ -540,13 +553,16 @@ export function mapUserRow(row: Record<string, any>): UserRecord {
   return {
     id: row.id,
     email: row.email,
-    passwordHash: row.password_hash,
+    passwordHash: row.password_hash ?? undefined,
     fullName: row.full_name,
     phoneNumber: row.phone_number ?? undefined,
     isEmailVerified: Boolean(row.is_email_verified),
     isActive: Boolean(row.is_active),
     twoFactorSecret: row.two_factor_secret ?? undefined,
     twoFactorEnabled: Boolean(row.two_factor_enabled),
+    googleId: row.google_id ?? undefined,
+    authProvider: row.auth_provider ?? 'LOCAL',
+    avatarUrl: row.avatar_url ?? undefined,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
   };
@@ -715,14 +731,30 @@ export class PostgresStore {
 
   // --- Users ---
   async createUser(
-    data: { email: string; passwordHash: string; fullName: string; phoneNumber?: string },
+    data: {
+      email: string;
+      passwordHash?: string;
+      fullName: string;
+      phoneNumber?: string;
+      googleId?: string;
+      authProvider?: string;
+      avatarUrl?: string;
+      isEmailVerified?: boolean;
+    },
     tx: SqlExecutor = sql,
   ): Promise<UserRecord> {
     const emailNorm = data.email.trim().toLowerCase();
     const id = randomUUID();
     const rows = await tx`
-      INSERT INTO "users" ("id", "email", "password_hash", "full_name", "phone_number", "is_email_verified", "is_active")
-      VALUES (${id}, ${emailNorm}, ${data.passwordHash}, ${data.fullName}, ${data.phoneNumber ?? null}, false, true)
+      INSERT INTO "users" (
+        "id", "email", "password_hash", "full_name", "phone_number",
+        "is_email_verified", "is_active", "google_id", "auth_provider", "avatar_url"
+      )
+      VALUES (
+        ${id}, ${emailNorm}, ${data.passwordHash ?? null}, ${data.fullName},
+        ${data.phoneNumber ?? null}, ${Boolean(data.isEmailVerified)}, true,
+        ${data.googleId ?? null}, ${data.authProvider ?? 'LOCAL'}, ${data.avatarUrl ?? null}
+      )
       RETURNING *
     `;
     return mapUserRow(rows[0]!);
@@ -737,6 +769,92 @@ export class PostgresStore {
   async findUserById(id: string, tx: SqlExecutor = sql): Promise<UserRecord | null> {
     const rows = await tx`SELECT * FROM "users" WHERE "id" = ${id} LIMIT 1`;
     return rows[0] ? mapUserRow(rows[0]) : null;
+  }
+
+  async findUserByGoogleId(googleId: string, tx: SqlExecutor = sql): Promise<UserRecord | null> {
+    const rows = await tx`SELECT * FROM "users" WHERE "google_id" = ${googleId} LIMIT 1`;
+    return rows[0] ? mapUserRow(rows[0]) : null;
+  }
+
+  async linkGoogleAccount(
+    userId: string,
+    googleId: string,
+    avatarUrl?: string,
+    tx: SqlExecutor = sql,
+  ): Promise<UserRecord> {
+    const rows = await tx`
+      UPDATE "users"
+      SET
+        "google_id" = ${googleId},
+        "avatar_url" = COALESCE(${avatarUrl ?? null}, "avatar_url"),
+        "is_email_verified" = true,
+        "updated_at" = NOW()
+      WHERE "id" = ${userId}
+      RETURNING *
+    `;
+    if (!rows[0]) {
+      throw new Error(`User '${userId}' not found for Google linking`);
+    }
+    return mapUserRow(rows[0]);
+  }
+
+  // --- Email Verification Tokens ---
+  async createEmailVerificationToken(
+    data: { userId: string; tokenHash: string; expiresAt: Date },
+    tx: SqlExecutor = sql,
+  ): Promise<EmailVerificationTokenRecord> {
+    const id = randomUUID();
+    const rows = await tx`
+      INSERT INTO "email_verification_tokens" ("id", "user_id", "token_hash", "expires_at")
+      VALUES (${id}, ${data.userId}, ${data.tokenHash}, ${data.expiresAt})
+      RETURNING *
+    `;
+    const r = rows[0]!;
+    return {
+      id: r.id,
+      userId: r.user_id,
+      tokenHash: r.token_hash,
+      expiresAt: new Date(r.expires_at),
+      usedAt: r.used_at ? new Date(r.used_at) : null,
+      createdAt: new Date(r.created_at),
+    };
+  }
+
+  async findVerificationToken(tokenOrHash: string, tx: SqlExecutor = sql): Promise<EmailVerificationTokenRecord | null> {
+    const hash = tokenOrHash.length === 64 && /^[0-9a-f]{64}$/i.test(tokenOrHash)
+      ? tokenOrHash
+      : hashToken(tokenOrHash);
+    const rows = await tx`
+      SELECT * FROM "email_verification_tokens"
+      WHERE "token_hash" = ${hash}
+      LIMIT 1
+    `;
+    if (!rows[0]) return null;
+    const r = rows[0];
+    return {
+      id: r.id,
+      userId: r.user_id,
+      tokenHash: r.token_hash,
+      expiresAt: new Date(r.expires_at),
+      usedAt: r.used_at ? new Date(r.used_at) : null,
+      createdAt: new Date(r.created_at),
+    };
+  }
+
+  async consumeVerificationToken(tokenId: string, tx: SqlExecutor = sql): Promise<void> {
+    await tx`
+      UPDATE "email_verification_tokens"
+      SET "used_at" = NOW()
+      WHERE "id" = ${tokenId}
+    `;
+  }
+
+  async revokeUserVerificationTokens(userId: string, tx: SqlExecutor = sql): Promise<void> {
+    await tx`
+      UPDATE "email_verification_tokens"
+      SET "expires_at" = NOW()
+      WHERE "user_id" = ${userId} AND "used_at" IS NULL AND "expires_at" > NOW()
+    `;
   }
 
   // --- Organizations ---

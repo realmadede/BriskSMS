@@ -20,17 +20,17 @@ BriskSMS enforces a strict **Production-First, Security-First** configuration go
 3. **Multi-Tenant & Network Isolation:** Configuration toggles that allow private/loopback network targets (`ALLOW_PRIVATE_GATEWAY_NETWORKS`) or destructive schema manipulation (`ALLOW_PRODUCTION_DB_RESET`) must fail closed and be strictly prohibited in staging and production.
 4. **Zero Object Storage Requirement:** BriskSMS is purely database-backed. All raw payment notifications and evidence payloads are immutably stored in PostgreSQL (`raw_payment_evidence` table) as native JSONB. No S3, MinIO, Cloudflare R2, or blob storage credentials are required or supported.
 5. **Redis Transport & Protocol Architecture:** The application runtime (`packages/db/src/redis.ts`) utilizes a custom lightweight RESP protocol client over raw TCP `net.Socket` (or local Unix domain socket). It handles password authentication (`AUTH <password>`) and database selection (`SELECT <db>`), but does **not** implement in-transit TLS handshakes internally. Therefore, staging/production environments requiring encrypted Redis communication must enforce transport encryption via private VPC networking or an external TLS termination tunnel (e.g., stunnel/ghostunnel). Redis persistence (AOF/RDB) is a server-side daemon configuration directive, not an application client capability.
-6. **Authentication & Integration Blockers:**
+6. **Authentication & Identity Integrations:**
    - Active merchant authentication uses custom scrypt password hashing, HMAC-signed JWTs, and secure cookies.
-   - **Google Sign-In / Google Identity Token Validation:** **Completely absent** in the active codebase.
-   - **Email Verification via Resend / SMTP:** **Completely absent** in the active codebase. The database includes an `is_email_verified` boolean flag, but no outbound transactional email provider client exists.
-   - These missing capabilities are **explicit staging and product blockers** for workflows that require third-party identity federation or automated transactional email delivery.
+   - **Google Sign-In & OpenID Connect ID Token Verification:** Implemented natively using Node.js RS256 cryptographic verification against Google public JWKS (`https://www.googleapis.com/oauth2/v3/certs`), validating cryptographic signatures, issuer (`accounts.google.com`), audience (`GOOGLE_CLIENT_ID`), expiry timestamp, and `email_verified` claim. Supports auto-provisioning new merchant accounts and safe account linking for existing verified email accounts.
+   - **Transactional Email Verification via Resend:** Implemented with transactional email delivery adapter, Stitch-styled HTML/plain-text templates, single-use `bsk_ev_...` tokens stored as SHA-256 hashes in `email_verification_tokens`, atomic consumption with `SELECT ... FOR UPDATE`, and non-enumerating rate-limited resend.
+   - **External Staging Requirements:** Implementation is complete and covered by automated test suites. Staging operational enablement requires configuring live `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` in Google Cloud Console and `RESEND_API_KEY` with verified DNS records in Resend.
 
 ---
 
 ## 2. Exhaustive Server-Side Environment Variable Inventory
 
-Static analysis of the BriskSMS codebase reveals exactly **26 server-side environment variables** consumed by backend services and CLI tools:
+Static analysis of the BriskSMS codebase reveals exactly **31 server-side environment variables** consumed by backend services and CLI tools:
 
 | Variable Name | Consuming Service(s) | Required in Staging/Prod? | Sensitive / Secret? | Development Default | Fail-Closed Behavior | Expected Format & Validation Rules | Operational Purpose |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -60,6 +60,11 @@ Static analysis of the BriskSMS codebase reveals exactly **26 server-side enviro
 | `DISPATCH_RECOVERY_INTERVAL_MS` | `apps/worker` | Optional | No | `30000` | Falls back to 30,000 ms (30s). | Positive integer in milliseconds (e.g. 30000). | Polling interval for `DispatchRecoveryRunner` to sweep stale dispatches and expired claims across API/worker restarts. |
 | `CLIENT_ID` | `packages/zapier-app` | Optional | No | `brisksms_zapier_client` | Standard client ID. | Alphanumeric string. | OAuth 2.0 client identifier for the BriskSMS Zapier integration. |
 | `BRISKSMS_SILENT_LOGS` | `packages/db`, Tests | Optional | No | `false` | Falls back to standard logging. | Boolean string: `'true'` or `'false'`. | When `'true'`, suppresses error logs on stdout/stderr (used in automated test runners). Leave `false` in staging. |
+| `GOOGLE_CLIENT_ID` | `apps/api` | Required for Google SSO | No | None | When unset, Google ID token verification is rejected with 401. | Standard Google OAuth Client ID string (`*.apps.googleusercontent.com`). | Audience claim (`aud`) verification against Google OpenID Connect ID tokens. |
+| `GOOGLE_CLIENT_SECRET` | `apps/api` | Optional | **YES** | None | Not required for pure ID token signature verification. | Alphanumeric client secret string. | Client secret for Google OAuth authorization code exchange flows. |
+| `RESEND_API_KEY` | `apps/api` | Required for Email | **YES** | None | When unset, email verification dispatch logs warning and fails safely. | String starting with `re_`. | Bearer API token for transactional email dispatch via Resend REST API. |
+| `RESEND_FROM_EMAIL` | `apps/api` | Optional | No | `BriskSMS <verify@brisksms.com>` | Falls back to default BriskSMS verification address. | Valid RFC 5322 email string (e.g. `BriskSMS <verify@brisksms.com>`). | Default sender header for transactional verification and security notification emails. |
+| `EMAIL_VERIFICATION_EXPIRY_HOURS` | `apps/api` | Optional | No | `24` | Falls back to 24 hours. | Positive integer in hours (e.g. 24). | Token expiration lifetime for `email_verification_tokens`. |
 
 ### Client-Side / Documentation Variables (Not Consumed by Backend Services):
 - `BRISKSMS_API_KEY`: Featured in developer portal code snippets (`apps/web/src/developers.html`) showing external third-party developers how to initialize client SDKs. Not consumed by the BriskSMS backend.
@@ -152,6 +157,19 @@ PROMOTIONAL_CURFEW_START_HOUR_EAT=20
 PROMOTIONAL_CURFEW_END_HOUR_EAT=7
 ALLOW_PRIVATE_GATEWAY_NETWORKS=false
 BRISKSMS_SILENT_LOGS=false
+
+# ------------------------------------------------------------------------------
+# 7. Google Identity Sign-In (OpenID Connect / Google SSO)
+# ------------------------------------------------------------------------------
+GOOGLE_CLIENT_ID=REPLACE_WITH_STAGING_GOOGLE_CLIENT_ID.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=REPLACE_WITH_STAGING_GOOGLE_CLIENT_SECRET
+
+# ------------------------------------------------------------------------------
+# 8. Transactional Email Delivery (Resend Provider)
+# ------------------------------------------------------------------------------
+RESEND_API_KEY=re_REPLACE_WITH_STAGING_RESEND_KEY
+RESEND_FROM_EMAIL=BriskSMS Staging <verify@staging.brisksms.com>
+EMAIL_VERIFICATION_EXPIRY_HOURS=24
 ```
 
 ---

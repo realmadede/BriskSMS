@@ -213,6 +213,7 @@ export async function resetTestDatabaseState(): Promise<void> {
       "devices",
       "revoked_sessions",
       "refresh_tokens",
+      "email_verification_tokens",
       "organization_invitations",
       "users_organizations",
       "subscription_billing_invoices",

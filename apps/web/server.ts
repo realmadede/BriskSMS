@@ -67,14 +67,16 @@ const server = createServer((req: IncomingMessage, res: ServerResponse) => {
     return;
   }
 
-  // Dedicated /console, /merchant-console, /app, and /dashboard merchant routes
+  // Dedicated /console, /merchant-console, /app, /dashboard, and /verify-email merchant routes
   if (
     path === '/console' ||
     path === '/console.html' ||
     path === '/merchant-console' ||
     path === '/merchant-console.html' ||
     path === '/app' ||
-    path === '/dashboard'
+    path === '/dashboard' ||
+    path === '/verify-email' ||
+    path === '/verify-email.html'
   ) {
     if (existsSync(CONSOLE_PATH)) {
       res.writeHead(200, {

@@ -16,6 +16,14 @@ import {
   isAllowedOrigin,
 } from '../../core/cookies.js';
 
+function extractClientIp(req: RouteRequest): string {
+  const forwarded = req.headers['x-forwarded-for'];
+  if (typeof forwarded === 'string') {
+    return forwarded.split(',')[0]?.trim() || '';
+  }
+  return req.rawReq?.socket?.remoteAddress || '';
+}
+
 export function registerAuthRoutes(router: Router): void {
   // Public CSRF handshake endpoint for browser clients
   router.get('/v1/auth/csrf', async (): Promise<ApiResponse> => {
@@ -78,6 +86,40 @@ export function registerAuthRoutes(router: Router): void {
 
     const dto = req.body as unknown as LoginDto;
     const result = await authService.login(dto);
+    const csrfToken = generateCsrfToken();
+
+    const cookies: CookieToSet[] = [
+      { name: SESSION_COOKIE_NAME, value: result.tokens.accessToken, options: getSessionCookieOptions() },
+      { name: REFRESH_COOKIE_NAME, value: result.tokens.refreshToken, options: getRefreshCookieOptions() },
+      { name: CSRF_COOKIE_NAME, value: csrfToken, options: getCsrfCookieOptions() },
+    ];
+
+    return {
+      success: true,
+      data: {
+        ...result,
+        csrfToken,
+      },
+      cookies,
+    };
+  });
+
+  router.post('/v1/auth/google', async (req: RouteRequest): Promise<ApiResponse> => {
+    // Origin & Fetch Metadata defense against Login CSRF
+    if (req.headers.origin && !isAllowedOrigin(req.headers.origin as string)) {
+      throw new HttpException(403, 'CSRF_ORIGIN_MISMATCH', `Request origin '${req.headers.origin}' is not authorized`);
+    }
+    if (req.headers['sec-fetch-site'] === 'cross-site') {
+      throw new HttpException(403, 'CSRF_CROSS_SITE_FORBIDDEN', 'Cross-site login blocked by Fetch Metadata policy');
+    }
+
+    // If browser sent CSRF cookie or token, validate it
+    if (req.cookies[CSRF_COOKIE_NAME] || req.headers['x-csrf-token']) {
+      validateCsrf(req);
+    }
+
+    const idToken = ((req.body.idToken || req.body.credential) as string) || '';
+    const result = await authService.loginWithGoogle(idToken, extractClientIp(req));
     const csrfToken = generateCsrfToken();
 
     const cookies: CookieToSet[] = [
@@ -213,14 +255,52 @@ export function registerAuthRoutes(router: Router): void {
     if (req.headers['sec-fetch-site'] === 'cross-site') {
       throw new HttpException(403, 'CSRF_CROSS_SITE_FORBIDDEN', 'Cross-site request blocked by Fetch Metadata policy');
     }
-    const userId = (req.body.userId as string) || '';
-    if (!userId) {
-      throw new HttpException(400, 'INVALID_PAYLOAD', 'userId is required');
+
+    const token = (req.body.token as string) || '';
+    if (!token) {
+      if (req.body.userId) {
+        throw new HttpException(
+          400,
+          'INVALID_PAYLOAD',
+          'Verification token is required. Verifying via userId alone is strictly prohibited.',
+        );
+      }
+      throw new HttpException(400, 'INVALID_PAYLOAD', 'Verification token is required');
     }
-    await authService.verifyEmail(userId);
+
+    const result = await authService.verifyEmailToken(token);
     return {
       success: true,
-      data: { message: 'Email address verified successfully' },
+      data: {
+        message: 'Email address verified successfully',
+        userId: result.userId,
+        verified: result.verified,
+      },
+    };
+  });
+
+  router.post('/v1/auth/resend-verification', async (req: RouteRequest): Promise<ApiResponse> => {
+    if (req.headers.origin && !isAllowedOrigin(req.headers.origin as string)) {
+      throw new HttpException(403, 'CSRF_ORIGIN_MISMATCH', `Request origin '${req.headers.origin}' is not authorized`);
+    }
+    if (req.headers['sec-fetch-site'] === 'cross-site') {
+      throw new HttpException(403, 'CSRF_CROSS_SITE_FORBIDDEN', 'Cross-site request blocked by Fetch Metadata policy');
+    }
+
+    // Validate CSRF if cookie or header is present
+    if (req.cookies[CSRF_COOKIE_NAME] || req.headers['x-csrf-token']) {
+      validateCsrf(req);
+    }
+
+    const email = (req.body.email as string) || '';
+    if (!email) {
+      throw new HttpException(400, 'INVALID_PAYLOAD', 'Email address is required');
+    }
+
+    const result = await authService.resendVerificationEmail(email, extractClientIp(req));
+    return {
+      success: true,
+      data: result,
     };
   });
 

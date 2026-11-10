@@ -217,20 +217,39 @@ model Organization {
 model User {
   id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   email            String   @unique @db.VarChar(255)
-  passwordHash     String   @map("password_hash") @db.VarChar(255)
+  passwordHash     String?  @map("password_hash") @db.VarChar(255)
   fullName         String   @map("full_name") @db.VarChar(255)
   phoneNumber      String?  @map("phone_number") @db.VarChar(50)
   isEmailVerified  Boolean  @default(false) @map("is_email_verified")
   isActive         Boolean  @default(true) @map("is_active")
   twoFactorSecret  String?  @map("two_factor_secret") @db.VarChar(100)
   twoFactorEnabled Boolean  @default(false) @map("two_factor_enabled")
+  googleId         String?  @unique @map("google_id") @db.VarChar(255)
+  authProvider     String   @default("LOCAL") @map("auth_provider") @db.VarChar(32)
+  avatarUrl        String?  @map("avatar_url") @db.Text
   createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt        DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  memberships   UserOrganization[]
-  refreshTokens RefreshToken[]
+  memberships        UserOrganization[]
+  refreshTokens      RefreshToken[]
+  verificationTokens EmailVerificationToken[]
 
   @@map("users")
+}
+
+model EmailVerificationToken {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @unique @map("token_hash") @db.VarChar(64)
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(6)
+  usedAt    DateTime? @map("used_at") @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tokenHash, expiresAt])
+  @@map("email_verification_tokens")
 }
 
 model UserOrganization {

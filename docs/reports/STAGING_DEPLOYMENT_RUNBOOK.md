@@ -94,6 +94,13 @@ PROMOTIONAL_CURFEW_START_HOUR_EAT=20
 PROMOTIONAL_CURFEW_END_HOUR_EAT=7
 ALLOW_PRIVATE_GATEWAY_NETWORKS=false
 BRISKSMS_SILENT_LOGS=false
+
+# 7. Google Identity & Resend Transactional Email
+GOOGLE_CLIENT_ID=replace_with_staging_google_client_id.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=replace_with_staging_google_client_secret
+RESEND_API_KEY=re_replace_with_staging_resend_api_key
+RESEND_FROM_EMAIL=BriskSMS Staging <verify@staging.brisksms.com>
+EMAIL_VERIFICATION_EXPIRY_HOURS=24
 EOF
 ```
 
@@ -101,7 +108,7 @@ EOF
 > Ensure permissions are restricted: `chmod 600 /opt/brisksms/.env`.
 
 ### Step 4: Execute Database Migrations
-Run the transactional migration runner against the staging database. Exactly 4 migrations must apply:
+Run the transactional migration runner against the staging database. Exactly 5 migrations must apply:
 ```bash
 # Check current migration status
 bun run db:status
@@ -116,6 +123,7 @@ bun run db:migrate
 [BriskSMS DB] Applied migration: 20261107010000_smsgate_keys_and_webhook_events
 [BriskSMS DB] Applied migration: 20261109000000_durable_message_idempotency
 [BriskSMS DB] Applied migration: 20261109010000_message_dispatch_recovery
+[BriskSMS DB] Applied migration: 20261110000000_email_verification_and_google_auth
 [BriskSMS DB] Migrations up to date.
 ```
 
@@ -271,6 +279,18 @@ curl -s -i https://staging-api.brisksms.com/v1/health
      -H "X-Timestamp: 1794260000" \
      -H "Content-Type: application/json" \
      -d '{"messageId":"MSG_UUID","status":"DELIVERED"}'
+   ```
+6. **Email Verification Token Consumption:**
+   ```bash
+   curl -s -i -X POST https://staging-api.brisksms.com/v1/auth/verify-email \
+     -H "Content-Type: application/json" \
+     -d '{"token":"bsk_ev_TOKEN_FROM_EMAIL"}'
+   ```
+7. **Google Identity Sign-In (OpenID Connect SSO):**
+   ```bash
+   curl -s -i -X POST https://staging-api.brisksms.com/v1/auth/google \
+     -H "Content-Type: application/json" \
+     -d '{"idToken":"VALID_GOOGLE_ID_TOKEN"}'
    ```
 
 ---

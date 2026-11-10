@@ -715,7 +715,11 @@
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
           Pair Android Device
         </button>
-        <button class="btn btn-outline" onclick="handleLogout()" title="End authenticated browser session">
+        <button id="signInNavBtn" class="btn btn-primary" onclick="openAuthModal()" style="display: none;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+          Sign In
+        </button>
+        <button id="signOutNavBtn" class="btn btn-outline" onclick="handleLogout()" title="End authenticated browser session">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
           Sign Out
         </button>
@@ -1186,6 +1190,118 @@
     </div>
   </div>
 
+  <!-- Merchant Authentication Modal (Sign In / Register / Google SSO) -->
+  <div class="modal-overlay" id="authModal">
+    <div class="modal-card" style="max-width: 440px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <span style="font-size: 0.8rem; font-weight: 700; color: var(--text-sub); text-transform: uppercase; letter-spacing: 0.05em;">Authentication</span>
+        <button class="btn btn-outline" style="padding: 0.2rem 0.5rem; font-size: 0.75rem; border: none;" onclick="closeAuthModal()">✕</button>
+      </div>
+      <div style="display: flex; gap: 0.5rem; background: var(--bg-bone); padding: 0.35rem; border-radius: 10px; margin-bottom: 1.5rem; border: 1px solid var(--border-subtle);">
+        <button id="authTabSignIn" class="btn" style="flex: 1; padding: 0.5rem; font-size: 0.875rem; background: #FFFFFF; font-weight: 700; border: none; box-shadow: 0 1px 3px rgba(0,0,0,0.05);" onclick="setAuthTab('signin')">Sign In</button>
+        <button id="authTabRegister" class="btn" style="flex: 1; padding: 0.5rem; font-size: 0.875rem; background: transparent; font-weight: 600; border: none; color: var(--text-sub);" onclick="setAuthTab('register')">Register</button>
+      </div>
+
+      <!-- Sign In Form -->
+      <div id="authSignInPane">
+        <div class="modal-title">Welcome Back</div>
+        <div class="modal-desc">Sign in to your BriskSMS enterprise console.</div>
+
+        <div id="authSignInError" style="display: none; background: #FEF2F2; color: #991B1B; padding: 0.75rem; border-radius: 8px; font-size: 0.85rem; margin-bottom: 1rem; border: 1px solid #FCA5A5;"></div>
+
+        <div class="form-group">
+          <label class="form-label">Email Address</label>
+          <input type="email" class="form-input" id="signInEmail" placeholder="admin@business.co.tz">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Password</label>
+          <input type="password" class="form-input" id="signInPassword" placeholder="••••••••">
+        </div>
+        <button class="btn btn-primary" style="width: 100%; justify-content: center; margin-top: 0.5rem;" onclick="submitEmailPasswordLogin()">Sign In with Email</button>
+      </div>
+
+      <!-- Register Form -->
+      <div id="authRegisterPane" style="display: none;">
+        <div class="modal-title">Create Workspace</div>
+        <div class="modal-desc">Start reconciling payments and sending bulk SMS with your cellular SIM.</div>
+
+        <div id="authRegisterError" style="display: none; background: #FEF2F2; color: #991B1B; padding: 0.75rem; border-radius: 8px; font-size: 0.85rem; margin-bottom: 1rem; border: 1px solid #FCA5A5;"></div>
+
+        <div class="form-group">
+          <label class="form-label">Full Name</label>
+          <input type="text" class="form-input" id="registerFullName" placeholder="Raphael Bagomwa">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Business / Workspace Name</label>
+          <input type="text" class="form-input" id="registerOrgName" placeholder="Alpha Traders Ltd">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Business Email</label>
+          <input type="email" class="form-input" id="registerEmail" placeholder="admin@business.co.tz">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Password (min 8 chars)</label>
+          <input type="password" class="form-input" id="registerPassword" placeholder="••••••••">
+        </div>
+        <button class="btn btn-primary" style="width: 100%; justify-content: center; margin-top: 0.5rem;" onclick="submitEmailPasswordRegister()">Create Account</button>
+      </div>
+
+      <!-- Pending Verification Pane -->
+      <div id="authPendingPane" style="display: none; text-align: center;">
+        <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">✉️</div>
+        <div class="modal-title">Check Your Email</div>
+        <div class="modal-desc" id="pendingVerificationEmailDesc">We've dispatched a secure verification link to your email. Click the link to activate your workspace.</div>
+        <div class="form-group" style="text-align: left; margin-top: 1.5rem;">
+          <label class="form-label">Didn't receive the email?</label>
+          <button class="btn btn-outline" style="width: 100%; justify-content: center;" onclick="requestResendVerification()">Resend Verification Email</button>
+        </div>
+        <button class="btn btn-outline" style="width: 100%; justify-content: center; margin-top: 0.5rem;" onclick="setAuthTab('signin')">Back to Sign In</button>
+      </div>
+
+      <!-- Social / Google SSO Divider -->
+      <div id="authDividerGroup" style="margin: 1.5rem 0 1rem; position: relative; text-align: center;">
+        <div style="position: absolute; top: 50%; left: 0; right: 0; height: 1px; background: var(--border-subtle);"></div>
+        <span style="position: relative; background: #FFFFFF; padding: 0 0.75rem; font-size: 0.75rem; color: var(--text-sub); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">Or continue with</span>
+      </div>
+
+      <!-- Google Sign In Button -->
+      <div id="authGoogleGroup">
+        <button class="btn btn-outline" style="width: 100%; justify-content: center; gap: 0.6rem; font-weight: 600;" onclick="triggerGoogleSignIn()">
+          <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/></svg>
+          Google Identity SSO
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Email Verification Status Modal (Triggered by ?token=... or /verify-email) -->
+  <div class="modal-overlay" id="emailVerificationModal">
+    <div class="modal-card" style="max-width: 440px; text-align: center;">
+      <div id="verifySpinner">
+        <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">🔄</div>
+        <div class="modal-title">Verifying Your Email...</div>
+        <div class="modal-desc">Connecting to BriskSMS identity verification service.</div>
+      </div>
+      <div id="verifySuccess" style="display: none;">
+        <div style="font-size: 2.5rem; margin-bottom: 0.5rem; color: #059669;">✅</div>
+        <div class="modal-title">Email Verified!</div>
+        <div class="modal-desc">Your email address has been verified. Your merchant workspace is active.</div>
+        <button class="btn btn-primary" style="width: 100%; justify-content: center; margin-top: 1rem;" onclick="closeVerificationModal(true)">Enter Console</button>
+      </div>
+      <div id="verifyError" style="display: none;">
+        <div style="font-size: 2.5rem; margin-bottom: 0.5rem; color: #DC2626;">⚠️</div>
+        <div class="modal-title">Verification Failed</div>
+        <div class="modal-desc" id="verifyErrorMessage">This verification link is invalid, expired, or has already been used.</div>
+        <div class="form-group" style="text-align: left; margin-top: 1.25rem;">
+          <label class="form-label">Request Fresh Verification Link</label>
+          <input type="email" class="form-input" id="verifyResendEmail" placeholder="your@email.com">
+        </div>
+        <button class="btn btn-primary" style="width: 100%; justify-content: center; margin-top: 0.5rem;" onclick="resendFromVerifyModal()">Send New Link</button>
+        <button class="btn btn-outline" style="width: 100%; justify-content: center; margin-top: 0.5rem;" onclick="closeVerificationModal(false)">Close</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Floating Toast Notifications -->
   <div class="toast-container" id="toastContainer"></div>
 
@@ -1438,6 +1554,12 @@
       if (planEl) planEl.textContent = `Plan: ${(org.plan || 'STANDARD').toUpperCase()}`;
       const quotaEl = document.getElementById('sidebarDeviceQuota');
       if (quotaEl) quotaEl.textContent = `${org.deviceCount || 0} / ${org.deviceQuota || 2} Devices Connected`;
+
+      const signInBtn = document.getElementById('signInNavBtn');
+      const signOutBtn = document.getElementById('signOutNavBtn');
+      const isAuthenticated = Boolean(currentSession?.user?.email || (currentSession?.user?.id && currentSession?.user?.id !== 'usr_demo'));
+      if (signInBtn) signInBtn.style.display = isAuthenticated ? 'none' : 'inline-flex';
+      if (signOutBtn) signOutBtn.style.display = isAuthenticated ? 'inline-flex' : 'none';
     }
 
     async function loadSubscriptionsCatalog() {
@@ -2271,12 +2393,254 @@
       }, 750);
     }
 
+    // Merchant Authentication & Email Verification Modal Logic
+    function openAuthModal(defaultTab = 'signin') {
+      const modal = document.getElementById('authModal');
+      if (modal) modal.classList.add('active');
+      setAuthTab(defaultTab);
+    }
+
+    function closeAuthModal() {
+      const modal = document.getElementById('authModal');
+      if (modal) modal.classList.remove('active');
+    }
+
+    function setAuthTab(tab) {
+      const signInTab = document.getElementById('authTabSignIn');
+      const registerTab = document.getElementById('authTabRegister');
+      const signInPane = document.getElementById('authSignInPane');
+      const registerPane = document.getElementById('authRegisterPane');
+      const pendingPane = document.getElementById('authPendingPane');
+      const divider = document.getElementById('authDividerGroup');
+      const google = document.getElementById('authGoogleGroup');
+
+      const errSignIn = document.getElementById('authSignInError');
+      const errRegister = document.getElementById('authRegisterError');
+      if (errSignIn) errSignIn.style.display = 'none';
+      if (errRegister) errRegister.style.display = 'none';
+
+      if (tab === 'signin') {
+        if (signInTab) { signInTab.style.background = '#FFFFFF'; signInTab.style.fontWeight = '700'; signInTab.style.color = 'var(--text-main)'; }
+        if (registerTab) { registerTab.style.background = 'transparent'; registerTab.style.fontWeight = '600'; registerTab.style.color = 'var(--text-sub)'; }
+        if (signInPane) signInPane.style.display = 'block';
+        if (registerPane) registerPane.style.display = 'none';
+        if (pendingPane) pendingPane.style.display = 'none';
+        if (divider) divider.style.display = 'block';
+        if (google) google.style.display = 'block';
+      } else if (tab === 'register') {
+        if (signInTab) { signInTab.style.background = 'transparent'; signInTab.style.fontWeight = '600'; signInTab.style.color = 'var(--text-sub)'; }
+        if (registerTab) { registerTab.style.background = '#FFFFFF'; registerTab.style.fontWeight = '700'; registerTab.style.color = 'var(--text-main)'; }
+        if (signInPane) signInPane.style.display = 'none';
+        if (registerPane) registerPane.style.display = 'block';
+        if (pendingPane) pendingPane.style.display = 'none';
+        if (divider) divider.style.display = 'block';
+        if (google) google.style.display = 'block';
+      } else if (tab === 'pending') {
+        if (signInPane) signInPane.style.display = 'none';
+        if (registerPane) registerPane.style.display = 'none';
+        if (pendingPane) pendingPane.style.display = 'block';
+        if (divider) divider.style.display = 'none';
+        if (google) google.style.display = 'none';
+      }
+    }
+
+    async function submitEmailPasswordLogin() {
+      const email = document.getElementById('signInEmail')?.value?.trim();
+      const password = document.getElementById('signInPassword')?.value;
+      const errEl = document.getElementById('authSignInError');
+      if (!email || !password) {
+        if (errEl) { errEl.textContent = 'Please enter both email and password.'; errEl.style.display = 'block'; }
+        return;
+      }
+      try {
+        if (errEl) errEl.style.display = 'none';
+        await ensureCsrfToken();
+        const res = await apiFetch('/v1/auth/login', {
+          method: 'POST',
+          body: JSON.stringify({ email, password })
+        });
+        closeAuthModal();
+        await bootstrapMerchantSession();
+        updateOrgDisplay();
+        showToast('Signed in successfully', 'success');
+        await Promise.allSettled([
+          loadReconciliationFeed(),
+          loadReviewQueue(),
+          loadDeviceFleet(),
+          loadMessagingData(),
+          updateKpis()
+        ]);
+      } catch (err) {
+        if (errEl) {
+          errEl.textContent = err.message || 'Authentication failed. Please check your credentials.';
+          errEl.style.display = 'block';
+        }
+      }
+    }
+
+    async function submitEmailPasswordRegister() {
+      const fullName = document.getElementById('registerFullName')?.value?.trim();
+      const orgName = document.getElementById('registerOrgName')?.value?.trim();
+      const email = document.getElementById('registerEmail')?.value?.trim();
+      const password = document.getElementById('registerPassword')?.value;
+      const errEl = document.getElementById('authRegisterError');
+
+      if (!email || !password || !fullName) {
+        if (errEl) { errEl.textContent = 'Please fill out all required fields.'; errEl.style.display = 'block'; }
+        return;
+      }
+      if (password.length < 8) {
+        if (errEl) { errEl.textContent = 'Password must be at least 8 characters.'; errEl.style.display = 'block'; }
+        return;
+      }
+
+      try {
+        if (errEl) errEl.style.display = 'none';
+        await ensureCsrfToken();
+        const res = await apiFetch('/v1/auth/register', {
+          method: 'POST',
+          body: JSON.stringify({ email, password, fullName, orgName: orgName || undefined })
+        });
+        const pendingDesc = document.getElementById('pendingVerificationEmailDesc');
+        if (pendingDesc) {
+          pendingDesc.textContent = `We've dispatched a secure verification link to ${email}. Click the link to activate your workspace.`;
+        }
+        setAuthTab('pending');
+        showToast('Account created! Please verify your email.', 'info');
+      } catch (err) {
+        if (errEl) {
+          errEl.textContent = err.message || 'Registration failed. Please try again.';
+          errEl.style.display = 'block';
+        }
+      }
+    }
+
+    async function requestResendVerification() {
+      const email = document.getElementById('registerEmail')?.value?.trim() ||
+                    document.getElementById('signInEmail')?.value?.trim();
+      if (!email) {
+        showToast('Please enter your registered email address.', 'warning');
+        return;
+      }
+      try {
+        await ensureCsrfToken();
+        await apiFetch('/v1/auth/resend-verification', {
+          method: 'POST',
+          body: JSON.stringify({ email })
+        });
+        showToast('Verification email dispatched. Please check your inbox.', 'success');
+      } catch (err) {
+        showToast(err.message || 'Could not resend email. Please try again later.', 'error');
+      }
+    }
+
+    async function triggerGoogleSignIn() {
+      let token = null;
+      if (window.google?.accounts?.id) {
+        window.google.accounts.id.prompt();
+        return;
+      }
+      token = await showBriskDialog({
+        title: 'Google Identity Sign-In',
+        message: 'Provide your Google ID token to authenticate with Google SSO:',
+        inputPlaceholder: 'eyJhbGciOiJSUzI1NiIsImtpZCI...',
+        confirmText: 'Sign In with Google'
+      });
+      if (!token) return;
+
+      try {
+        await ensureCsrfToken();
+        const res = await apiFetch('/v1/auth/google', {
+          method: 'POST',
+          body: JSON.stringify({ idToken: token })
+        });
+        closeAuthModal();
+        await bootstrapMerchantSession();
+        updateOrgDisplay();
+        showToast(`Signed in as ${res?.user?.email || 'Google User'}`, 'success');
+        await Promise.allSettled([
+          loadReconciliationFeed(),
+          loadReviewQueue(),
+          loadDeviceFleet(),
+          loadMessagingData(),
+          updateKpis()
+        ]);
+      } catch (err) {
+        showToast(err.message || 'Google authentication failed', 'error');
+      }
+    }
+
+    async function checkUrlVerificationToken() {
+      const params = new URLSearchParams(window.location.search);
+      const token = params.get('token');
+      if (!token) return;
+
+      const modal = document.getElementById('emailVerificationModal');
+      const spinner = document.getElementById('verifySpinner');
+      const success = document.getElementById('verifySuccess');
+      const error = document.getElementById('verifyError');
+      const errMsg = document.getElementById('verifyErrorMessage');
+
+      if (modal) modal.classList.add('active');
+      if (spinner) spinner.style.display = 'block';
+      if (success) success.style.display = 'none';
+      if (error) error.style.display = 'none';
+
+      try {
+        await ensureCsrfToken();
+        await apiFetch('/v1/auth/verify-email', {
+          method: 'POST',
+          body: JSON.stringify({ token })
+        });
+        if (spinner) spinner.style.display = 'none';
+        if (success) success.style.display = 'block';
+      } catch (err) {
+        if (spinner) spinner.style.display = 'none';
+        if (error) error.style.display = 'block';
+        if (errMsg) errMsg.textContent = err.message || 'This verification link is invalid, expired, or has already been used.';
+      }
+    }
+
+    async function resendFromVerifyModal() {
+      const email = document.getElementById('verifyResendEmail')?.value?.trim();
+      if (!email) {
+        showToast('Please provide an email address.', 'warning');
+        return;
+      }
+      try {
+        await ensureCsrfToken();
+        await apiFetch('/v1/auth/resend-verification', {
+          method: 'POST',
+          body: JSON.stringify({ email })
+        });
+        showToast('New verification email dispatched. Check your inbox.', 'success');
+        closeVerificationModal(false);
+      } catch (err) {
+        showToast(err.message || 'Failed to dispatch verification email.', 'error');
+      }
+    }
+
+    function closeVerificationModal(refresh = false) {
+      const modal = document.getElementById('emailVerificationModal');
+      if (modal) modal.classList.remove('active');
+      if (window.history && window.history.replaceState) {
+        window.history.replaceState(null, '', window.location.pathname);
+      }
+      if (refresh) {
+        bootstrapMerchantSession().then(() => {
+          updateOrgDisplay();
+          loadReconciliationFeed();
+        });
+      }
+    }
+
     // Initialize On Load
     document.addEventListener('DOMContentLoaded', async () => {
       await bootstrapMerchantSession();
       updateOrgDisplay();
       setupInfiniteScroll();
       renderLivePreview();
+      await checkUrlVerificationToken();
       await Promise.allSettled([
         loadReconciliationFeed(),
         loadReviewQueue(),

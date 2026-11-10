@@ -50,6 +50,9 @@ graph TD
 - [x] **SMSGate Webhook Authentication:** Requires valid HMAC-SHA256 signature (`X-Signature`) computed over `rawBody + timestamp` matching `currentKey` or `previousKey`.
 - [x] **Developer Key Plaintext Never Persisted:** API keys are hashed with `SHA-256` before persistence. The plaintext is returned only once at creation time.
 - [x] **Cryptographic Device Pairing:** 5-minute single-use token (`bsk_pair_...` via `POST /v1/devices/pairing-token`) exchanged with Android Keystore hardware public key (`POST /v1/devices/pair`) enforces atomic consumption via row-level locks.
+- [x] **Google Identity OpenID Connect Verification:** Validates RS256 token signatures against Google JWKS (`createPublicKey` with format `'jwk'`), checks issuer (`accounts.google.com`), audience (`GOOGLE_CLIENT_ID`), expiry, and `email_verified: true`. Safe account linking matches verified emails without destroying scrypt password hashes.
+- [x] **Single-Use Email Verification Tokens:** `email_verification_tokens` table stores `token_hash` (SHA-256). Consumption executes within ACID transaction with row-level locks (`SELECT ... FOR UPDATE`), strictly rejects replay or expired tokens, and invalidates older tokens.
+- [x] **Anti-Enumeration Email Resend:** `POST /v1/auth/resend-verification` returns generic confirmation for nonexistent or already-verified accounts, preventing merchant enumeration, and enforces IP rate limiting (3 requests / 15 min).
 
 ---
 
@@ -92,7 +95,7 @@ graph TD
 | Checkpoint | Verified By | Date | Result |
 | :--- | :--- | :--- | :--- |
 | **CI Build & Automated Tests** | GitHub Actions Run #19 (`42728702647`) | 2026-11-10 | **SUCCESS (259/259 Tests Passed)** |
-| **Local Full Workspace Tests** | `bun test` with local PostgreSQL 18 & Redis 7 | 2026-11-10 | **SUCCESS (259/259 Tests Passed in 36.74s)** |
+| **Local Full Workspace Tests** | `bun test` with local PostgreSQL 18 & Redis 7 | 2026-11-10 | **SUCCESS (546/546 Tests Passed in 84.19s across 44 files)** |
 | **Typecheck & Monorepo Bundling** | `tsc -b && bun run build` | 2026-11-10 | **SUCCESS (0 Errors)** |
 | **Cryptographic Boundary Independence** | Pre-Flight Security Audit | 2026-11-10 | **VERIFIED** |
 | **Staging Deployment Configuration** | `STAGING_ENVIRONMENT_CONFIGURATION.md` | 2026-11-10 | **VERIFIED** |
@@ -101,9 +104,10 @@ graph TD
 
 ---
 
-## 7. Implementation Blockers
+## 7. Operational & Hardware Requirements Prior to Staging Deployment
 
-The following items are completely absent from the codebase and represent explicit product/staging blockers:
-1. **Google Sign-In / Google Identity Token Verification:** No endpoint or validation logic exists.
-2. **Resend / Transactional Email Delivery:** No email delivery client exists for registration or password reset emails.
+The following items represent operational and physical hardware requirements prior to commercial staging launch:
+1. **Google Identity Staging Credentials:** The backend RS256 token verification engine is complete and tested. Staging operation requires provisioning a Google Cloud Project with OAuth 2.0 Web Client credentials (`GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`).
+2. **Resend Staging API Key & Domain Verification:** The Resend transactional email adapter is complete and tested. Staging operation requires configuring live `RESEND_API_KEY` and DNS domain verification for `staging.brisksms.com`.
 3. **Physical Hardware & SIM Matrix:** Physical Android devices and Tanzanian carrier SIM cards must be provisioned for cellular testing.
+4. **Staging Cloud Infrastructure:** Staging compute VM, managed PostgreSQL 16+, and Redis 7+ are not yet provisioned.

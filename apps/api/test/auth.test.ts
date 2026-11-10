@@ -31,8 +31,8 @@ describe('Phase 1: AuthModule & Identity Lifecycle', () => {
 
     // Verify password is not plaintext
     const storedUser = await dbStore.findUserById(result.user.id);
-    assert.ok(storedUser?.passwordHash.startsWith('scrypt:'));
-    assert.ok(!storedUser?.passwordHash.includes('StrongPassword123!'));
+    assert.ok(storedUser?.passwordHash?.startsWith('scrypt:'));
+    assert.ok(!storedUser?.passwordHash?.includes('StrongPassword123!'));
   });
 
   it('should reject registration with weak passwords less than 8 characters', async () => {

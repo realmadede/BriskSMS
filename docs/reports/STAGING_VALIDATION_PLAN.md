@@ -183,6 +183,9 @@ The device pairing implementation adheres to a **cryptographic, single-use, 5-mi
 | **STG-AUTH-03** | HMAC-Signed Double-Submit CSRF Verification | State-mutating `POST` without `X-CSRF-Token` | Blocked with `403 CSRF_TOKEN_MISSING`. Valid matching cookie + header allowed. |
 | **STG-AUTH-04** | Atomic Refresh Token Rotation & Concurrency Lock | `POST /v1/auth/refresh` using cookie | Issues new access token & rotates refresh token. Old refresh token immediately invalidated in `refresh_tokens`. Concurrent reuse blocked via `SELECT ... FOR UPDATE`. |
 | **STG-AUTH-05** | Complete Logout & Session Invalidation | `POST /v1/auth/logout` | Emits `Max-Age=0` clearing cookies. Invalids JTI in `revoked_sessions` and revokes DB refresh token. Subsequent calls with old cookie return `401`. |
+| **STG-AUTH-06** | Google Identity SSO Token Verification | `POST /v1/auth/google` with RS256 token | Verifies signature, audience, issuer, expiry, and email_verified claim. Auto-provisions merchant workspace or safely links existing account without password loss. Sets HttpOnly cookies. |
+| **STG-AUTH-07** | Transactional Email Verification via Resend | `POST /v1/auth/register` & `POST /v1/auth/verify-email` | Dispatches single-use `bsk_ev_...` token via Resend adapter. User clicks `/verify-email?token=...`; atomically consumes token with `SELECT ... FOR UPDATE` and sets `is_email_verified = true`. Replay rejected with `400`. |
+| **STG-AUTH-08** | Non-Enumerating Email Verification Resend | `POST /v1/auth/resend-verification` | Throttled to 3 requests per 15 min. Invalidates old tokens. Returns identical generic success response for missing or verified accounts (anti-enumeration). |
 
 ### Workstream 2: Product A — Payment Intelligence & Companion Ingestion
 | Test ID | Test Scenario | Execution Method | Expected Verifiable Result |
@@ -237,11 +240,11 @@ The SMSGate integration distinguishes between two modes:
 
 ---
 
-## 8. Explicit Staging & Product Implementation Blockers
+## 8. Explicit Staging & External Configuration Blockers
 
-The following accepted product requirements are **completely absent** in the active codebase and must be addressed prior to commercial production launch:
-1. **Google Sign-In / Google Identity Token Verification:** Completely absent in backend API. No Google OAuth endpoints or token verification logic exist.
-2. **Transactional Email Delivery via Resend / SMTP:** Completely absent. The system records `is_email_verified`, but cannot send verification emails or password reset messages.
+The following items represent operational and physical hardware requirements prior to commercial staging and production launch:
+1. **Google Identity OAuth Credentials (Configuration Requirement):** The Google Sign-In backend implementation and RS256 token verification engine are complete and tested. Staging operation requires provisioning a Google Cloud Project with OAuth 2.0 Web Client credentials (`GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`) and authorized JavaScript origins for `staging-console.brisksms.com`.
+2. **Resend Transactional Email API Key & DNS Verification (Configuration Requirement):** The Resend transactional email provider and token lifecycle are complete and tested. Staging operation requires acquiring a live `RESEND_API_KEY` and configuring SPF/DKIM DNS records for `staging.brisksms.com`.
 3. **Physical Cellular Hardware & Carrier SIMs:** Staging cannot complete end-to-end cellular validation without physical Android devices and active Tanzanian carrier SIMs (Vodacom, Tigo, Airtel, Halotel).
 4. **Staging Cloud Compute & Persistence:** Staging compute VM, managed PostgreSQL 16+, and Redis 7+ are not yet provisioned.
 
