@@ -73,7 +73,11 @@ export interface StkPushCallbackPayload {
   success: boolean;
   providerReference?: string;
   amountCents?: bigint | number;
+  currency?: string;
   phoneNumber?: string;
+  referenceNumber?: string;
+  customerName?: string;
+  providerTimestamp?: Date;
   resultCode?: number;
   resultDescription?: string;
   rawPayload?: Record<string, unknown>;

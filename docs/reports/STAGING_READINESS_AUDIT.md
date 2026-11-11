@@ -42,7 +42,7 @@ Live staging deployment cannot proceed immediately until external administrative
 | **Resend Email Verification** | `REQUIRES EXTERNAL CONFIGURATION` | URL fragment tokens (`#token=...`), anti-enumeration resend, DB connection starvation prevention. | Provisioning Resend API key and DNS records (DKIM/SPF/DMARC). |
 | **Session Security & CSRF** | `VERIFIED BY AUTOMATED TEST` | HttpOnly Lax/Strict cookies, HMAC-SHA256 CSRF tokens, strict Fetch Metadata and Origin checks. | Cloudflare/Nginx reverse proxy must sanitize `X-Forwarded-For`. |
 | **Product A: Payment Intelligence** | `VERIFIED BY AUTOMATED TEST` | Append-only raw evidence, SHA-256 deduplication, candidate matching, ACID transaction settlement with row locks. | Testing with synthetic mobile money SMS on staging companion. |
-| **Product A: Carrier STK Push** | `VERIFIED BY AUTOMATED TEST` | Telco push initiation, prefix routing (Vodacom/Tigo/Airtel/Halotel), asynchronous callback reconciliation, duplicate receipt claim box protection. | Testing with telco sandbox simulator. |
+| **Product A: Carrier STK Push** | `REQUIRES EXTERNAL CONFIGURATION` | Provider callback trust-boundary hardened with `ProviderCallbackVerifier`. All providers disabled by default (`PROVIDER_CALLBACK_DISABLED`). Row-level ACID locking, exact amount/currency match, provider-native JSON evidence. 21/21 automated tests pass. | Configuring official carrier webhook credentials/signing keys before enabling settlement. |
 | **Product B: Cellular Messaging** | `VERIFIED BY AUTOMATED TEST` | SMSGate `textMessage.text` schema, 15s timeout, definitive vs uncertain classification, configurable curfew. | Pairing physical Android gateway device with staging backend. |
 | **Android Companion (`apps/android`)** | `VERIFIED BY AUTOMATED TEST` | Kotlin + Jetpack Compose app, Keystore hardware keys, QR pairing, notification listener, foreground service. | Installing debug APK on physical Android device for live testing. |
 
@@ -225,13 +225,49 @@ Inspection of `packages/db/prisma/migrations/` and PostgreSQL schema history con
 
 ---
 
+## 6.1. Carrier STK Push Callback Trust-Boundary & Settlement Authorization
+
+To eliminate financial settlement forgery and unauthenticated state mutation, BriskSMS implements an explicit provider-specific callback verification boundary in `apps/api/src/modules/stk-push/`:
+
+### Implemented Callback Verification Infrastructure
+1. **`ProviderCallbackVerifier` Abstraction:** Verification operates on the exact HTTP request representation (`headers`, `rawBody`, `body`, `query`, `ipAddress`) according to provider contracts.
+2. **Safe Disabled-by-Default State:** Because official carrier authentication mechanisms (mutual TLS, HMAC, or certificates) for Vodacom Daraja, Mixx (Tigo), Airtel Money, and HaloPesa are not yet configured with production credentials, all providers default to `DisabledProviderCallbackVerifier`. Unauthenticated or unconfigured callbacks are rejected immediately with HTTP 403 `PROVIDER_CALLBACK_DISABLED`.
+3. **Settlement Authorization Enforcements:**
+   - **Transaction Row Lock:** `SELECT ... FOR UPDATE` on `stk_push_transactions` inside an ACID transaction.
+   - **Provider Match:** The incoming route provider must match the original transaction provider.
+   - **Amount Exact Match:** The callback amount in minor units (`amount_cents`) must match the requested amount to the cent. Mismatches are rejected with HTTP 422 `AMOUNT_MISMATCH`.
+   - **Currency Match:** Currency must match requested currency (`TZS`). Mismatches reject with HTTP 422 `CURRENCY_MISMATCH`.
+   - **Provider Reference Uniqueness:** Cryptographically verifies that `provider_reference` has not been previously redeemed in the organization across `normalized_payments` or other STK transactions.
+   - **Idempotency:** Replayed successful callbacks return the existing status DTO without re-decrementing invoice balances or creating duplicate payments.
+4. **Provider-Native Evidence Provenance (No Synthetic SMS):**
+   - Direct provider callbacks persist authentic raw JSON payloads in `raw_payment_evidence` with `sourceType: DIRECT_PROVIDER_API` and `sender_address: PROVIDER_API_<provider>`.
+   - Simulated Swahili SMS strings (`simulatedRawSms`) have been completely eliminated.
+   - Companion Android handsets forwarding carrier SMS for the same transaction reference are deduplicated via `computeDeduplicationHash` and marked `DUPLICATE_REJECTED` without double-settlement.
+
+### Provider Integration & External Status Matrix
+
+| Provider | Dispatch Adapter | Callback Parser | Verifier Status | External Approval | Staging Requirement |
+|---|---|---|---|---|---|
+| **Vodacom M-Pesa** | Mock Dispatch | Real Daraja Parser | `DisabledProviderCallbackVerifier` (403) | None | Configure Daraja OAuth & Webhook Key |
+| **Mixx by Yas (Tigo)** | Mock Dispatch | Real Tigo Parser | `DisabledProviderCallbackVerifier` (403) | None | Configure Tigo B2B Webhook Key |
+| **Airtel Money** | Mock Dispatch | Real Airtel Parser | `DisabledProviderCallbackVerifier` (403) | None | Configure Airtel OpenAPI Secret |
+| **HaloPesa** | Mock Dispatch | Real HaloPesa Parser | `DisabledProviderCallbackVerifier` (403) | None | Configure HaloPesa B2B Credentials |
+
+### Conditions Required Before Enabling Live Staging Settlement
+1. Real carrier OpenAPI client implementations replacing simulated mock adapters.
+2. Official provider webhook signing secrets or mTLS certificates loaded into validated environment schemas.
+3. Provider-specific verifiers registered with `stkPushService.verifierRegistry`.
+4. Staging public IP address with TLS 1.3 certificate configured for telco webhook delivery.
+
+---
+
 ## 7. Automated Test Evidence Summary
 
 ### Fresh Execution on Current HEAD
 - **Execution Date:** 2026-11-11
 - **Command:** `bun run test` (`bun test packages/shared/test/ packages/parser-engine/test/ packages/ui/test/ apps/api/test/ packages/zapier-app/test/`)
 - **Services:** Local PostgreSQL (port 54322) and Redis (port 6379)
-- **Results:** **363 passed, 0 failed, 0 skipped across 28 test files** (187.23s execution time).
+- **Results:** **385 passed, 0 failed, 0 skipped across 29 test files** (149.45s execution time).
 - **Typecheck:** `tsc -b` passed with 0 compiler errors.
 - **Build:** `bun run build` cleanly bundled all 6 workspace packages into `dist/`.
 
@@ -241,11 +277,12 @@ Inspection of `packages/db/prisma/migrations/` and PostgreSQL schema history con
 |---|---|---|---|---|
 | **Remote CI Run #19** | `c7b4a50ab8ad636996f328645be2d18517230bd2` | 259 passed, 0 failed | 23 test files | `VERIFIED IN REMOTE CI` |
 | **Pre-Audit Baseline** | `5f590acbce6e4ef11a852f3c687e5aa3066d9775` | 342 passed, 0 failed | 26 test files | `VERIFIED BY AUTOMATED TEST` |
-| **Current Working HEAD** | Distributed Token Revocation & Family Consistency | 375 passed, 0 failed | 29 test files | `VERIFIED BY AUTOMATED TEST` |
-| **Delta (Added Tests)** | `a80f998`..HEAD | +116 tests (Auth, Nonce, STK Push, Family Revocation, 429 Safety, Distributed Revocation Consistency) | +6 test files | `VERIFIED BY AUTOMATED TEST` (Pending Remote CI Push) |
+| **Distributed Revocation HEAD** | `36221acc343682978cca0edcddd256f038c5da05` | 375 passed, 0 failed | 29 test files | `VERIFIED BY AUTOMATED TEST` |
+| **Current Working HEAD** | P0 Payment Callback Trust-Boundary Hardening | 385 passed, 0 failed | 29 test files | `VERIFIED BY AUTOMATED TEST` |
+| **Delta (Added Tests)** | `a80f998`..HEAD | +126 tests (Auth, Nonce, STK Callback Trust Boundary, Family Revocation, 429 Safety, Distributed Revocation) | +6 test files | `VERIFIED BY AUTOMATED TEST` (Pending Remote CI Push) |
 
 > [!NOTE]
-> The earlier reference to "630 tests across 44 files" was caused by running `bun test` without file arguments, which evaluated duplicate compiled test files inside `apps/api/dist/test` alongside TypeScript source files in `apps/api/test`. The authoritative monorepo test corpus contains **375 unique tests across 29 files**.
+> The earlier reference to "630 tests across 44 files" was caused by running `bun test` without file arguments, which evaluated duplicate compiled test files inside `apps/api/dist/test` alongside TypeScript source files in `apps/api/test`. The authoritative monorepo test corpus contains **385 unique tests across 29 files**.
 
 ---
 

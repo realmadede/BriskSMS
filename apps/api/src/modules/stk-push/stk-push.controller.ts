@@ -3,6 +3,7 @@ import { authenticate } from '../../core/guards.js';
 import { ApiKeyScope, PaymentProvider } from '@brisksms/shared';
 import { ApiKeyService } from '../developer/api-key.service.js';
 import { stkPushService } from './stk-push.service.js';
+import { CallbackVerificationRequest } from './verifiers/index.js';
 
 const apiKeyService = new ApiKeyService();
 
@@ -135,6 +136,7 @@ export function registerStkPushRoutes(router: Router): void {
   /**
    * 3. Telco Webhook Callback Receiver
    * Handles asynchronous push notifications from Vodacom, Tigo, Airtel, Halotel
+   * Enforces provider-specific cryptographic callback authentication before processing.
    */
   router.post('/v1/payments/stk-push/callback/:provider', async (req: RouteRequest): Promise<ApiResponse> => {
     const providerParam = req.params.provider || '';
@@ -145,8 +147,18 @@ export function registerStkPushRoutes(router: Router): void {
       throw new HttpException(400, 'INVALID_PAYLOAD', 'Callback payload must be a JSON object');
     }
 
+    const verificationReq: CallbackVerificationRequest = {
+      provider,
+      headers: req.headers,
+      rawBody: req.rawBody,
+      body: req.body,
+      query: req.query,
+      urlPath: req.path,
+      ipAddress: (req.rawReq?.socket?.remoteAddress || '').replace(/^.*:/, ''),
+    };
+
     try {
-      const result = await stkPushService.handleCarrierCallback(provider, body);
+      const result = await stkPushService.handleCarrierCallback(provider, verificationReq);
       return {
         success: true,
         data: {
@@ -157,6 +169,9 @@ export function registerStkPushRoutes(router: Router): void {
         },
       };
     } catch (err: any) {
+      if (err instanceof HttpException) {
+        throw err;
+      }
       throw new HttpException(400, 'CALLBACK_PROCESSING_FAILED', err.message);
     }
   });

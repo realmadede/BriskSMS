@@ -1,25 +1,28 @@
 import { randomUUID } from 'node:crypto';
 import {
   BusinessEventType,
+  computeDeduplicationHash,
   detectTanzanianCarrier,
   EvidenceSourceType,
+  InvoiceStatus,
   normalizeTanzanianPhone,
   PaymentProvider,
   StkPushRequestDto,
   StkPushResponseDto,
   StkPushStatus,
   StkPushStatusDto,
-  toMajorUnits,
   toMinorUnits,
+  TransactionState,
   VerificationMethod,
 } from '@brisksms/shared';
-import { assertTenantContext, sql } from '@brisksms/db';
+import { assertTenantContext, withTransaction } from '@brisksms/db';
 import {
   dbStore,
+  mapInvoiceRow,
   mapStkPushTransactionRow,
   StkPushTransactionRecord,
 } from '../../core/store.js';
-import { IngestionService } from '../ingestion/ingestion.service.js';
+import { HttpException } from '../../core/http.js';
 import { ReconciliationService } from '../reconciliation/reconciliation.service.js';
 import {
   AirtelStkAdapter,
@@ -28,13 +31,18 @@ import {
   StkPushAdapter,
   TigoStkAdapter,
 } from './adapters/index.js';
+import {
+  CallbackVerificationRequest,
+  CallbackVerifierRegistry,
+  callbackVerifierRegistry,
+} from './verifiers/index.js';
 
 export class StkPushService {
   private readonly adapters: Map<PaymentProvider, StkPushAdapter> = new Map();
 
   constructor(
-    private readonly ingestionService: IngestionService = new IngestionService(new ReconciliationService()),
     private readonly reconciliationService: ReconciliationService = new ReconciliationService(),
+    public readonly verifierRegistry: CallbackVerifierRegistry = callbackVerifierRegistry,
   ) {
     this.registerAdapter(new MpesaStkAdapter());
     this.registerAdapter(new TigoStkAdapter());
@@ -174,136 +182,355 @@ export class StkPushService {
   }
 
   /**
-   * Handles asynchronous webhook callback received from carrier gateways
+   * Handles asynchronous webhook callback received from carrier gateways.
+   *
+   * CRITICAL FINANCIAL INTEGRITY & TRUST BOUNDARY:
+   * 1. Provider-specific callback verification MUST succeed before any processing.
+   * 2. Transaction row MUST be locked (FOR UPDATE) within an ACID transaction.
+   * 3. Provider, checkoutId, amount, currency, reference, and invoice association
+   *    MUST match the original STK request.
+   * 4. Idempotent replays MUST return existing terminal state without double-settling.
+   * 5. Provider-confirmed evidence is recorded natively as immutable JSON without
+   *    synthetic SMS strings.
+   * 6. Target invoice settlement executes within the same atomic ACID transaction.
    */
   public async handleCarrierCallback(
     provider: PaymentProvider,
-    rawPayload: any,
+    reqOrPayload: CallbackVerificationRequest | any,
   ): Promise<StkPushStatusDto> {
-    const adapter = this.getAdapter(provider);
-    const parsed = adapter.parseCallback(rawPayload);
+    const verificationReq: CallbackVerificationRequest = (
+      reqOrPayload && typeof reqOrPayload === 'object' && 'headers' in reqOrPayload
+    )
+      ? (reqOrPayload as CallbackVerificationRequest)
+      : {
+          provider,
+          headers: {},
+          body: reqOrPayload,
+          rawBody: typeof reqOrPayload === 'string' ? reqOrPayload : JSON.stringify(reqOrPayload),
+        };
 
-    // Look up transaction by checkoutId or providerReference
-    let checkoutId = parsed.checkoutId.trim();
+    // 1. Enforce Provider-Specific Callback Authentication
+    const verifier = this.verifierRegistry.getVerifier(provider);
+    const verification = await verifier.verify(verificationReq);
+    if (!verification.isValid) {
+      if (verification.code === 'PROVIDER_CALLBACK_DISABLED') {
+        throw new HttpException(
+          403,
+          'PROVIDER_CALLBACK_DISABLED',
+          verification.reason || `Callbacks for provider '${provider}' are disabled by default until official authentication is configured`,
+        );
+      }
+      throw new HttpException(
+        401,
+        verification.code || 'CALLBACK_AUTHENTICATION_FAILED',
+        verification.reason || 'Callback authentication failed',
+      );
+    }
+
+    // 2. Parse Provider Payload
+    const adapter = this.getAdapter(provider);
+    const parsed = adapter.parseCallback(verificationReq.body);
+
+    let checkoutId = (parsed.checkoutId || '').trim();
     if (checkoutId.startsWith('voda_')) checkoutId = checkoutId.substring(5);
     else if (checkoutId.startsWith('tigo_')) checkoutId = checkoutId.substring(5);
     else if (checkoutId.startsWith('airtel_')) checkoutId = checkoutId.substring(7);
     else if (checkoutId.startsWith('halo_')) checkoutId = checkoutId.substring(5);
 
-    const rows = await sql<Record<string, any>>`
-      SELECT * FROM "stk_push_transactions"
-      WHERE "id" = ${checkoutId}
-         OR "id" = ${parsed.checkoutId}
-         OR ("provider_reference" IS NOT NULL AND "provider_reference" = ${parsed.providerReference ?? ''})
-      LIMIT 1
-    `;
-
-    if (rows.length === 0) {
-      throw new Error(`No matching STK Push transaction found for checkoutId '${parsed.checkoutId}'`);
+    if (!checkoutId) {
+      throw new HttpException(400, 'MISSING_CHECKOUT_ID', 'Callback payload missing valid checkout identifier');
     }
 
-    const stkTx = mapStkPushTransactionRow(rows[0]!);
-    const orgId = stkTx.organizationId;
+    // 3. Atomic Database Verification & Settlement
+    return withTransaction(async (tx) => {
+      // Row lock the STK push transaction
+      const rows = await tx<Record<string, any>>`
+        SELECT * FROM "stk_push_transactions"
+        WHERE "id" = ${checkoutId}
+        FOR UPDATE
+      `;
 
-    // Idempotent guard: do not re-process already succeeded transaction
-    if (stkTx.status === StkPushStatus.SUCCESS) {
-      return this.mapToStatusDto(stkTx);
-    }
+      if (rows.length === 0) {
+        throw new HttpException(404, 'TRANSACTION_NOT_FOUND', `No STK Push transaction found for checkoutId '${checkoutId}'`);
+      }
 
-    if (parsed.success) {
-      const providerRef = (parsed.providerReference || `STK${Date.now()}`).trim().toUpperCase();
+      const stkTx = mapStkPushTransactionRow(rows[0]!);
+      const orgId = stkTx.organizationId;
+      assertTenantContext({ organizationId: orgId });
 
-      // 1. Update STK transaction state
-      const updatedTx = await dbStore.updateStkTransaction(stkTx.id, orgId, {
-        status: StkPushStatus.SUCCESS,
-        providerReference: providerRef,
-        resultCode: parsed.resultCode ?? 0,
-        resultDescription: parsed.resultDescription ?? 'Success',
-        rawCallbackPayload: rawPayload,
-      });
+      // Invariant: Provider in callback route must match provider recorded at initiation
+      if (stkTx.provider !== provider) {
+        throw new HttpException(
+          422,
+          'PROVIDER_MISMATCH',
+          `Callback provider '${provider}' does not match original STK push transaction provider '${stkTx.provider}'`,
+        );
+      }
 
-      // 2. Direct Ingestion via DIRECT_PROVIDER_API
-      const providerSender = provider === PaymentProvider.MPESA ? 'M-PESA' : provider;
-      const amountMajor = toMajorUnits(stkTx.amountCents);
-      const simulatedRawSms = `${providerRef} Imethibitishwa. Umepokea Tsh${amountMajor.toLocaleString()} kutoka kwa ${stkTx.phoneNumber} tarehe ${new Date().toISOString()}. Kumbukumbu namba: ${stkTx.referenceNumber || ''}`;
+      // Idempotency: Already succeeded callbacks return existing status without re-settlement
+      if (stkTx.status === StkPushStatus.SUCCESS) {
+        return this.mapToStatusDto(stkTx);
+      }
 
-      const ack = await this.ingestionService.ingestEvidence({
-        organizationId: orgId,
-        sourceType: EvidenceSourceType.DIRECT_PROVIDER_API,
-        senderAddress: providerSender,
-        rawPayload: simulatedRawSms,
-        deviceTimestamp: new Date(),
-      });
+      // Terminal state guard: If already failed or cancelled, do not allow re-transition
+      if (stkTx.status === StkPushStatus.FAILED || stkTx.status === StkPushStatus.CANCELLED) {
+        return this.mapToStatusDto(stkTx);
+      }
 
-      // 3. Independent Verification & Invoice Settlement
-      let settledPaymentId: string | undefined = ack.paymentId;
-      if (ack.paymentId) {
-        try {
-          const targetInvId = (stkTx.invoiceId ?? ack.matchedInvoiceId ?? ack.candidateInvoiceId) || undefined;
-          const settlement = await this.reconciliationService.verifyPayment(orgId, {
-            paymentId: ack.paymentId,
-            invoiceId: targetInvId,
-            verificationMethod: VerificationMethod.INDEPENDENT_PROVIDER_QUERY,
-            externalVerificationRef: providerRef,
-            notes: `Authoritative settlement via carrier STK push callback (${provider}). CheckoutId: ${stkTx.id}`,
-          });
-          settledPaymentId = settlement.payment.id;
+      const rawPayloadJson = typeof verificationReq.body === 'string'
+        ? verificationReq.body
+        : JSON.stringify(verificationReq.body);
 
-          await dbStore.updateStkTransaction(stkTx.id, orgId, {
-            status: StkPushStatus.SUCCESS,
-            settledPaymentId: settlement.payment.id,
-          });
-        } catch (err: any) {
-          // If invoice is already paid or other non-fatal error, log and preserve payment id
-          settledPaymentId = ack.paymentId;
+      // Handle Provider Rejection / Cancellation
+      if (!parsed.success) {
+        const failureStatus = parsed.resultCode === 1032 ? StkPushStatus.CANCELLED : StkPushStatus.FAILED;
+
+        await tx`
+          UPDATE "stk_push_transactions"
+          SET
+            "status" = ${failureStatus}::"StkPushStatus",
+            "result_code" = ${parsed.resultCode ?? 1},
+            "result_description" = ${parsed.resultDescription ?? 'Payment declined or cancelled by subscriber'},
+            "error_message" = ${parsed.resultDescription || 'Customer declined transaction or prompt expired'},
+            "raw_callback_payload" = ${rawPayloadJson}::jsonb,
+            "updated_at" = NOW()
+          WHERE "id" = ${stkTx.id} AND "organization_id" = ${orgId}
+        `;
+
+        await dbStore.insertOutboxEvent(
+          {
+            organizationId: orgId,
+            eventType: BusinessEventType.PAYMENT_STK_FAILED,
+            payload: {
+              checkoutId: stkTx.id,
+              provider,
+              phoneNumber: stkTx.phoneNumber,
+              resultCode: parsed.resultCode,
+              reason: parsed.resultDescription || 'Customer declined or session timed out',
+            },
+          },
+          tx,
+        );
+
+        const updatedTx = await dbStore.getStkTransactionById(stkTx.id, orgId, tx);
+        return this.mapToStatusDto(updatedTx || stkTx);
+      }
+
+      // =========================================================================
+      // Settlement Authorization Enforcement (All Invariants Must Hold)
+      // =========================================================================
+
+      // A. Provider Transaction Reference validation
+      const providerRef = (parsed.providerReference || '').trim().toUpperCase();
+      if (!providerRef) {
+        throw new HttpException(400, 'MISSING_PROVIDER_REFERENCE', 'Provider callback missing transaction reference');
+      }
+
+      // B. Provider Reference Uniqueness within Organization
+      const existingPay = await tx`
+        SELECT "id" FROM "normalized_payments"
+        WHERE "organization_id" = ${orgId}
+          AND "provider" = ${provider}::"PaymentProvider"
+          AND "reference" = ${providerRef}
+        LIMIT 1
+      `;
+      if (existingPay.length > 0 && existingPay[0]!.id !== stkTx.settledPaymentId) {
+        throw new HttpException(
+          409,
+          'REFERENCE_ALREADY_USED',
+          `Provider reference '${providerRef}' has already been redeemed in organization`,
+        );
+      }
+
+      const otherStk = await tx`
+        SELECT "id" FROM "stk_push_transactions"
+        WHERE "organization_id" = ${orgId}
+          AND "provider_reference" = ${providerRef}
+          AND "id" != ${stkTx.id}
+          AND "status" = 'SUCCESS'
+        LIMIT 1
+      `;
+      if (otherStk.length > 0) {
+        throw new HttpException(
+          409,
+          'REFERENCE_ALREADY_USED',
+          `Provider reference '${providerRef}' is already bound to successful STK transaction '${otherStk[0]!.id}'`,
+        );
+      }
+
+      // C. Amount Exact Match (to the cent)
+      if (parsed.amountCents === undefined || parsed.amountCents === null) {
+        throw new HttpException(400, 'MISSING_CALLBACK_AMOUNT', 'Callback payload missing payment amount');
+      }
+      const callbackAmountCents = BigInt(parsed.amountCents);
+      if (callbackAmountCents !== stkTx.amountCents) {
+        throw new HttpException(
+          422,
+          'AMOUNT_MISMATCH',
+          `Callback amount (${callbackAmountCents.toString()}) does not match requested STK amount (${stkTx.amountCents.toString()})`,
+        );
+      }
+
+      // D. Currency Match
+      if (parsed.currency && parsed.currency.trim().toUpperCase() !== stkTx.currency.trim().toUpperCase()) {
+        throw new HttpException(
+          422,
+          'CURRENCY_MISMATCH',
+          `Callback currency '${parsed.currency}' does not match requested currency '${stkTx.currency}'`,
+        );
+      }
+
+      // E. Merchant Reference Match
+      if (
+        stkTx.referenceNumber &&
+        parsed.referenceNumber &&
+        parsed.referenceNumber.trim().toUpperCase() !== stkTx.referenceNumber.trim().toUpperCase()
+      ) {
+        throw new HttpException(
+          422,
+          'REFERENCE_MISMATCH',
+          `Callback reference '${parsed.referenceNumber}' does not match requested reference '${stkTx.referenceNumber}'`,
+        );
+      }
+
+      // F. Lock Target Invoice (if bound)
+      const targetInvoiceId = stkTx.invoiceId || undefined;
+      if (targetInvoiceId) {
+        const invRows = await tx`
+          SELECT * FROM "invoices"
+          WHERE "id" = ${targetInvoiceId} AND "organization_id" = ${orgId}
+          FOR UPDATE
+        `;
+        if (invRows.length === 0) {
+          throw new HttpException(404, 'INVOICE_NOT_FOUND', `Target invoice '${targetInvoiceId}' not found in organization`);
+        }
+        const inv = mapInvoiceRow(invRows[0]!);
+        if (inv.status === InvoiceStatus.VOID || inv.status === InvoiceStatus.REFUNDED) {
+          throw new HttpException(422, 'INVOICE_NOT_PAYABLE', `Target invoice '${targetInvoiceId}' is in non-payable state '${inv.status}'`);
         }
       }
 
-      // 4. Outbox Event
-      await dbStore.insertOutboxEvent({
-        organizationId: orgId,
-        eventType: BusinessEventType.PAYMENT_STK_SUCCESS,
-        payload: {
-          checkoutId: stkTx.id,
-          provider,
-          providerReference: providerRef,
-          phoneNumber: stkTx.phoneNumber,
-          amountCents: stkTx.amountCents.toString(),
-          invoiceId: stkTx.invoiceId,
-          referenceNumber: stkTx.referenceNumber,
-          settledPaymentId,
+      // =========================================================================
+      // Provider-Native Evidence Persistence & Normalization (No Synthetic SMS)
+      // =========================================================================
+      const evidenceId = randomUUID();
+      const paymentId = randomUUID();
+      const providerTimestamp = parsed.providerTimestamp || new Date();
+      const deduplicationHash = computeDeduplicationHash(
+        orgId,
+        provider,
+        providerRef,
+        stkTx.amountCents,
+        providerTimestamp,
+      );
+
+      // 1. Immutable Raw Evidence with actual JSON payload
+      await tx`
+        INSERT INTO "raw_payment_evidence" (
+          "id", "organization_id", "source_type", "device_id", "sender_address",
+          "raw_payload", "sim_slot", "device_timestamp", "signature", "nonce",
+          "sequence_number", "parser_version", "parse_status"
+        )
+        VALUES (
+          ${evidenceId},
+          ${orgId},
+          ${EvidenceSourceType.DIRECT_PROVIDER_API}::"EvidenceSourceType",
+          NULL,
+          ${`PROVIDER_API_${provider}`},
+          ${rawPayloadJson},
+          1,
+          ${providerTimestamp},
+          ${typeof verificationReq.headers['x-signature'] === 'string' ? verificationReq.headers['x-signature'] : null},
+          NULL,
+          NULL,
+          '1.0.0',
+          'OBSERVED'
+        )
+      `;
+
+      // 2. Normalized Payment created directly from verified provider data
+      await tx`
+        INSERT INTO "normalized_payments" (
+          "id", "organization_id", "device_id", "raw_evidence_id", "provider",
+          "reference", "amount_cents", "currency", "sender_phone", "sender_name",
+          "recipient_account", "customer_memo", "provider_timestamp", "parser_version",
+          "state", "deduplication_hash", "matched_invoice_id", "candidate_invoice_id"
+        )
+        VALUES (
+          ${paymentId},
+          ${orgId},
+          NULL,
+          ${evidenceId},
+          ${provider}::"PaymentProvider",
+          ${providerRef},
+          ${stkTx.amountCents.toString()}::bigint,
+          ${stkTx.currency},
+          ${parsed.phoneNumber || stkTx.phoneNumber},
+          ${parsed.customerName ?? null},
+          NULL,
+          ${stkTx.memo ?? null},
+          ${providerTimestamp},
+          '1.0.0',
+          ${TransactionState.MATCHED}::"TransactionState",
+          ${deduplicationHash},
+          ${targetInvoiceId ?? null},
+          ${targetInvoiceId ?? null}
+        )
+      `;
+
+      // 3. Invoice Settlement via Reconciliation Service
+      let settledPaymentId: string | undefined = paymentId;
+      if (targetInvoiceId) {
+        const settlement = await this.reconciliationService.verifyPayment(
+          orgId,
+          {
+            paymentId,
+            invoiceId: targetInvoiceId,
+            verificationMethod: VerificationMethod.INDEPENDENT_PROVIDER_QUERY,
+            externalVerificationRef: providerRef,
+            notes: `Authoritative settlement via verified carrier STK push callback (${provider}). CheckoutId: ${stkTx.id}`,
+          },
+          tx,
+        );
+        settledPaymentId = settlement.payment.id;
+      }
+
+      // 4. Update STK Push Transaction to SUCCESS
+      await tx`
+        UPDATE "stk_push_transactions"
+        SET
+          "status" = ${StkPushStatus.SUCCESS}::"StkPushStatus",
+          "provider_reference" = ${providerRef},
+          "result_code" = ${parsed.resultCode ?? 0},
+          "result_description" = ${parsed.resultDescription ?? 'Success'},
+          "settled_payment_id" = ${settledPaymentId},
+          "raw_callback_payload" = ${rawPayloadJson}::jsonb,
+          "updated_at" = NOW()
+        WHERE "id" = ${stkTx.id} AND "organization_id" = ${orgId}
+      `;
+
+      // 5. Outbox Event
+      await dbStore.insertOutboxEvent(
+        {
+          organizationId: orgId,
+          eventType: BusinessEventType.PAYMENT_STK_SUCCESS,
+          payload: {
+            checkoutId: stkTx.id,
+            provider,
+            providerReference: providerRef,
+            phoneNumber: stkTx.phoneNumber,
+            amountCents: stkTx.amountCents.toString(),
+            invoiceId: stkTx.invoiceId,
+            referenceNumber: stkTx.referenceNumber,
+            settledPaymentId,
+          },
         },
-      });
+        tx,
+      );
 
-      return this.mapToStatusDto({
-        ...updatedTx,
-        status: StkPushStatus.SUCCESS,
-        settledPaymentId: settledPaymentId ?? null,
-      });
-    } else {
-      // Failed or cancelled push
-      const updatedTx = await dbStore.updateStkTransaction(stkTx.id, orgId, {
-        status: parsed.resultCode === 1032 ? StkPushStatus.CANCELLED : StkPushStatus.FAILED,
-        resultCode: parsed.resultCode ?? 1,
-        resultDescription: parsed.resultDescription ?? 'Payment declined or cancelled by subscriber',
-        errorMessage: parsed.resultDescription || 'Customer declined transaction or USSD prompt expired',
-        rawCallbackPayload: rawPayload,
-      });
-
-      await dbStore.insertOutboxEvent({
-        organizationId: orgId,
-        eventType: BusinessEventType.PAYMENT_STK_FAILED,
-        payload: {
-          checkoutId: stkTx.id,
-          provider,
-          phoneNumber: stkTx.phoneNumber,
-          resultCode: parsed.resultCode,
-          reason: parsed.resultDescription || 'Customer declined or session timed out',
-        },
-      });
-
-      return this.mapToStatusDto(updatedTx);
-    }
+      const updatedTx = await dbStore.getStkTransactionById(stkTx.id, orgId, tx);
+      return this.mapToStatusDto(updatedTx || stkTx);
+    });
   }
 
   private mapToStatusDto(record: StkPushTransactionRecord): StkPushStatusDto {

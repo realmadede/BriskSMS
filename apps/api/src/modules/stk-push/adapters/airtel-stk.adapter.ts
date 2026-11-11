@@ -42,6 +42,7 @@ export class AirtelStkAdapter implements StkPushAdapter {
       success: isSuccess,
       providerReference: providerReference ? String(providerReference).trim().toUpperCase() : undefined,
       amountCents: amountVal,
+      currency: payload.currency ? String(payload.currency).trim().toUpperCase() : undefined,
       phoneNumber: payload.phoneNumber || payload.msisdn ? String(payload.phoneNumber || payload.msisdn) : undefined,
       resultCode: payload.resultCode !== undefined ? Number(payload.resultCode) : (isSuccess ? 0 : 1),
       resultDescription: payload.resultDescription || payload.message,

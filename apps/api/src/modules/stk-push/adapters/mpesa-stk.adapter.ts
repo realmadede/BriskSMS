@@ -37,6 +37,7 @@ export class MpesaStkAdapter implements StkPushAdapter {
       let providerReference: string | undefined;
       let amountCents: bigint | undefined;
       let phoneNumber: string | undefined;
+      let providerTimestamp: Date | undefined;
 
       if (cb.CallbackMetadata?.Item && Array.isArray(cb.CallbackMetadata.Item)) {
         for (const item of cb.CallbackMetadata.Item) {
@@ -46,6 +47,17 @@ export class MpesaStkAdapter implements StkPushAdapter {
             amountCents = toMinorUnits(item.Value);
           } else if (item.Name === 'PhoneNumber' && item.Value) {
             phoneNumber = String(item.Value);
+          } else if (item.Name === 'TransactionDate' && item.Value) {
+            const s = String(item.Value);
+            if (s.length === 14) {
+              const yr = parseInt(s.substring(0, 4), 10);
+              const mo = parseInt(s.substring(4, 6), 10) - 1;
+              const dy = parseInt(s.substring(6, 8), 10);
+              const hr = parseInt(s.substring(8, 10), 10);
+              const mi = parseInt(s.substring(10, 12), 10);
+              const sc = parseInt(s.substring(12, 14), 10);
+              providerTimestamp = new Date(Date.UTC(yr, mo, dy, hr, mi, sc));
+            }
           }
         }
       }
@@ -57,6 +69,7 @@ export class MpesaStkAdapter implements StkPushAdapter {
         providerReference,
         amountCents,
         phoneNumber,
+        providerTimestamp,
         resultCode,
         resultDescription,
         rawPayload: payload,
@@ -77,6 +90,7 @@ export class MpesaStkAdapter implements StkPushAdapter {
       success: isSuccess,
       providerReference: providerReference ? String(providerReference).trim().toUpperCase() : undefined,
       amountCents: amountVal,
+      currency: payload.currency ? String(payload.currency).trim().toUpperCase() : undefined,
       phoneNumber: payload.phoneNumber ? String(payload.phoneNumber) : undefined,
       resultCode: payload.resultCode !== undefined ? Number(payload.resultCode) : (isSuccess ? 0 : 1),
       resultDescription: payload.resultDescription || payload.message,
