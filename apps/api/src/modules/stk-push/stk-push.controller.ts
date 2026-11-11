@@ -39,7 +39,7 @@ async function resolveOrganizationContext(
   }
 
   // Fallback to JWT Bearer / Session Cookie
-  authenticate(req);
+  await authenticate(req);
   const orgId = req.query.organizationId || req.context.organizationId || (req.body as any)?.organizationId;
   if (!orgId) {
     throw new HttpException(400, 'VALIDATION_ERROR', 'organizationId is required');

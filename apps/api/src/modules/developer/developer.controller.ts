@@ -30,7 +30,7 @@ async function assertDeveloperAccess(orgId: string, userId: string): Promise<voi
 export function registerDeveloperRoutes(router: Router): void {
   // 1. List API Keys
   router.get('/v1/developer/api-keys', async (req: RouteRequest): Promise<ApiResponse> => {
-    authenticate(req);
+    await authenticate(req);
     const userId = req.context.userId!;
     const orgId = req.query.organizationId || req.context.organizationId;
     if (!orgId) {
@@ -47,7 +47,7 @@ export function registerDeveloperRoutes(router: Router): void {
 
   // 2. Create API Key
   router.post('/v1/developer/api-keys', async (req: RouteRequest): Promise<ApiResponse> => {
-    authenticate(req);
+    await authenticate(req);
     const userId = req.context.userId!;
     const body = req.body as Record<string, any>;
     const orgId = (body.organizationId as string) || req.context.organizationId;
@@ -75,7 +75,7 @@ export function registerDeveloperRoutes(router: Router): void {
 
   // 3. Revoke API Key
   router.delete('/v1/developer/api-keys/:id', async (req: RouteRequest): Promise<ApiResponse> => {
-    authenticate(req);
+    await authenticate(req);
     const userId = req.context.userId!;
     const keyId = req.params.id || '';
     const orgId = req.query.organizationId || req.context.organizationId;
@@ -97,7 +97,7 @@ export function registerDeveloperRoutes(router: Router): void {
 
   // 4. List Registered Webhooks
   router.get('/v1/developer/webhooks', async (req: RouteRequest): Promise<ApiResponse> => {
-    authenticate(req);
+    await authenticate(req);
     const userId = req.context.userId!;
     const orgId = req.query.organizationId || req.context.organizationId;
     if (!orgId) {
@@ -114,7 +114,7 @@ export function registerDeveloperRoutes(router: Router): void {
 
   // 5. Register Webhook Endpoint
   router.post('/v1/developer/webhooks', async (req: RouteRequest): Promise<ApiResponse> => {
-    authenticate(req);
+    await authenticate(req);
     const userId = req.context.userId!;
     const body = req.body as Record<string, any>;
     const orgId = (body.organizationId as string) || req.context.organizationId;
@@ -142,7 +142,7 @@ export function registerDeveloperRoutes(router: Router): void {
 
   // 6. Delete Webhook Endpoint
   router.delete('/v1/developer/webhooks/:id', async (req: RouteRequest): Promise<ApiResponse> => {
-    authenticate(req);
+    await authenticate(req);
     const userId = req.context.userId!;
     const endpointId = req.params.id || '';
     const orgId = req.query.organizationId || req.context.organizationId;
@@ -256,7 +256,7 @@ export function registerDeveloperRoutes(router: Router): void {
     }
 
     // Otherwise standard JWT user authentication
-    authenticate(req);
+    await authenticate(req);
     const userId = req.context.userId!;
     const orgId = (body.organizationId as string) || req.context.organizationId;
     if (!orgId) {

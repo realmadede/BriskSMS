@@ -59,6 +59,7 @@ export interface RouteRequest {
   rawBodyBuffer: Buffer<ArrayBufferLike>;
   context: RequestContext;
   rawReq: IncomingMessage;
+  tokenBlacklist?: Set<string>;
 }
 
 export type RouteHandler = (req: RouteRequest) => Promise<ApiResponse | void> | ApiResponse | void;
@@ -72,6 +73,7 @@ export interface RouteDefinition {
 
 export class Router {
   private routes: RouteDefinition[] = [];
+  public tokenBlacklist?: Set<string>;
 
   add(method: string, pathPattern: string, handler: RouteHandler): void {
     const paramNames: string[] = [];
@@ -219,6 +221,7 @@ export class Router {
       rawBodyBuffer,
       context: {},
       rawReq: req,
+      tokenBlacklist: this.tokenBlacklist,
     };
 
     try {

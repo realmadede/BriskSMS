@@ -92,7 +92,7 @@ export function registerIngestionRoutes(router: Router): void {
    * Authenticated by human user JWT with organization context.
    */
   router.get('/v1/ingestion/evidence', async (req: RouteRequest): Promise<ApiResponse> => {
-    authenticate(req);
+    await authenticate(req);
     const orgId = req.context.organizationId || (req.query.organizationId as string);
 
     if (!orgId) {

@@ -658,7 +658,56 @@ export class AuthService {
     return { success: true, message: genericMsg };
   }
 
-  async refreshToken(rawRefreshToken: string): Promise<AuthTokens> {
+  async revokeFamily(familyId: string, localBlacklist: Set<string> = tokenBlacklist): Promise<string[]> {
+    if (!familyId) return [];
+
+    // 1. Durably revoke all active refresh tokens in the family in PostgreSQL
+    await sql`
+      UPDATE "refresh_tokens"
+      SET "revoked_at" = NOW()
+      WHERE "family_id" = ${familyId}
+        AND "revoked_at" IS NULL
+    `;
+
+    // 2. Query all access token JTIs issued in this family
+    const familyTokens = await sql<{ jti: string; user_id: string }>`
+      SELECT "jti", "user_id"
+      FROM "refresh_tokens"
+      WHERE "family_id" = ${familyId}
+        AND "jti" IS NOT NULL
+    `;
+
+    const jtis = familyTokens.map((t) => t.jti).filter(Boolean);
+    if (jtis.length === 0) return [];
+
+    // 3. Durably persist revoked JTIs in PostgreSQL
+    await sql`
+      INSERT INTO "revoked_sessions" ("jti", "user_id", "expires_at", "revoked_at")
+      SELECT "jti", "user_id", NOW() + INTERVAL '1 day', NOW()
+      FROM "refresh_tokens"
+      WHERE "family_id" = ${familyId}
+        AND "jti" IS NOT NULL
+      ON CONFLICT ("jti") DO UPDATE SET "revoked_at" = NOW()
+    `;
+
+    // 4. Update in-process cache
+    for (const jti of jtis) {
+      localBlacklist.add(jti);
+    }
+
+    // 5. Populate shared Redis store with 24h TTL (86,400s)
+    try {
+      await Promise.all(
+        jtis.map((jti) => redisClient.set(`auth:revoked_jti:${jti}`, '1', 86400).catch(() => {}))
+      );
+    } catch {
+      // Redis write failure does not rollback PostgreSQL durable record
+    }
+
+    return jtis;
+  }
+
+  async refreshToken(rawRefreshToken: string, localBlacklist: Set<string> = tokenBlacklist): Promise<AuthTokens> {
     if (!rawRefreshToken) {
       throw new HttpException(400, 'INVALID_PAYLOAD', 'Refresh token is required');
     }
@@ -679,37 +728,7 @@ export class AuthService {
 
       // Replay Detection: If the token was already consumed or revoked, revoke its entire family!
       if (record.revoked_at) {
-        // Durably revoke all active tokens in the same family in PostgreSQL
-        await sql`
-          UPDATE "refresh_tokens"
-          SET "revoked_at" = NOW()
-          WHERE "family_id" = ${record.family_id}
-            AND "revoked_at" IS NULL
-        `;
-
-        // Revoke every access token JTI issued in this family
-        const familyTokens = await sql<{ jti: string; user_id: string }>`
-          SELECT "jti", "user_id"
-          FROM "refresh_tokens"
-          WHERE "family_id" = ${record.family_id}
-            AND "jti" IS NOT NULL
-        `;
-
-        for (const token of familyTokens) {
-          if (token.jti) {
-            tokenBlacklist.add(token.jti);
-          }
-        }
-
-        await sql`
-          INSERT INTO "revoked_sessions" ("jti", "user_id", "expires_at", "revoked_at")
-          SELECT "jti", "user_id", NOW() + INTERVAL '1 day', NOW()
-          FROM "refresh_tokens"
-          WHERE "family_id" = ${record.family_id}
-            AND "jti" IS NOT NULL
-          ON CONFLICT ("jti") DO UPDATE SET "revoked_at" = NOW()
-        `;
-
+        await this.revokeFamily(record.family_id, localBlacklist);
         throw new HttpException(401, 'INVALID_TOKEN', 'Refresh token is expired or invalid (consumed; entire session family revoked)');
       }
 
@@ -761,15 +780,21 @@ export class AuthService {
     });
   }
 
-  async revokeSession(jti: string, userId?: string): Promise<void> {
+  async revokeSession(jti: string, userId?: string, localBlacklist: Set<string> = tokenBlacklist): Promise<void> {
     if (jti) {
-      tokenBlacklist.add(jti);
+      localBlacklist.add(jti);
       const expiresAt = new Date(Date.now() + 86400 * 1000);
       await sql`
         INSERT INTO "revoked_sessions" ("jti", "user_id", "expires_at", "revoked_at")
         VALUES (${jti}, ${userId ?? null}, ${expiresAt}, NOW())
         ON CONFLICT ("jti") DO UPDATE SET "revoked_at" = NOW()
       `;
+
+      try {
+        await redisClient.set(`auth:revoked_jti:${jti}`, '1', 86400);
+      } catch {
+        // Redis best-effort
+      }
 
       // Find the family_id bound to this jti
       const familyRows = await sql<{ family_id: string }>`
@@ -778,34 +803,7 @@ export class AuthService {
       const familyId = familyRows[0]?.family_id;
 
       if (familyId) {
-        // Revoke all refresh tokens in the family
-        await sql`
-          UPDATE "refresh_tokens"
-          SET "revoked_at" = NOW()
-          WHERE "family_id" = ${familyId}
-            AND "revoked_at" IS NULL
-        `;
-
-        // Revoke all access token JTIs in this family
-        const familyTokens = await sql<{ jti: string; user_id: string }>`
-          SELECT "jti", "user_id"
-          FROM "refresh_tokens"
-          WHERE "family_id" = ${familyId}
-            AND "jti" IS NOT NULL
-        `;
-        for (const token of familyTokens) {
-          if (token.jti) {
-            tokenBlacklist.add(token.jti);
-          }
-        }
-        await sql`
-          INSERT INTO "revoked_sessions" ("jti", "user_id", "expires_at", "revoked_at")
-          SELECT "jti", "user_id", ${expiresAt}, NOW()
-          FROM "refresh_tokens"
-          WHERE "family_id" = ${familyId}
-            AND "jti" IS NOT NULL
-          ON CONFLICT ("jti") DO UPDATE SET "revoked_at" = NOW()
-        `;
+        await this.revokeFamily(familyId, localBlacklist);
       }
     }
   }

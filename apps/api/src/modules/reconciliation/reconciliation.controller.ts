@@ -26,7 +26,7 @@ async function assertOrgAccess(
 export function registerReconciliationRoutes(router: Router): void {
   // 1. List Normalized Payments with Filters
   router.get('/v1/reconciliation/payments', async (req: RouteRequest): Promise<ApiResponse> => {
-    authenticate(req);
+    await authenticate(req);
     const userId = req.context.userId!;
     const orgId = req.query.organizationId || req.context.organizationId;
     if (!orgId) {
@@ -50,7 +50,7 @@ export function registerReconciliationRoutes(router: Router): void {
 
   // 2. Get Normalized Payment Detail
   router.get('/v1/reconciliation/payments/:id', async (req: RouteRequest): Promise<ApiResponse> => {
-    authenticate(req);
+    await authenticate(req);
     const userId = req.context.userId!;
     const paymentId = req.params.id || '';
     const orgId = req.query.organizationId || req.context.organizationId;
@@ -83,7 +83,7 @@ export function registerReconciliationRoutes(router: Router): void {
 
   // 2b. Get Candidate Invoices for Review Queue Payment
   router.get('/v1/reconciliation/payments/:id/candidates', async (req: RouteRequest): Promise<ApiResponse> => {
-    authenticate(req);
+    await authenticate(req);
     const userId = req.context.userId!;
     const paymentId = req.params.id || '';
     const orgId = req.query.organizationId || req.context.organizationId;
@@ -101,7 +101,7 @@ export function registerReconciliationRoutes(router: Router): void {
 
   // 3. List Invoices
   router.get('/v1/reconciliation/invoices', async (req: RouteRequest): Promise<ApiResponse> => {
-    authenticate(req);
+    await authenticate(req);
     const userId = req.context.userId!;
     const orgId = req.query.organizationId || req.context.organizationId;
     if (!orgId) {
@@ -118,7 +118,7 @@ export function registerReconciliationRoutes(router: Router): void {
 
   // 4. Create Invoice
   router.post('/v1/reconciliation/invoices', async (req: RouteRequest): Promise<ApiResponse> => {
-    authenticate(req);
+    await authenticate(req);
     const userId = req.context.userId!;
     const orgId = (req.body.organizationId as string) || req.context.organizationId;
     if (!orgId) {
@@ -151,7 +151,7 @@ export function registerReconciliationRoutes(router: Router): void {
 
   // 5. Get Specific Invoice Detail
   router.get('/v1/reconciliation/invoices/:id', async (req: RouteRequest): Promise<ApiResponse> => {
-    authenticate(req);
+    await authenticate(req);
     const userId = req.context.userId!;
     const invoiceId = req.params.id || '';
     const orgId = req.query.organizationId || req.context.organizationId;
@@ -173,7 +173,7 @@ export function registerReconciliationRoutes(router: Router): void {
 
   // 6. Verify Payment (Manual or Independent Verification Settlement)
   router.post('/v1/reconciliation/verify', async (req: RouteRequest): Promise<ApiResponse> => {
-    authenticate(req);
+    await authenticate(req);
     const userId = req.context.userId!;
     const body = req.body as Record<string, any>;
     const orgId = (body.organizationId as string) || req.context.organizationId;
@@ -205,7 +205,7 @@ export function registerReconciliationRoutes(router: Router): void {
 
   // 7. Reject Payment (Manual Review Queue Rejection)
   router.post('/v1/reconciliation/reject', async (req: RouteRequest): Promise<ApiResponse> => {
-    authenticate(req);
+    await authenticate(req);
     const userId = req.context.userId!;
     const body = req.body as Record<string, any>;
     const orgId = (body.organizationId as string) || req.context.organizationId;

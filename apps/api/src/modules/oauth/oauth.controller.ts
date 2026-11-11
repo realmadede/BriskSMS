@@ -24,7 +24,7 @@ async function assertDeveloperAccess(orgId: string, userId: string): Promise<voi
 export function registerOAuthRoutes(router: Router): void {
   // 1. Register OAuth Client Application (e.g. Zapier App, Third-party ERP)
   router.post('/v1/oauth/clients', async (req: RouteRequest): Promise<ApiResponse> => {
-    authenticate(req);
+    await authenticate(req);
     const userId = req.context.userId!;
     const body = req.body as Record<string, any>;
     const orgId = (body.organizationId as string) || req.context.organizationId;
@@ -61,7 +61,7 @@ export function registerOAuthRoutes(router: Router): void {
 
   // 2. RFC 7636 Authorization Endpoint (Issues authorization code with PKCE challenge)
   router.get('/v1/oauth/authorize', async (req: RouteRequest): Promise<ApiResponse> => {
-    authenticate(req);
+    await authenticate(req);
     const userId = req.context.userId!;
     const clientId = req.query.client_id;
     const redirectUri = req.query.redirect_uri;

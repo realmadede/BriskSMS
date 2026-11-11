@@ -79,10 +79,28 @@ In Login CSRF, an attacker crafts a malicious webpage that submits credentials f
      - Durably records them in PostgreSQL `revoked_sessions` (`expires_at = NOW() + 1 day`).
   4. The refresh request terminates with HTTP `401 INVALID_TOKEN`.
 - **Immediate Access-Token Revocation:** Replay invalidates not only the refresh chain, but also every in-flight access token issued in that family. An active descendant access token ($A_3$) cannot continue making requests and is immediately rejected with HTTP `401 TOKEN_REVOKED`.
-- **Process Restart & Authoritative Store:** PostgreSQL `revoked_sessions` is the authoritative persistence layer. On application boot, `syncTokenBlacklistFromDb()` loads all unexpired revocations into the in-memory fast cache. Across multiple application instances, any instance that has reloaded from PostgreSQL rejects revoked sessions immediately; unsynchronized instances rely on the bounded 15-minute maximum remaining lifetime of JWT access tokens (`900s`).
-- **Session Logout Semantics:** Explicit logout via `POST /v1/auth/logout` revokes all active refresh tokens and all issued access-token JTIs in the family.
+- **Distributed Consistency Model (Multi-Replica Architecture):**
+  - **Durable Authority:** PostgreSQL `revoked_sessions` table (`jti PRIMARY KEY, user_id, expires_at, revoked_at`) is the durable source of truth. All family and session revocations commit to PostgreSQL before success is reported.
+  - **Shared Low-Latency Store:** Redis shared key `auth:revoked_jti:<jti>` populated with value `'1'` and TTL of 86,400s (24 hours). This provides a 24x safety margin over the 15-minute (900s) maximum access-token lifetime while avoiding permanent unbounded memory consumption.
+  - **In-Process Cache:** Each API replica maintains an isolated in-memory `tokenBlacklist: Set<string>` for zero-latency ($O(1)$ memory, 0ms) subsequent checks once a revoked JTI is discovered by that replica.
+  - **Authentication Lookup Path:**
+    1. Parse Bearer header or HttpOnly session cookie; verify JWT signature & expiration.
+    2. Check local replica in-memory `tokenBlacklist`. If hit $\to$ immediate `401 TOKEN_REVOKED`.
+    3. Query shared Redis via `mget(auth:revoked_jti:<jti>, auth:revocation_sync_marker)`. If revoked key exists $\to$ cache in local blacklist and reject with `401 TOKEN_REVOKED`. If sync marker is present and key is absent $\to$ token is valid (zero PostgreSQL queries required).
+    4. If sync marker is absent (Redis restarted or flushed) $\to$ automatically resynchronize from PostgreSQL `revoked_sessions`, repopulate Redis, and check revocation state.
+    5. If Redis is unavailable or disconnected $\to$ gracefully fall back to querying PostgreSQL `revoked_sessions`. If present $\to$ cache locally and reject with `401 TOKEN_REVOKED`.
+    6. If both Redis and PostgreSQL are unavailable $\to$ fail closed with HTTP `503 Service Unavailable`, never accepting an unverified token.
+- **Process Startup & Readiness Isolation:**
+  - On application initialization, `syncTokenBlacklistFromDb()` syncs active unexpired sessions from PostgreSQL and warms Redis.
+  - Readiness probe `/v1/health/ready` strictly requires `dbHealth === 'UP'`, `redisHealth === 'UP'`, and `isRevocationSyncReady === true`.
+  - Dedicated liveness probe `/v1/health/live` reports process health independently.
+  - In `authenticate()`, `ensureRevocationSync()` guarantees that if an authenticated request arrives before startup sync completes, the request awaits synchronization; if PostgreSQL is unreachable, the request fails closed with HTTP 503.
+- **Session Logout Semantics:** Explicit logout via `POST /v1/auth/logout` revokes all active refresh tokens and all issued access-token JTIs in the family across PostgreSQL, Redis, and local replica cache.
 - **Family Isolation:** Revocation of one token family has zero impact on independent token families for the same user (e.g. concurrent sessions on another browser or device).
-- **Test Evidence:** Verified by 14 comprehensive regression tests in `apps/api/test/refresh-token-family.test.ts`. Note: automated test verification confirms code and PostgreSQL contracts; multi-node distributed sync requires live staging verification.
+- **Test Evidence:**
+  - `apps/api/test/refresh-token-family.test.ts`: 14/14 tests passing.
+  - `apps/api/test/distributed-token-revocation.test.ts`: 12/12 multi-instance integration tests passing across shared Redis, PostgreSQL fallback, fail-closed dual outage, Redis restart self-healing, and startup readiness.
+  - Total automated suite: 375 tests passing across 29 test files. Live staging validation is still required for multi-node container load balancers and network VPC boundaries.
 
 ---
 

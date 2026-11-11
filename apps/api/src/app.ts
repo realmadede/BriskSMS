@@ -1,5 +1,5 @@
 import { Router } from './core/http.js';
-import { syncTokenBlacklistFromDb } from './core/guards.js';
+import { syncTokenBlacklistFromDb, ensureRevocationSync, isRevocationSyncReady } from './core/guards.js';
 import {
   checkDatabaseHealth,
   checkRedisHealth,
@@ -17,14 +17,53 @@ import { registerDeveloperRoutes } from './modules/developer/developer.controlle
 import { registerOAuthRoutes } from './modules/oauth/oauth.controller.js';
 import { registerStkPushRoutes } from './modules/stk-push/stk-push.controller.js';
 
-export function createApp(): Router {
-  // Synchronize active revoked access tokens from PostgreSQL into in-memory fast blacklist
-  syncTokenBlacklistFromDb().catch(() => {});
-
+export function createApp(options?: { tokenBlacklist?: Set<string> }): Router {
   const router = new Router();
+  if (options?.tokenBlacklist) {
+    router.tokenBlacklist = options.tokenBlacklist;
+  }
+
+  // Synchronize active revoked access tokens from PostgreSQL into in-memory fast blacklist
+  syncTokenBlacklistFromDb(router.tokenBlacklist).catch(() => {});
+
+  // Dedicated Liveness Probe (distinguished from readiness)
+  router.get('/v1/health/live', async () => {
+    return {
+      success: true,
+      statusCode: 200,
+      data: {
+        status: 'UP',
+        service: '@brisksms/api',
+        process: { status: 'UP', pid: process.pid, uptime: process.uptime() },
+      },
+    };
+  });
+
+  // Dedicated Readiness Probe (strictly validates DB, Redis, and revocation synchronization)
+  router.get('/v1/health/ready', async () => {
+    await ensureRevocationSync().catch(() => {});
+    const [dbHealth, redisHealth] = await Promise.all([
+      checkDatabaseHealth(),
+      checkRedisHealth(),
+    ]);
+
+    const isReady = dbHealth.status === 'UP' && redisHealth.status === 'UP' && isRevocationSyncReady;
+    return {
+      success: isReady,
+      statusCode: isReady ? 200 : 503,
+      data: {
+        status: isReady ? 'UP' : 'DOWN',
+        service: '@brisksms/api',
+        revocationSync: isRevocationSyncReady ? 'UP' : 'DOWN',
+        postgresql: dbHealth.status,
+        redis: redisHealth.status,
+      },
+    };
+  });
 
   // Production Health & Readiness Endpoint
   router.get('/v1/health', async () => {
+    await ensureRevocationSync().catch(() => {});
     const [dbHealth, redisHealth, workerHealth, queueHealth] = await Promise.all([
       checkDatabaseHealth(),
       checkRedisHealth(),
@@ -32,7 +71,7 @@ export function createApp(): Router {
       checkQueueHealth(),
     ]);
 
-    const criticalHealthy = dbHealth.status === 'UP' && redisHealth.status === 'UP';
+    const criticalHealthy = dbHealth.status === 'UP' && redisHealth.status === 'UP' && isRevocationSyncReady;
     const overallStatus = !criticalHealthy
       ? 'DOWN'
       : workerHealth.status === 'UP' && queueHealth.status === 'UP'
@@ -52,6 +91,7 @@ export function createApp(): Router {
           process: { status: 'UP' },
           postgresql: dbHealth,
           redis: redisHealth,
+          revocationSync: { status: isRevocationSyncReady ? 'UP' : 'DOWN' },
           worker: workerHealth,
           queues: queueHealth,
         },

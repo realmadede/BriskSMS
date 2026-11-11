@@ -32,7 +32,7 @@ export function registerSubscriptionRoutes(router: Router): void {
 
   // 2. Tenant Subscription Detail (Authenticated, Any Org Member)
   router.get('/v1/organizations/:orgId/subscription', async (req: RouteRequest): Promise<ApiResponse> => {
-    authenticate(req);
+    await authenticate(req);
     const userId = req.context.userId!;
     const orgId = req.params.orgId || '';
     await assertOrgMemberRole(orgId, userId, [
@@ -52,7 +52,7 @@ export function registerSubscriptionRoutes(router: Router): void {
 
   // 3. Tenant Subscription Checkout / Plan Upgrade (OWNER or ADMIN only)
   router.post('/v1/organizations/:orgId/subscription/checkout', async (req: RouteRequest): Promise<ApiResponse> => {
-    authenticate(req);
+    await authenticate(req);
     const userId = req.context.userId!;
     const orgId = req.params.orgId || '';
     await assertOrgMemberRole(orgId, userId, [UserRole.OWNER, UserRole.ADMIN]);
@@ -81,7 +81,7 @@ export function registerSubscriptionRoutes(router: Router): void {
 
   // 4. Tenant Subscription Cancellation (OWNER only)
   router.post('/v1/organizations/:orgId/subscription/cancel', async (req: RouteRequest): Promise<ApiResponse> => {
-    authenticate(req);
+    await authenticate(req);
     const userId = req.context.userId!;
     const orgId = req.params.orgId || '';
     await assertOrgMemberRole(orgId, userId, [UserRole.OWNER]);
@@ -96,7 +96,7 @@ export function registerSubscriptionRoutes(router: Router): void {
 
   // 5. Tenant Entitlements Resolution (Any Org Member)
   router.get('/v1/organizations/:orgId/entitlements', async (req: RouteRequest): Promise<ApiResponse> => {
-    authenticate(req);
+    await authenticate(req);
     const userId = req.context.userId!;
     const orgId = req.params.orgId || '';
     await assertOrgMemberRole(orgId, userId, [
@@ -116,7 +116,7 @@ export function registerSubscriptionRoutes(router: Router): void {
 
   // 6. Administrative Catalog Management: Create Plan (Privileged)
   router.post('/v1/admin/catalog/plans', async (req: RouteRequest): Promise<ApiResponse> => {
-    authenticate(req);
+    await authenticate(req);
     const body = req.body as any;
     if (!body.productCode || !body.code || !body.name || !body.prices || !body.entitlements) {
       throw new HttpException(
@@ -135,7 +135,7 @@ export function registerSubscriptionRoutes(router: Router): void {
 
   // 7. Administrative Catalog Management: Create New Plan Version (Privileged)
   router.post('/v1/admin/catalog/plans/:code/versions', async (req: RouteRequest): Promise<ApiResponse> => {
-    authenticate(req);
+    await authenticate(req);
     const planCode = req.params.code || '';
     const body = req.body as any;
     if (!body.prices || !body.entitlements) {

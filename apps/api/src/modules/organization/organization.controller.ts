@@ -6,7 +6,7 @@ import { UserRole } from '@brisksms/shared';
 export function registerOrganizationRoutes(router: Router): void {
   // Create organization
   router.post('/v1/organizations', async (req: RouteRequest): Promise<ApiResponse> => {
-    authenticate(req);
+    await authenticate(req);
     const userId = req.context.userId!;
     const dto = req.body as unknown as CreateOrgDto;
     const result = await organizationService.createOrganization(userId, dto);
@@ -18,7 +18,7 @@ export function registerOrganizationRoutes(router: Router): void {
 
   // List user's organizations
   router.get('/v1/organizations', async (req: RouteRequest): Promise<ApiResponse> => {
-    authenticate(req);
+    await authenticate(req);
     const userId = req.context.userId!;
     const orgs = await organizationService.listUserOrganizations(userId);
     return {
@@ -29,7 +29,7 @@ export function registerOrganizationRoutes(router: Router): void {
 
   // Get specific organization
   router.get('/v1/organizations/:id', async (req: RouteRequest): Promise<ApiResponse> => {
-    authenticate(req);
+    await authenticate(req);
     const userId = req.context.userId!;
     const orgId = req.params.id || '';
     const org = await organizationService.getOrganization(orgId, userId);
@@ -41,7 +41,7 @@ export function registerOrganizationRoutes(router: Router): void {
 
   // Invite member
   router.post('/v1/organizations/:id/invitations', async (req: RouteRequest): Promise<ApiResponse> => {
-    authenticate(req);
+    await authenticate(req);
     const userId = req.context.userId!;
     const orgId = req.params.id || '';
     const dto = req.body as unknown as InviteMemberDto;
@@ -54,7 +54,7 @@ export function registerOrganizationRoutes(router: Router): void {
 
   // List members
   router.get('/v1/organizations/:id/members', async (req: RouteRequest): Promise<ApiResponse> => {
-    authenticate(req);
+    await authenticate(req);
     const userId = req.context.userId!;
     const orgId = req.params.id || '';
     const members = await organizationService.listMembers(orgId, userId);
@@ -66,7 +66,7 @@ export function registerOrganizationRoutes(router: Router): void {
 
   // Update member role
   router.patch('/v1/organizations/:id/members/:userId', async (req: RouteRequest): Promise<ApiResponse> => {
-    authenticate(req);
+    await authenticate(req);
     const actorUserId = req.context.userId!;
     const orgId = req.params.id || '';
     const targetUserId = req.params.userId || '';
@@ -85,7 +85,7 @@ export function registerOrganizationRoutes(router: Router): void {
 
   // Remove member
   router.delete('/v1/organizations/:id/members/:userId', async (req: RouteRequest): Promise<ApiResponse> => {
-    authenticate(req);
+    await authenticate(req);
     const actorUserId = req.context.userId!;
     const orgId = req.params.id || '';
     const targetUserId = req.params.userId || '';

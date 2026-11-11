@@ -5,7 +5,7 @@ import { authenticate } from '../../core/guards.js';
 export function registerDeviceRoutes(router: Router): void {
   // Generate QR pairing token
   router.post('/v1/devices/pairing-token', async (req: RouteRequest): Promise<ApiResponse> => {
-    authenticate(req);
+    await authenticate(req);
     const userId = req.context.userId!;
     const orgId = req.context.organizationId || (req.body.organizationId as string);
 
@@ -32,7 +32,7 @@ export function registerDeviceRoutes(router: Router): void {
 
   // List organization devices
   router.get('/v1/devices', async (req: RouteRequest): Promise<ApiResponse> => {
-    authenticate(req);
+    await authenticate(req);
     const userId = req.context.userId!;
     const orgId = req.context.organizationId || (req.query.organizationId as string);
 
@@ -49,7 +49,7 @@ export function registerDeviceRoutes(router: Router): void {
 
   // Get specific device and telemetry
   router.get('/v1/devices/:id', async (req: RouteRequest): Promise<ApiResponse> => {
-    authenticate(req);
+    await authenticate(req);
     const userId = req.context.userId!;
     const orgId = req.context.organizationId || (req.query.organizationId as string);
     const deviceId = req.params.id || '';
@@ -89,7 +89,7 @@ export function registerDeviceRoutes(router: Router): void {
 
   // Revoke device
   router.post('/v1/devices/:id/revoke', async (req: RouteRequest): Promise<ApiResponse> => {
-    authenticate(req);
+    await authenticate(req);
     const userId = req.context.userId!;
     const orgId = req.context.organizationId || (req.body.organizationId as string);
     const deviceId = req.params.id || '';
@@ -107,7 +107,7 @@ export function registerDeviceRoutes(router: Router): void {
 
   // Queue remote device command (Fleet Management)
   router.post('/v1/devices/:id/command', async (req: RouteRequest): Promise<ApiResponse> => {
-    authenticate(req);
+    await authenticate(req);
     const userId = req.context.userId!;
     const orgId = req.context.organizationId || (req.body.organizationId as string);
     const deviceId = req.params.id || '';

@@ -250,6 +250,11 @@ export class BriskRedisClient {
     return this.sendCommand<string | null>('GET', key);
   }
 
+  async mget(...keys: string[]): Promise<Array<string | null>> {
+    if (keys.length === 0) return [];
+    return (await this.sendCommand<Array<string | null>>('MGET', ...keys)) ?? [];
+  }
+
   async set(key: string, value: string, ttlSeconds?: number): Promise<string> {
     if (ttlSeconds !== undefined) {
       return this.sendCommand<string>('SET', key, value, 'EX', ttlSeconds);

@@ -1,7 +1,7 @@
 import { Router, RouteRequest, ApiResponse, HttpException } from '../../core/http.js';
 import type { CookieToSet } from '../../core/cookies.js';
 import { authService, RegisterDto, LoginDto } from './auth.service.js';
-import { authenticate, validateCsrf, tokenBlacklist } from '../../core/guards.js';
+import { authenticate, validateCsrf } from '../../core/guards.js';
 import { hashToken } from '../../core/crypto.js';
 import { sql } from '@brisksms/db';
 import {
@@ -241,7 +241,7 @@ export function registerAuthRoutes(router: Router): void {
       throw new HttpException(400, 'INVALID_PAYLOAD', 'Refresh token is required');
     }
 
-    const tokens = await authService.refreshToken(token);
+    const tokens = await authService.refreshToken(token, req.tokenBlacklist);
     const csrfToken = generateCsrfToken();
 
     const cookies: CookieToSet[] = [
@@ -272,9 +272,9 @@ export function registerAuthRoutes(router: Router): void {
     }
 
     try {
-      authenticate(req);
+      await authenticate(req);
       if (req.context.jti) {
-        await authService.revokeSession(req.context.jti, req.context.userId);
+        await authService.revokeSession(req.context.jti, req.context.userId, req.tokenBlacklist);
       }
     } catch {
       // Allow clean logout even if session was expired
@@ -289,30 +289,7 @@ export function registerAuthRoutes(router: Router): void {
       `;
       const familyId = familyRows[0]?.family_id;
       if (familyId) {
-        await sql`
-          UPDATE "refresh_tokens"
-          SET "revoked_at" = NOW()
-          WHERE "family_id" = ${familyId} AND "revoked_at" IS NULL
-        `;
-        const familyTokens = await sql<{ jti: string; user_id: string }>`
-          SELECT "jti", "user_id"
-          FROM "refresh_tokens"
-          WHERE "family_id" = ${familyId}
-            AND "jti" IS NOT NULL
-        `;
-        for (const token of familyTokens) {
-          if (token.jti) {
-            tokenBlacklist.add(token.jti);
-          }
-        }
-        await sql`
-          INSERT INTO "revoked_sessions" ("jti", "user_id", "expires_at", "revoked_at")
-          SELECT "jti", "user_id", NOW() + INTERVAL '1 day', NOW()
-          FROM "refresh_tokens"
-          WHERE "family_id" = ${familyId}
-            AND "jti" IS NOT NULL
-          ON CONFLICT ("jti") DO UPDATE SET "revoked_at" = NOW()
-        `;
+        await authService.revokeFamily(familyId, req.tokenBlacklist);
       }
     }
 
@@ -330,7 +307,7 @@ export function registerAuthRoutes(router: Router): void {
   });
 
   router.get('/v1/auth/session', async (req: RouteRequest): Promise<ApiResponse> => {
-    authenticate(req);
+    await authenticate(req);
     const userId = req.context.userId!;
     const profile = await authService.getMe(userId);
 
@@ -418,7 +395,7 @@ export function registerAuthRoutes(router: Router): void {
   });
 
   router.get('/v1/auth/me', async (req: RouteRequest): Promise<ApiResponse> => {
-    authenticate(req);
+    await authenticate(req);
     const userId = req.context.userId!;
     const profile = await authService.getMe(userId);
     return {

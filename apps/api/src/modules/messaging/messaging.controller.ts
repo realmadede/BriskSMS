@@ -202,7 +202,7 @@ export function registerMessagingRoutes(router: Router): void {
 
   // 1. Get Prepaid SMS Credit Balance
   router.get('/v1/messaging/balance', async (req: RouteRequest): Promise<ApiResponse> => {
-    authenticate(req);
+    await authenticate(req);
     const userId = req.context.userId!;
     const orgId = req.query.organizationId || req.context.organizationId;
     if (!orgId) {
@@ -222,7 +222,7 @@ export function registerMessagingRoutes(router: Router): void {
 
   // 2. Dispatch Single SMS Message
   router.post('/v1/messaging/send', async (req: RouteRequest): Promise<ApiResponse> => {
-    authenticate(req);
+    await authenticate(req);
     const userId = req.context.userId!;
     const body = req.body as Record<string, any>;
     const orgId = (body.organizationId as string) || req.context.organizationId;
@@ -253,7 +253,7 @@ export function registerMessagingRoutes(router: Router): void {
 
   // 3. Create & Dispatch Bulk SMS Campaign
   router.post('/v1/messaging/campaigns', async (req: RouteRequest): Promise<ApiResponse> => {
-    authenticate(req);
+    await authenticate(req);
     const userId = req.context.userId!;
     const body = req.body as Record<string, any>;
     const orgId = (body.organizationId as string) || req.context.organizationId;
@@ -288,7 +288,7 @@ export function registerMessagingRoutes(router: Router): void {
 
   // 4. Query Credit Ledger History
   router.get('/v1/messaging/ledger', async (req: RouteRequest): Promise<ApiResponse> => {
-    authenticate(req);
+    await authenticate(req);
     const userId = req.context.userId!;
     const orgId = req.query.organizationId || req.context.organizationId;
     if (!orgId) {

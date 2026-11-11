@@ -1,7 +1,7 @@
 import { RouteRequest, HttpException } from './http.js';
 import { hashToken, verifyJwt } from './crypto.js';
 import { DeviceStatus, UserRole } from '@brisksms/shared';
-import { sql } from '@brisksms/db';
+import { sql, redisClient } from '@brisksms/db';
 import { DeviceRecord, mapDeviceRow } from './store.js';
 import { timingSafeEqual } from 'node:crypto';
 import {
@@ -11,29 +11,105 @@ import {
   isAllowedOrigin,
 } from './cookies.js';
 
-// Fast in-process cache synchronized with PostgreSQL `revoked_sessions` table
+// Fast in-process cache synchronized with PostgreSQL `revoked_sessions` table and Redis
 export const tokenBlacklist = new Set<string>();
 
-export async function syncTokenBlacklistFromDb(): Promise<number> {
+export let isRevocationSyncReady = false;
+let activeRevocationSyncPromise: Promise<number> | null = null;
+
+export function isRevocationReady(): boolean {
+  return isRevocationSyncReady;
+}
+
+export function setRevocationSyncReady(ready: boolean): void {
+  isRevocationSyncReady = ready;
+}
+
+export async function syncTokenBlacklistFromDb(targetBlacklist: Set<string> = tokenBlacklist): Promise<number> {
   const rows = await sql<{ jti: string }>`
     SELECT "jti" FROM "revoked_sessions" WHERE "expires_at" > NOW()
   `;
   for (const row of rows) {
-    tokenBlacklist.add(row.jti);
+    targetBlacklist.add(row.jti);
   }
+  try {
+    if (rows.length > 0) {
+      await Promise.all(
+        rows.map((row) =>
+          redisClient.set(`auth:revoked_jti:${row.jti}`, '1', 86400).catch(() => {})
+        ),
+      );
+    }
+    await redisClient.set('auth:revocation_sync_marker', '1', 86400).catch(() => {});
+  } catch {
+    // Redis best-effort during database sync
+  }
+  isRevocationSyncReady = true;
   return rows.length;
 }
 
-export async function isTokenRevoked(jti: string): Promise<boolean> {
-  if (tokenBlacklist.has(jti)) return true;
-  const rows = await sql<{ jti: string }>`
-    SELECT "jti" FROM "revoked_sessions" WHERE "jti" = ${jti} AND "expires_at" > NOW() LIMIT 1
-  `;
-  if (rows.length > 0) {
-    tokenBlacklist.add(jti);
+export async function ensureRevocationSync(targetBlacklist: Set<string> = tokenBlacklist): Promise<void> {
+  if (isRevocationSyncReady) return;
+  if (!activeRevocationSyncPromise) {
+    activeRevocationSyncPromise = syncTokenBlacklistFromDb(targetBlacklist).finally(() => {
+      activeRevocationSyncPromise = null;
+    });
+  }
+  await activeRevocationSyncPromise;
+}
+
+export async function isTokenRevoked(
+  jti: string,
+  targetBlacklist: Set<string> = tokenBlacklist,
+): Promise<boolean> {
+  // 1. In-process cache check ($O(1)$)
+  if (targetBlacklist.has(jti)) {
     return true;
   }
-  return false;
+
+  // 2. Shared Redis lookup
+  try {
+    const [revokedVal, syncMarker] = await redisClient.mget(
+      `auth:revoked_jti:${jti}`,
+      'auth:revocation_sync_marker',
+    );
+
+    if (revokedVal) {
+      targetBlacklist.add(jti);
+      return true;
+    }
+
+    if (syncMarker) {
+      return false;
+    }
+
+    // Sync marker is missing: Redis was restarted or flushed.
+    // Resynchronize from durable PostgreSQL!
+    await syncTokenBlacklistFromDb(targetBlacklist);
+    if (targetBlacklist.has(jti)) {
+      return true;
+    }
+
+    const checkAfter = await redisClient.get(`auth:revoked_jti:${jti}`);
+    if (checkAfter) {
+      targetBlacklist.add(jti);
+      return true;
+    }
+    return false;
+  } catch (err) {
+    if (err instanceof HttpException) throw err;
+    // 3. Fallback to PostgreSQL when Redis is unavailable or disconnected
+    const rows = await sql<{ jti: string }>`
+      SELECT "jti" FROM "revoked_sessions"
+      WHERE "jti" = ${jti} AND "expires_at" > NOW()
+      LIMIT 1
+    `;
+    if (rows.length > 0) {
+      targetBlacklist.add(jti);
+      return true;
+    }
+    return false;
+  }
 }
 
 /**
@@ -89,7 +165,12 @@ export function validateCsrf(req: RouteRequest): void {
 /**
  * Extracts and verifies JWT from Authorization header or HttpOnly session cookie
  */
-export function authenticate(req: RouteRequest): void {
+export async function authenticate(req: RouteRequest): Promise<void> {
+  const effectiveBlacklist = req.tokenBlacklist ?? tokenBlacklist;
+
+  // Ensure initial synchronization has run before processing authenticated traffic
+  await ensureRevocationSync(effectiveBlacklist);
+
   // If an Origin header is provided by a browser, verify that the origin is authorized
   const origin = typeof req.headers.origin === 'string' ? req.headers.origin : undefined;
   if (origin && !isAllowedOrigin(origin)) {
@@ -131,7 +212,7 @@ export function authenticate(req: RouteRequest): void {
     throw new HttpException(401, 'UNAUTHORIZED', 'Invalid or expired access token');
   }
 
-  if (payload.jti && tokenBlacklist.has(payload.jti)) {
+  if (payload.jti && (await isTokenRevoked(payload.jti, effectiveBlacklist))) {
     throw new HttpException(401, 'TOKEN_REVOKED', 'This session has been revoked');
   }
 
@@ -150,8 +231,8 @@ export function authenticate(req: RouteRequest): void {
 /**
  * Enforces that user is authenticated and has required role
  */
-export function authorizeRole(req: RouteRequest, allowedRoles: UserRole[]): void {
-  authenticate(req);
+export async function authorizeRole(req: RouteRequest, allowedRoles: UserRole[]): Promise<void> {
+  await authenticate(req);
 
   const userRole = req.context.role as UserRole | undefined;
   if (!userRole) {
