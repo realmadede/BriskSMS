@@ -8,6 +8,7 @@ export interface CallbackVerificationRequest {
   provider: PaymentProvider;
   headers: Record<string, string | string[] | undefined>;
   rawBody?: string | Buffer;
+  rawBodyBuffer?: Buffer;
   body: any;
   query?: Record<string, string | string[] | undefined>;
   urlPath?: string;

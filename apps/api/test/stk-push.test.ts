@@ -4,6 +4,7 @@ import { createHmac, randomUUID } from 'node:crypto';
 import { IncomingMessage, ServerResponse } from 'node:http';
 import { Socket } from 'node:net';
 import { createApp } from '../src/app.js';
+import { HttpException } from '../src/core/http.js';
 import {
   ApiKeyScope,
   EvidenceSourceType,
@@ -344,6 +345,7 @@ describe('Carrier STK Push & Asynchronous Reconciliation Engine', () => {
               CallbackMetadata: {
                 Item: [
                   { Name: 'Amount', Value: 50000 },
+                  { Name: 'Currency', Value: 'TZS' },
                   { Name: 'MpesaReceiptNumber', Value: 'UNAUTH999' },
                   { Name: 'PhoneNumber', Value: 255754000111 },
                 ],
@@ -405,6 +407,7 @@ describe('Carrier STK Push & Asynchronous Reconciliation Engine', () => {
             CallbackMetadata: {
               Item: [
                 { Name: 'Amount', Value: 30000 },
+                { Name: 'Currency', Value: 'TZS' },
                 { Name: 'MpesaReceiptNumber', Value: 'FORGE1234' },
                 { Name: 'PhoneNumber', Value: 255754000111 },
               ],
@@ -462,6 +465,7 @@ describe('Carrier STK Push & Asynchronous Reconciliation Engine', () => {
             CallbackMetadata: {
               Item: [
                 { Name: 'Amount', Value: 50000 },
+                { Name: 'Currency', Value: 'TZS' },
                 { Name: 'MpesaReceiptNumber', Value: 'QA88HH99II' },
                 { Name: 'TransactionDate', Value: 20261110120000 },
                 { Name: 'PhoneNumber', Value: 255754000111 },
@@ -526,6 +530,7 @@ describe('Carrier STK Push & Asynchronous Reconciliation Engine', () => {
             CallbackMetadata: {
               Item: [
                 { Name: 'Amount', Value: 1000 },
+                { Name: 'Currency', Value: 'TZS' },
                 { Name: 'MpesaReceiptNumber', Value: 'UNDERPAY1' },
                 { Name: 'PhoneNumber', Value: 255754000111 },
               ],
@@ -632,6 +637,7 @@ describe('Carrier STK Push & Asynchronous Reconciliation Engine', () => {
             CallbackMetadata: {
               Item: [
                 { Name: 'Amount', Value: 10000 },
+                { Name: 'Currency', Value: 'TZS' },
                 { Name: 'MpesaReceiptNumber', Value: 'XORG_REF_1' },
                 { Name: 'PhoneNumber', Value: 255754000111 },
               ],
@@ -688,6 +694,7 @@ describe('Carrier STK Push & Asynchronous Reconciliation Engine', () => {
             CallbackMetadata: {
               Item: [
                 { Name: 'Amount', Value: 40000 },
+                { Name: 'Currency', Value: 'TZS' },
                 { Name: 'MpesaReceiptNumber', Value: 'IDEM_RECEIPT_1' },
                 { Name: 'PhoneNumber', Value: 255754000111 },
               ],
@@ -747,6 +754,7 @@ describe('Carrier STK Push & Asynchronous Reconciliation Engine', () => {
             CallbackMetadata: {
               Item: [
                 { Name: 'Amount', Value: 60000 },
+                { Name: 'Currency', Value: 'TZS' },
                 { Name: 'MpesaReceiptNumber', Value: 'RACE_REF_99' },
                 { Name: 'PhoneNumber', Value: 255754000111 },
               ],
@@ -817,6 +825,7 @@ describe('Carrier STK Push & Asynchronous Reconciliation Engine', () => {
             CallbackMetadata: {
               Item: [
                 { Name: 'Amount', Value: 15000 },
+                { Name: 'Currency', Value: 'TZS' },
                 { Name: 'MpesaReceiptNumber', Value: 'ROLLBACK_REF' },
                 { Name: 'PhoneNumber', Value: 255754000111 },
               ],
@@ -881,6 +890,7 @@ describe('Carrier STK Push & Asynchronous Reconciliation Engine', () => {
             CallbackMetadata: {
               Item: [
                 { Name: 'Amount', Value: 75000 },
+                { Name: 'Currency', Value: 'TZS' },
                 { Name: 'MpesaReceiptNumber', Value: 'DISTINCT_EVID_1' },
                 { Name: 'PhoneNumber', Value: 255754000111 },
               ],
@@ -942,6 +952,7 @@ describe('Carrier STK Push & Asynchronous Reconciliation Engine', () => {
             CallbackMetadata: {
               Item: [
                 { Name: 'Amount', Value: 40000 },
+                { Name: 'Currency', Value: 'TZS' },
                 { Name: 'MpesaReceiptNumber', Value: 'QZ99AA11BB' },
                 { Name: 'PhoneNumber', Value: 255754999000 },
               ],
@@ -1024,6 +1035,652 @@ describe('Carrier STK Push & Asynchronous Reconciliation Engine', () => {
       assert.equal(invAfter?.status, InvoiceStatus.UNPAID);
       assert.equal(invAfter?.balanceCents, 2000000n);
       assert.equal(invAfter?.paidAmountCents, 0n);
+    });
+  });
+
+  describe('4. P0.1 Provider Reference Uniqueness & Callback Integrity Suite', () => {
+    it('P0.1-1: Two different checkout IDs concurrently presenting the same provider reference', async () => {
+      const testVerifier = new TestCallbackVerifier(PaymentProvider.MPESA, {
+        secretKey: TEST_CALLBACK_SECRET,
+      });
+      stkPushService.verifierRegistry.registerVerifier(testVerifier);
+
+      const inv1 = await reconciliationService.createInvoice(orgId, {
+        referenceNumber: 'INV-CONCURR-1',
+        totalAmountCents: 1000000n, // 10,000 TZS
+      });
+      const inv2 = await reconciliationService.createInvoice(orgId, {
+        referenceNumber: 'INV-CONCURR-2',
+        totalAmountCents: 1000000n, // 10,000 TZS
+      });
+
+      const init1 = await makeRequest(
+        'POST',
+        '/v1/payments/stk-push',
+        { Authorization: `Bearer ${validApiKey}`, 'Content-Type': 'application/json' },
+        { phoneNumber: '0754 000 111', amount: 10000, invoiceId: inv1.id },
+      );
+      const init2 = await makeRequest(
+        'POST',
+        '/v1/payments/stk-push',
+        { Authorization: `Bearer ${validApiKey}`, 'Content-Type': 'application/json' },
+        { phoneNumber: '0754 000 222', amount: 10000, invoiceId: inv2.id },
+      );
+
+      const checkoutId1 = init1.json?.data?.checkoutId;
+      const checkoutId2 = init2.json?.data?.checkoutId;
+
+      const sharedRef = 'COLLIDE_REF_001';
+      const payload1 = {
+        Body: {
+          stkCallback: {
+            CheckoutRequestID: checkoutId1,
+            ResultCode: 0,
+            ResultDesc: 'Success',
+            CallbackMetadata: {
+              Item: [
+                { Name: 'Amount', Value: 10000 },
+                { Name: 'Currency', Value: 'TZS' },
+                { Name: 'MpesaReceiptNumber', Value: sharedRef },
+                { Name: 'PhoneNumber', Value: 255754000111 },
+              ],
+            },
+          },
+        },
+      };
+
+      const payload2 = {
+        Body: {
+          stkCallback: {
+            CheckoutRequestID: checkoutId2,
+            ResultCode: 0,
+            ResultDesc: 'Success',
+            CallbackMetadata: {
+              Item: [
+                { Name: 'Amount', Value: 10000 },
+                { Name: 'Currency', Value: 'TZS' },
+                { Name: 'MpesaReceiptNumber', Value: sharedRef },
+                { Name: 'PhoneNumber', Value: 255754000222 },
+              ],
+            },
+          },
+        },
+      };
+
+      const nowSec = Math.floor(Date.now() / 1000);
+      const headers1 = createSignedCallbackHeaders(payload1, nowSec);
+      const headers2 = createSignedCallbackHeaders(payload2, nowSec + 1);
+
+      // Execute concurrently
+      const [res1, res2] = await Promise.all([
+        makeRequest('POST', '/v1/payments/stk-push/callback/mpesa', headers1, payload1),
+        makeRequest('POST', '/v1/payments/stk-push/callback/mpesa', headers2, payload2),
+      ]);
+
+      const statuses = [res1.statusCode, res2.statusCode].sort();
+      assert.deepEqual(statuses, [200, 409]);
+
+      // Exactly ONE invoice must be settled
+      const checkInv1 = await reconciliationService.findInvoiceById(orgId, inv1.id);
+      const checkInv2 = await reconciliationService.findInvoiceById(orgId, inv2.id);
+      const paidInvoices = [checkInv1?.status, checkInv2?.status].filter((s) => s === InvoiceStatus.PAID);
+      assert.equal(paidInvoices.length, 1);
+
+      // Exactly ONE claim in payment_reference_claims
+      const claims = await sql`
+        SELECT * FROM "payment_reference_claims"
+        WHERE "provider" = 'MPESA'::"PaymentProvider" AND "provider_reference" = ${sharedRef}
+      `;
+      assert.equal(claims.length, 1);
+
+      // Exactly ONE normalized payment
+      const payments = await sql`
+        SELECT * FROM "normalized_payments"
+        WHERE "provider" = 'MPESA'::"PaymentProvider" AND "reference" = ${sharedRef}
+      `;
+      assert.equal(payments.length, 1);
+    });
+
+    it('P0.1-2: The same provider reference cannot be claimed by two different organizations', async () => {
+      const testVerifier = new TestCallbackVerifier(PaymentProvider.MPESA, {
+        secretKey: TEST_CALLBACK_SECRET,
+      });
+      stkPushService.verifierRegistry.registerVerifier(testVerifier);
+
+      const invA = await reconciliationService.createInvoice(orgId, {
+        referenceNumber: 'INV-ORGA-CLAIM',
+        totalAmountCents: 2000000n, // 20,000 TZS
+      });
+      const invB = await reconciliationService.createInvoice(otherOrgId, {
+        referenceNumber: 'INV-ORGB-CLAIM',
+        totalAmountCents: 2000000n, // 20,000 TZS
+      });
+
+      const keyResB = await apiKeyService.createApiKey(otherOrgId, {
+        organizationId: otherOrgId,
+        name: 'Org B Key',
+        scopes: [ApiKeyScope.PAYMENT_STK, ApiKeyScope.PAYMENTS_READ, ApiKeyScope.INVOICES_WRITE],
+      });
+
+      const initA = await makeRequest(
+        'POST',
+        '/v1/payments/stk-push',
+        { Authorization: `Bearer ${validApiKey}`, 'Content-Type': 'application/json' },
+        { phoneNumber: '0754 000 111', amount: 20000, invoiceId: invA.id },
+      );
+      const initB = await makeRequest(
+        'POST',
+        '/v1/payments/stk-push',
+        { Authorization: `Bearer ${keyResB.plainTextSecret}`, 'Content-Type': 'application/json' },
+        { phoneNumber: '0754 000 222', amount: 20000, invoiceId: invB.id },
+      );
+
+      const checkoutA = initA.json?.data?.checkoutId;
+      const checkoutB = initB.json?.data?.checkoutId;
+      const crossRef = 'CROSS_ORG_REF_999';
+
+      // Org A claims reference first
+      const payloadA = {
+        Body: {
+          stkCallback: {
+            CheckoutRequestID: checkoutA,
+            ResultCode: 0,
+            ResultDesc: 'Success',
+            CallbackMetadata: {
+              Item: [
+                { Name: 'Amount', Value: 20000 },
+                { Name: 'Currency', Value: 'TZS' },
+                { Name: 'MpesaReceiptNumber', Value: crossRef },
+                { Name: 'PhoneNumber', Value: 255754000111 },
+              ],
+            },
+          },
+        },
+      };
+
+      const resA = await makeRequest('POST', '/v1/payments/stk-push/callback/mpesa', createSignedCallbackHeaders(payloadA), payloadA);
+      assert.equal(resA.statusCode, 200);
+
+      // Org B attempts to claim the same reference
+      const payloadB = {
+        Body: {
+          stkCallback: {
+            CheckoutRequestID: checkoutB,
+            ResultCode: 0,
+            ResultDesc: 'Success',
+            CallbackMetadata: {
+              Item: [
+                { Name: 'Amount', Value: 20000 },
+                { Name: 'Currency', Value: 'TZS' },
+                { Name: 'MpesaReceiptNumber', Value: crossRef },
+                { Name: 'PhoneNumber', Value: 255754000222 },
+              ],
+            },
+          },
+        },
+      };
+
+      const resB = await makeRequest('POST', '/v1/payments/stk-push/callback/mpesa', createSignedCallbackHeaders(payloadB), payloadB);
+      assert.equal(resB.statusCode, 409);
+      assert.equal(resB.json?.error?.code, 'REFERENCE_ALREADY_USED');
+
+      // Org B invoice remains UNPAID
+      const checkInvB = await reconciliationService.findInvoiceById(otherOrgId, invB.id);
+      assert.equal(checkInvB?.status, InvoiceStatus.UNPAID);
+      assert.equal(checkInvB?.paidAmountCents, 0n);
+
+      // Org B checkout remains PENDING
+      const checkStkB = await stkPushService.getStkTransactionStatus(otherOrgId, checkoutB);
+      assert.equal(checkStkB.status, StkPushStatus.PENDING);
+    });
+
+    it('P0.1-3: Duplicate reference claims across normalized_payments and stk_push_transactions are rejected', async () => {
+      const testVerifier = new TestCallbackVerifier(PaymentProvider.MPESA, {
+        secretKey: TEST_CALLBACK_SECRET,
+      });
+      stkPushService.verifierRegistry.registerVerifier(testVerifier);
+
+      const smsRef = 'QC77BB88AA';
+      // 1. Ingest an SMS notification first (creates normalized_payments entry)
+      await ingestionService.ingestEvidence({
+        organizationId: orgId,
+        sourceType: EvidenceSourceType.ANDROID_NOTIFICATION_RELAY,
+        senderAddress: 'M-PESA',
+        rawPayload: `${smsRef} Imethibitishwa. Umepokea Tsh25,000.00 kutoka kwa JOHN DOE 255754111222 tarehe 11/11/2026 saa 10:00 AM. Salio lako jipya la M-Pesa ni Tsh100,000.00.`,
+        deviceTimestamp: new Date(),
+      });
+
+      // 2. STK Push is initiated
+      const invoice = await reconciliationService.createInvoice(orgId, {
+        referenceNumber: 'INV-SMS-DUP',
+        totalAmountCents: 2500000n,
+      });
+      const initRes = await makeRequest(
+        'POST',
+        '/v1/payments/stk-push',
+        { Authorization: `Bearer ${validApiKey}`, 'Content-Type': 'application/json' },
+        { phoneNumber: '0754 111 222', amount: 25000, invoiceId: invoice.id },
+      );
+      const checkoutId = initRes.json?.data?.checkoutId;
+
+      // 3. Callback arrives with same receipt number as the already-ingested SMS
+      const payload = {
+        Body: {
+          stkCallback: {
+            CheckoutRequestID: checkoutId,
+            ResultCode: 0,
+            ResultDesc: 'Success',
+            CallbackMetadata: {
+              Item: [
+                { Name: 'Amount', Value: 25000 },
+                { Name: 'Currency', Value: 'TZS' },
+                { Name: 'MpesaReceiptNumber', Value: smsRef },
+                { Name: 'PhoneNumber', Value: 255754111222 },
+              ],
+            },
+          },
+        },
+      };
+
+      const res = await makeRequest('POST', '/v1/payments/stk-push/callback/mpesa', createSignedCallbackHeaders(payload), payload);
+      assert.equal(res.statusCode, 409);
+      assert.equal(res.json?.error?.code, 'REFERENCE_ALREADY_USED');
+
+      // Invoice remains unpaid
+      const invCheck = await reconciliationService.findInvoiceById(orgId, invoice.id);
+      assert.equal(invCheck?.status, InvoiceStatus.UNPAID);
+    });
+
+    it('P0.1-4: The same reference claimed concurrently across independent database transactions is serialized', async () => {
+      const testVerifier = new TestCallbackVerifier(PaymentProvider.MPESA, {
+        secretKey: TEST_CALLBACK_SECRET,
+      });
+      stkPushService.verifierRegistry.registerVerifier(testVerifier);
+
+      const inv1 = await reconciliationService.createInvoice(orgId, {
+        referenceNumber: 'INV-WORKER-1',
+        totalAmountCents: 5000000n,
+      });
+      const inv2 = await reconciliationService.createInvoice(otherOrgId, {
+        referenceNumber: 'INV-WORKER-2',
+        totalAmountCents: 5000000n,
+      });
+
+      const keyResB = await apiKeyService.createApiKey(otherOrgId, {
+        organizationId: otherOrgId,
+        name: 'Worker B Key',
+        scopes: [ApiKeyScope.PAYMENT_STK, ApiKeyScope.PAYMENTS_READ, ApiKeyScope.INVOICES_WRITE],
+      });
+
+      const init1 = await makeRequest(
+        'POST',
+        '/v1/payments/stk-push',
+        { Authorization: `Bearer ${validApiKey}`, 'Content-Type': 'application/json' },
+        { phoneNumber: '0754 000 111', amount: 50000, invoiceId: inv1.id },
+      );
+      const init2 = await makeRequest(
+        'POST',
+        '/v1/payments/stk-push',
+        { Authorization: `Bearer ${keyResB.plainTextSecret}`, 'Content-Type': 'application/json' },
+        { phoneNumber: '0754 000 222', amount: 50000, invoiceId: inv2.id },
+      );
+
+      const workerRef = 'WORKER_RACE_77';
+      const payload1 = {
+        Body: {
+          stkCallback: {
+            CheckoutRequestID: init1.json?.data?.checkoutId,
+            ResultCode: 0,
+            ResultDesc: 'Success',
+            CallbackMetadata: {
+              Item: [
+                { Name: 'Amount', Value: 50000 },
+                { Name: 'Currency', Value: 'TZS' },
+                { Name: 'MpesaReceiptNumber', Value: workerRef },
+                { Name: 'PhoneNumber', Value: 255754000111 },
+              ],
+            },
+          },
+        },
+      };
+
+      const payload2 = {
+        Body: {
+          stkCallback: {
+            CheckoutRequestID: init2.json?.data?.checkoutId,
+            ResultCode: 0,
+            ResultDesc: 'Success',
+            CallbackMetadata: {
+              Item: [
+                { Name: 'Amount', Value: 50000 },
+                { Name: 'Currency', Value: 'TZS' },
+                { Name: 'MpesaReceiptNumber', Value: workerRef },
+                { Name: 'PhoneNumber', Value: 255754000222 },
+              ],
+            },
+          },
+        },
+      };
+
+      const nowSec = Math.floor(Date.now() / 1000);
+      const [res1, res2] = await Promise.all([
+        makeRequest('POST', '/v1/payments/stk-push/callback/mpesa', createSignedCallbackHeaders(payload1, nowSec), payload1),
+        makeRequest('POST', '/v1/payments/stk-push/callback/mpesa', createSignedCallbackHeaders(payload2, nowSec + 1), payload2),
+      ]);
+
+      const codes = [res1.statusCode, res2.statusCode].sort();
+      assert.deepEqual(codes, [200, 409]);
+
+      // Exactly 1 claim in database
+      const countClaims = await sql`
+        SELECT COUNT(*)::int as count FROM "payment_reference_claims"
+        WHERE "provider_reference" = ${workerRef}
+      `;
+      assert.equal(countClaims[0]!.count, 1);
+    });
+
+    it('P0.1-5: Rollback after a failed reference claim leaves no evidence, normalized payments, or settlements', async () => {
+      const testVerifier = new TestCallbackVerifier(PaymentProvider.MPESA, {
+        secretKey: TEST_CALLBACK_SECRET,
+      });
+      stkPushService.verifierRegistry.registerVerifier(testVerifier);
+
+      const existingRef = 'ALREADY_TAKEN_REF';
+      // Seed an existing claim in payment_reference_claims
+      await sql`
+        INSERT INTO "payment_reference_claims" (
+          "id", "provider", "provider_reference", "organization_id", "checkout_id", "claimed_at"
+        )
+        VALUES (
+          gen_random_uuid(), 'MPESA'::"PaymentProvider", ${existingRef}, ${otherOrgId}, 'stk_prior', NOW()
+        )
+      `;
+
+      const invoice = await reconciliationService.createInvoice(orgId, {
+        referenceNumber: 'INV-ROLLBACK-CLAIM',
+        totalAmountCents: 3000000n,
+      });
+
+      const initRes = await makeRequest(
+        'POST',
+        '/v1/payments/stk-push',
+        { Authorization: `Bearer ${validApiKey}`, 'Content-Type': 'application/json' },
+        { phoneNumber: '0754 000 111', amount: 30000, invoiceId: invoice.id },
+      );
+      const checkoutId = initRes.json?.data?.checkoutId;
+
+      const payload = {
+        Body: {
+          stkCallback: {
+            CheckoutRequestID: checkoutId,
+            ResultCode: 0,
+            ResultDesc: 'Success',
+            CallbackMetadata: {
+              Item: [
+                { Name: 'Amount', Value: 30000 },
+                { Name: 'Currency', Value: 'TZS' },
+                { Name: 'MpesaReceiptNumber', Value: existingRef },
+                { Name: 'PhoneNumber', Value: 255754000111 },
+              ],
+            },
+          },
+        },
+      };
+
+      const res = await makeRequest('POST', '/v1/payments/stk-push/callback/mpesa', createSignedCallbackHeaders(payload), payload);
+      assert.equal(res.statusCode, 409);
+
+      // Verify transaction rolled back completely
+      const stkCheck = await stkPushService.getStkTransactionStatus(orgId, checkoutId);
+      assert.equal(stkCheck.status, StkPushStatus.PENDING);
+
+      // No normalized payment created in orgId
+      const payCheck = await sql`
+        SELECT * FROM "normalized_payments" WHERE "organization_id" = ${orgId}
+      `;
+      assert.equal(payCheck.length, 0);
+
+      // No raw evidence created in orgId
+      const evCheck = await sql`
+        SELECT * FROM "raw_payment_evidence" WHERE "organization_id" = ${orgId}
+      `;
+      assert.equal(evCheck.length, 0);
+
+      // Invoice untouched
+      const invCheck = await reconciliationService.findInvoiceById(orgId, invoice.id);
+      assert.equal(invCheck?.status, InvoiceStatus.UNPAID);
+    });
+
+    it('P0.1-6: An expired transaction receiving a late success callback remains EXPIRED and does not settle', async () => {
+      const testVerifier = new TestCallbackVerifier(PaymentProvider.MPESA, {
+        secretKey: TEST_CALLBACK_SECRET,
+      });
+      stkPushService.verifierRegistry.registerVerifier(testVerifier);
+
+      const invoice = await reconciliationService.createInvoice(orgId, {
+        referenceNumber: 'INV-EXPIRED-1',
+        totalAmountCents: 1000000n,
+      });
+
+      const initRes = await makeRequest(
+        'POST',
+        '/v1/payments/stk-push',
+        { Authorization: `Bearer ${validApiKey}`, 'Content-Type': 'application/json' },
+        { phoneNumber: '0754 000 111', amount: 10000, invoiceId: invoice.id },
+      );
+      const checkoutId = initRes.json?.data?.checkoutId;
+
+      // Mark transaction EXPIRED (e.g. by expiration background job)
+      await sql`
+        UPDATE "stk_push_transactions"
+        SET "status" = 'EXPIRED'::"StkPushStatus"
+        WHERE "id" = ${checkoutId}
+      `;
+
+      // Late success callback arrives
+      const payload = {
+        Body: {
+          stkCallback: {
+            CheckoutRequestID: checkoutId,
+            ResultCode: 0,
+            ResultDesc: 'Success',
+            CallbackMetadata: {
+              Item: [
+                { Name: 'Amount', Value: 10000 },
+                { Name: 'Currency', Value: 'TZS' },
+                { Name: 'MpesaReceiptNumber', Value: 'LATE_REF_01' },
+                { Name: 'PhoneNumber', Value: 255754000111 },
+              ],
+            },
+          },
+        },
+      };
+
+      const res = await makeRequest('POST', '/v1/payments/stk-push/callback/mpesa', createSignedCallbackHeaders(payload), payload);
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.json?.data?.status, StkPushStatus.EXPIRED);
+
+      // Verify transaction remains EXPIRED
+      const stkCheck = await stkPushService.getStkTransactionStatus(orgId, checkoutId);
+      assert.equal(stkCheck.status, StkPushStatus.EXPIRED);
+
+      // Invoice remains UNPAID
+      const invCheck = await reconciliationService.findInvoiceById(orgId, invoice.id);
+      assert.equal(invCheck?.status, InvoiceStatus.UNPAID);
+      assert.equal(invCheck?.paidAmountCents, 0n);
+
+      // No claim created
+      const claims = await sql`
+        SELECT * FROM "payment_reference_claims" WHERE "provider_reference" = 'LATE_REF_01'
+      `;
+      assert.equal(claims.length, 0);
+    });
+
+    it('P0.1-7: Missing callback currency fails closed with 422 MISSING_CALLBACK_CURRENCY', async () => {
+      const testVerifier = new TestCallbackVerifier(PaymentProvider.MIXX, {
+        secretKey: TEST_CALLBACK_SECRET,
+      });
+      stkPushService.verifierRegistry.registerVerifier(testVerifier);
+
+      const invoice = await reconciliationService.createInvoice(orgId, {
+        referenceNumber: 'INV-NOCURR',
+        totalAmountCents: 1500000n,
+      });
+
+      const initRes = await makeRequest(
+        'POST',
+        '/v1/payments/stk-push',
+        { Authorization: `Bearer ${validApiKey}`, 'Content-Type': 'application/json' },
+        { phoneNumber: '0713 000 111', amount: 15000, invoiceId: invoice.id, currency: 'TZS' },
+      );
+      const checkoutId = initRes.json?.data?.checkoutId;
+
+      // Omit currency completely
+      const payload = {
+        checkoutId,
+        success: true,
+        amountCents: 1500000,
+        providerReference: 'TIGO_NOCURR_1',
+      };
+
+      const res = await makeRequest('POST', '/v1/payments/stk-push/callback/mixx', createSignedCallbackHeaders(payload), payload);
+      assert.equal(res.statusCode, 422);
+      assert.equal(res.json?.error?.code, 'MISSING_CALLBACK_CURRENCY');
+
+      // Invoice remains unpaid
+      const invCheck = await reconciliationService.findInvoiceById(orgId, invoice.id);
+      assert.equal(invCheck?.status, InvoiceStatus.UNPAID);
+    });
+
+    it('P0.1-8: Currency mismatch fails closed with 422 CURRENCY_MISMATCH', async () => {
+      const testVerifier = new TestCallbackVerifier(PaymentProvider.MIXX, {
+        secretKey: TEST_CALLBACK_SECRET,
+      });
+      stkPushService.verifierRegistry.registerVerifier(testVerifier);
+
+      const invoice = await reconciliationService.createInvoice(orgId, {
+        referenceNumber: 'INV-CURR-MISMATCH',
+        totalAmountCents: 2000000n,
+        currency: 'TZS',
+      });
+
+      const initRes = await makeRequest(
+        'POST',
+        '/v1/payments/stk-push',
+        { Authorization: `Bearer ${validApiKey}`, 'Content-Type': 'application/json' },
+        { phoneNumber: '0713 000 111', amount: 20000, invoiceId: invoice.id, currency: 'TZS' },
+      );
+      const checkoutId = initRes.json?.data?.checkoutId;
+
+      const payload = {
+        checkoutId,
+        success: true,
+        amountCents: 2000000,
+        currency: 'EUR',
+        providerReference: 'TIGO_EUR_1',
+      };
+
+      const res = await makeRequest('POST', '/v1/payments/stk-push/callback/mixx', createSignedCallbackHeaders(payload), payload);
+      assert.equal(res.statusCode, 422);
+      assert.equal(res.json?.error?.code, 'CURRENCY_MISMATCH');
+
+      // Invoice remains unpaid
+      const invCheck = await reconciliationService.findInvoiceById(orgId, invoice.id);
+      assert.equal(invCheck?.status, InvoiceStatus.UNPAID);
+    });
+
+    it('P0.1-9: Exact original request bytes survive HTTP ingress and evidence persistence without reserialization', async () => {
+      const testVerifier = new TestCallbackVerifier(PaymentProvider.MPESA, {
+        secretKey: TEST_CALLBACK_SECRET,
+      });
+      stkPushService.verifierRegistry.registerVerifier(testVerifier);
+
+      const invoice = await reconciliationService.createInvoice(orgId, {
+        referenceNumber: 'INV-RAW-BYTES',
+        totalAmountCents: 3500000n,
+      });
+
+      const initRes = await makeRequest(
+        'POST',
+        '/v1/payments/stk-push',
+        { Authorization: `Bearer ${validApiKey}`, 'Content-Type': 'application/json' },
+        { phoneNumber: '0754 000 111', amount: 35000, invoiceId: invoice.id },
+      );
+      const checkoutId = initRes.json?.data?.checkoutId;
+
+      // Custom formatting with unique multi-spaces, trailing newline, and non-canonical property ordering
+      const rawBodyString = `{\n  "extra_nonstandard_field":   "test_whitespace",\n  "Body": {\n    "stkCallback": {\n      "CheckoutRequestID": "${checkoutId}",\n      "ResultCode": 0,\n      "ResultDesc": "Success",\n      "CallbackMetadata": {\n        "Item": [\n          { "Name": "Amount", "Value": 35000 },\n          { "Name": "Currency", "Value": "TZS" },\n          { "Name": "MpesaReceiptNumber", "Value": "RAW_BYTES_REF" },\n          { "Name": "PhoneNumber", "Value": 255754000111 }\n        ]\n      }\n    }\n  }\n}\n`;
+
+      const nowSec = Math.floor(Date.now() / 1000);
+      const signingInput = `${nowSec}.${rawBodyString}`;
+      const sig = createHmac('sha256', TEST_CALLBACK_SECRET).update(signingInput, 'utf8').digest('hex');
+
+      const headers = {
+        'content-type': 'application/json',
+        'x-signature': sig,
+        'x-timestamp': nowSec.toString(),
+        'x-nonce': 'test_nonce_123',
+      };
+
+      // Custom makeRequest that pushes raw string directly
+      const socket = new Socket();
+      const req = new IncomingMessage(socket);
+      req.method = 'POST';
+      req.url = '/v1/payments/stk-push/callback/mpesa';
+      req.headers = { ...headers, host: 'localhost:3000' };
+      const res = new ServerResponse(req);
+      let capturedBody = '';
+      let statusCode = 200;
+      res.writeHead = (c: number) => { statusCode = c; return res; };
+      res.write = (c: any) => { if (c) capturedBody += c; return true; };
+      res.end = (c?: any) => { if (c) capturedBody += c; return res; };
+      req.push(rawBodyString);
+      req.push(null);
+
+      await router.handle(req, res);
+      assert.equal(statusCode, 200);
+
+      // Verify raw_payment_evidence stores the EXACT rawBodyString, NOT re-serialized JSON!
+      const evRows = await sql<Record<string, any>>`
+        SELECT * FROM "raw_payment_evidence"
+        WHERE "organization_id" = ${orgId}
+        ORDER BY "received_at" DESC
+        LIMIT 1
+      `;
+      assert.equal(evRows.length, 1);
+      assert.equal(evRows[0]!.raw_payload, rawBodyString);
+      assert.equal(evRows[0]!.nonce, 'test_nonce_123');
+    });
+
+    it('P0.1-10: TestCallbackVerifier cannot be instantiated in production mode', () => {
+      const prevEnv = process.env.NODE_ENV;
+      try {
+        process.env.NODE_ENV = 'production';
+        assert.throws(
+          () => new TestCallbackVerifier(PaymentProvider.MPESA, { secretKey: 'foo' }),
+          /SECURITY VIOLATION: TestCallbackVerifier cannot be instantiated in production environment/,
+        );
+      } finally {
+        process.env.NODE_ENV = prevEnv;
+      }
+    });
+
+    it('P0.1-11: Direct invocation of handleCarrierCallback enforces trust boundary at service layer', async () => {
+      // 1. With default registry (all disabled), direct call fails with 403 PROVIDER_CALLBACK_DISABLED
+      stkPushService.verifierRegistry.resetToDefaults();
+      await assert.rejects(
+        () => stkPushService.handleCarrierCallback(PaymentProvider.MPESA, { checkoutId: 'dummy' }),
+        (err: any) => err instanceof HttpException && err.statusCode === 403 && err.code === 'PROVIDER_CALLBACK_DISABLED',
+      );
+
+      // 2. With test verifier registered, direct call without signature headers fails with 401 MISSING_SIGNATURE
+      const testVerifier = new TestCallbackVerifier(PaymentProvider.MPESA, { secretKey: TEST_CALLBACK_SECRET });
+      stkPushService.verifierRegistry.registerVerifier(testVerifier);
+
+      await assert.rejects(
+        () => stkPushService.handleCarrierCallback(PaymentProvider.MPESA, { checkoutId: 'dummy' }),
+        (err: any) => err instanceof HttpException && err.statusCode === 401 && err.code === 'MISSING_SIGNATURE',
+      );
     });
   });
 });

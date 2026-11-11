@@ -201,7 +201,7 @@ Ambiguous Statuses (UNCERTAIN):
 
 ## 6. Authoritative Database Migrations
 
-Inspection of `packages/db/prisma/migrations/` and PostgreSQL schema history confirms **7 sequential migrations**:
+Inspection of `packages/db/prisma/migrations/` and PostgreSQL schema history confirms **8 sequential migrations**:
 
 ```text
 1. 20261107000000_init_foundation
@@ -218,9 +218,13 @@ Inspection of `packages/db/prisma/migrations/` and PostgreSQL schema history con
    - stk_push_transactions table with StkPushStatus enum, carrier routing, and invoice relations.
 7. 20261111000000_refresh_token_family_revocation
    - refresh_tokens table family_id column (UUID NOT NULL DEFAULT gen_random_uuid()) and family_id index.
+8. 20261111010000_provider_reference_claims_and_unique_stk
+   - payment_reference_claims table with CONSTRAINT payment_reference_claims_unique UNIQUE (provider, provider_reference).
+   - Partial unique index stk_push_transactions_provider_ref_success_unique on stk_push_transactions(provider, provider_reference) WHERE status = 'SUCCESS' AND provider_reference IS NOT NULL.
+   - Backfills existing claims from normalized_payments and successful stk_push_transactions.
 ```
 
-- **Applied Status in Database:** Verified via `bun run db:status` — all 7 migrations are applied and active in the local PostgreSQL database.
+- **Applied Status in Database:** Verified via `bun run db:status` — all 8 migrations are applied and active in the local PostgreSQL database.
 - **Migration Execution Duration:** < 1.8 seconds on fresh PostgreSQL 16 cluster.
 
 ---
@@ -230,19 +234,25 @@ Inspection of `packages/db/prisma/migrations/` and PostgreSQL schema history con
 To eliminate financial settlement forgery and unauthenticated state mutation, BriskSMS implements an explicit provider-specific callback verification boundary in `apps/api/src/modules/stk-push/`:
 
 ### Implemented Callback Verification Infrastructure
-1. **`ProviderCallbackVerifier` Abstraction:** Verification operates on the exact HTTP request representation (`headers`, `rawBody`, `body`, `query`, `ipAddress`) according to provider contracts.
+1. **`ProviderCallbackVerifier` Abstraction:** Verification operates on the exact HTTP request representation (`headers`, `rawBody`, `body`, `query`, `ipAddress`, and `rawBodyBuffer`) according to provider contracts.
 2. **Safe Disabled-by-Default State:** Because official carrier authentication mechanisms (mutual TLS, HMAC, or certificates) for Vodacom Daraja, Mixx (Tigo), Airtel Money, and HaloPesa are not yet configured with production credentials, all providers default to `DisabledProviderCallbackVerifier`. Unauthenticated or unconfigured callbacks are rejected immediately with HTTP 403 `PROVIDER_CALLBACK_DISABLED`.
 3. **Settlement Authorization Enforcements:**
    - **Transaction Row Lock:** `SELECT ... FOR UPDATE` on `stk_push_transactions` inside an ACID transaction.
+   - **Provider-Reference Cross-Replica Serialization:** PostgreSQL transaction-level advisory lock (`SELECT pg_advisory_xact_lock(hashtext('payment_ref_claim:' || provider || ':' || providerRef))`) guarantees concurrent callbacks presenting the same provider reference across separate database connections or API replicas are serialized before reading or registering claims.
+   - **Provider Reference Platform-Wide Uniqueness:** Claims are recorded in the durable `payment_reference_claims` table with a global `UNIQUE (provider, provider_reference)` constraint. A provider reference claimed in Organization A cannot be re-claimed in Organization B or anywhere on the platform.
+   - **Durable Partial Unique Index:** `stk_push_transactions_provider_ref_success_unique` guarantees that no two successful STK checkouts can ever share the same provider reference.
+   - **Terminal State Non-Resurrection:** `EXPIRED` transactions are strictly terminal. A late carrier callback for an expired checkout fails closed with HTTP 409 `TRANSACTION_EXPIRED` and cannot resurrect the checkout or settle an invoice.
    - **Provider Match:** The incoming route provider must match the original transaction provider.
    - **Amount Exact Match:** The callback amount in minor units (`amount_cents`) must match the requested amount to the cent. Mismatches are rejected with HTTP 422 `AMOUNT_MISMATCH`.
-   - **Currency Match:** Currency must match requested currency (`TZS`). Mismatches reject with HTTP 422 `CURRENCY_MISMATCH`.
-   - **Provider Reference Uniqueness:** Cryptographically verifies that `provider_reference` has not been previously redeemed in the organization across `normalized_payments` or other STK transactions.
-   - **Idempotency:** Replayed successful callbacks return the existing status DTO without re-decrementing invoice balances or creating duplicate payments.
-4. **Provider-Native Evidence Provenance (No Synthetic SMS):**
-   - Direct provider callbacks persist authentic raw JSON payloads in `raw_payment_evidence` with `sourceType: DIRECT_PROVIDER_API` and `sender_address: PROVIDER_API_<provider>`.
+   - **Currency Exact Match & Missing Currency Fail-Closed:** Callback currency must match the requested invoice currency (`TZS`). If the carrier callback omits currency, the request fails closed with HTTP 422 `MISSING_CALLBACK_CURRENCY`. Currency mismatches fail closed with HTTP 422 `CURRENCY_MISMATCH`.
+   - **Idempotency:** Replayed successful callbacks for the same checkout return the existing status DTO without re-decrementing invoice balances or creating duplicate payments.
+4. **Provider-Native Evidence Provenance & Raw Byte Preservation:**
+   - Original HTTP request body bytes (`rawBodyBuffer`) are preserved verbatim in `raw_payment_evidence.raw_payload` via `rawPayloadBytesStr` without JSON re-serialization, preserving exact whitespaces, ordering, and signatures for audit trails.
+   - Direct provider callbacks persist authentic payloads in `raw_payment_evidence` with `sourceType: DIRECT_PROVIDER_API` and `sender_address: PROVIDER_API_<provider>`.
    - Simulated Swahili SMS strings (`simulatedRawSms`) have been completely eliminated.
    - Companion Android handsets forwarding carrier SMS for the same transaction reference are deduplicated via `computeDeduplicationHash` and marked `DUPLICATE_REJECTED` without double-settlement.
+5. **Test Verifier Production Environment Guard:**
+   - `TestCallbackVerifier` enforces `if (process.env.NODE_ENV === 'production') throw new Error('SECURITY VIOLATION: TestCallbackVerifier cannot be instantiated in production environment');` to prevent test verifiers from ever executing in production staging.
 
 ### Provider Integration & External Status Matrix
 
@@ -265,9 +275,9 @@ To eliminate financial settlement forgery and unauthenticated state mutation, Br
 
 ### Fresh Execution on Current HEAD
 - **Execution Date:** 2026-11-11
-- **Command:** `bun run test` (`bun test packages/shared/test/ packages/parser-engine/test/ packages/ui/test/ apps/api/test/ packages/zapier-app/test/`)
-- **Services:** Local PostgreSQL (port 54322) and Redis (port 6379)
-- **Results:** **385 passed, 0 failed, 0 skipped across 29 test files** (149.45s execution time).
+- **Command:** `npm test` (`bun test packages/shared/test/ packages/parser-engine/test/ packages/ui/test/ apps/api/test/ packages/zapier-app/test/`)
+- **Services:** Local PostgreSQL 16 (port 54322) and Redis 7 (port 6379)
+- **Results:** **396 passed, 0 failed, 0 skipped across 29 test files** (231.95s execution time).
 - **Typecheck:** `tsc -b` passed with 0 compiler errors.
 - **Build:** `bun run build` cleanly bundled all 6 workspace packages into `dist/`.
 
@@ -278,11 +288,12 @@ To eliminate financial settlement forgery and unauthenticated state mutation, Br
 | **Remote CI Run #19** | `c7b4a50ab8ad636996f328645be2d18517230bd2` | 259 passed, 0 failed | 23 test files | `VERIFIED IN REMOTE CI` |
 | **Pre-Audit Baseline** | `5f590acbce6e4ef11a852f3c687e5aa3066d9775` | 342 passed, 0 failed | 26 test files | `VERIFIED BY AUTOMATED TEST` |
 | **Distributed Revocation HEAD** | `36221acc343682978cca0edcddd256f038c5da05` | 375 passed, 0 failed | 29 test files | `VERIFIED BY AUTOMATED TEST` |
-| **Current Working HEAD** | P0 Payment Callback Trust-Boundary Hardening | 385 passed, 0 failed | 29 test files | `VERIFIED BY AUTOMATED TEST` |
-| **Delta (Added Tests)** | `a80f998`..HEAD | +126 tests (Auth, Nonce, STK Callback Trust Boundary, Family Revocation, 429 Safety, Distributed Revocation) | +6 test files | `VERIFIED BY AUTOMATED TEST` (Pending Remote CI Push) |
+| **Callback Trust-Boundary HEAD** | `31db9333541a188ade63c30646cf2572d22e3aa9` | 385 passed, 0 failed | 29 test files | `VERIFIED BY AUTOMATED TEST` |
+| **Current Working HEAD** | P0.1 Provider Reference Uniqueness & Callback Integrity | 396 passed, 0 failed | 29 test files | `VERIFIED BY AUTOMATED TEST` |
+| **Delta (Added Tests)** | `a80f998`..HEAD | +137 tests (Auth, Nonce, STK Callback Trust Boundary, Family Revocation, 429 Safety, Distributed Revocation, P0.1 Reference Uniqueness) | +6 test files | `VERIFIED BY AUTOMATED TEST` (Pending Remote CI Push) |
 
 > [!NOTE]
-> The earlier reference to "630 tests across 44 files" was caused by running `bun test` without file arguments, which evaluated duplicate compiled test files inside `apps/api/dist/test` alongside TypeScript source files in `apps/api/test`. The authoritative monorepo test corpus contains **385 unique tests across 29 files**.
+> The earlier reference to "630 tests across 44 files" was caused by running `bun test` without file arguments, which evaluated duplicate compiled test files inside `apps/api/dist/test` alongside TypeScript source files in `apps/api/test`. The authoritative monorepo test corpus contains **396 unique tests across 29 files**.
 
 ---
 
@@ -310,7 +321,7 @@ flowchart TD
         end
 
         subgraph Data Layer
-            PG[("PostgreSQL 16+<br/>7 Migrations Applied (:5432)")]
+            PG[("PostgreSQL 16+<br/>8 Migrations Applied (:5432)")]
             Redis[("Redis 7+<br/>Atomic Lua Broker (:6379)<br/>[No TLS: VPC Isolated]")]
         end
     end

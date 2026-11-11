@@ -272,12 +272,27 @@ export class StkPushService {
         return this.mapToStatusDto(stkTx);
       }
 
-      // Terminal state guard: If already failed or cancelled, do not allow re-transition
-      if (stkTx.status === StkPushStatus.FAILED || stkTx.status === StkPushStatus.CANCELLED) {
+      // Terminal state guard: If already failed, cancelled, or expired, reject mutation
+      if (
+        stkTx.status === StkPushStatus.FAILED ||
+        stkTx.status === StkPushStatus.CANCELLED ||
+        stkTx.status === StkPushStatus.EXPIRED
+      ) {
         return this.mapToStatusDto(stkTx);
       }
 
-      const rawPayloadJson = typeof verificationReq.body === 'string'
+      // Preserve authentic original raw request bytes without reserialization
+      const rawPayloadBytesStr: string = (
+        typeof verificationReq.rawBody === 'string' && verificationReq.rawBody.length > 0
+      )
+        ? verificationReq.rawBody
+        : Buffer.isBuffer(verificationReq.rawBodyBuffer)
+          ? verificationReq.rawBodyBuffer.toString('utf-8')
+          : Buffer.isBuffer(verificationReq.rawBody)
+            ? verificationReq.rawBody.toString('utf-8')
+            : (typeof verificationReq.body === 'string' ? verificationReq.body : JSON.stringify(verificationReq.body));
+
+      const rawCallbackJson = typeof verificationReq.body === 'string'
         ? verificationReq.body
         : JSON.stringify(verificationReq.body);
 
@@ -292,7 +307,7 @@ export class StkPushService {
             "result_code" = ${parsed.resultCode ?? 1},
             "result_description" = ${parsed.resultDescription ?? 'Payment declined or cancelled by subscriber'},
             "error_message" = ${parsed.resultDescription || 'Customer declined transaction or prompt expired'},
-            "raw_callback_payload" = ${rawPayloadJson}::jsonb,
+            "raw_callback_payload" = ${rawCallbackJson}::jsonb,
             "updated_at" = NOW()
           WHERE "id" = ${stkTx.id} AND "organization_id" = ${orgId}
         `;
@@ -326,11 +341,30 @@ export class StkPushService {
         throw new HttpException(400, 'MISSING_PROVIDER_REFERENCE', 'Provider callback missing transaction reference');
       }
 
-      // B. Provider Reference Uniqueness within Organization
+      // B. Transaction-scoped PostgreSQL Advisory Lock (Cross-Replica Concurrency Protection)
+      // Deterministically serializes all concurrent claims for the same (provider, providerRef)
+      await tx`SELECT pg_advisory_xact_lock(hashtext('payment_ref_claim:' || ${provider} || ':' || ${providerRef}))`;
+
+      // C. Cross-Organization & Platform-Wide Provider Reference Uniqueness Enforcement
+      // 1. Check dedicated payment_reference_claims table
+      const existingClaim = await tx`
+        SELECT "id", "organization_id", "checkout_id" FROM "payment_reference_claims"
+        WHERE "provider" = ${provider}::"PaymentProvider"
+          AND "provider_reference" = ${providerRef}
+        LIMIT 1
+      `;
+      if (existingClaim.length > 0 && existingClaim[0]!.checkout_id !== stkTx.id) {
+        throw new HttpException(
+          409,
+          'REFERENCE_ALREADY_USED',
+          `Provider reference '${providerRef}' has already been claimed on platform (organization: ${existingClaim[0]!.organization_id})`,
+        );
+      }
+
+      // 2. Check normalized_payments platform-wide (across ALL organizations)
       const existingPay = await tx`
-        SELECT "id" FROM "normalized_payments"
-        WHERE "organization_id" = ${orgId}
-          AND "provider" = ${provider}::"PaymentProvider"
+        SELECT "id", "organization_id" FROM "normalized_payments"
+        WHERE "provider" = ${provider}::"PaymentProvider"
           AND "reference" = ${providerRef}
         LIMIT 1
       `;
@@ -338,13 +372,14 @@ export class StkPushService {
         throw new HttpException(
           409,
           'REFERENCE_ALREADY_USED',
-          `Provider reference '${providerRef}' has already been redeemed in organization`,
+          `Provider reference '${providerRef}' has already been redeemed in normalized payment '${existingPay[0]!.id}'`,
         );
       }
 
+      // 3. Check stk_push_transactions platform-wide (across ALL organizations)
       const otherStk = await tx`
-        SELECT "id" FROM "stk_push_transactions"
-        WHERE "organization_id" = ${orgId}
+        SELECT "id", "organization_id" FROM "stk_push_transactions"
+        WHERE "provider" = ${provider}::"PaymentProvider"
           AND "provider_reference" = ${providerRef}
           AND "id" != ${stkTx.id}
           AND "status" = 'SUCCESS'
@@ -371,12 +406,20 @@ export class StkPushService {
         );
       }
 
-      // D. Currency Match
-      if (parsed.currency && parsed.currency.trim().toUpperCase() !== stkTx.currency.trim().toUpperCase()) {
+      // D. Currency Match (Strict / Fail Closed): Callback currency MUST be present and match requested currency
+      const callbackCurrency = (parsed.currency || '').trim().toUpperCase();
+      if (!callbackCurrency) {
+        throw new HttpException(
+          422,
+          'MISSING_CALLBACK_CURRENCY',
+          'Callback payload missing required transaction currency',
+        );
+      }
+      if (callbackCurrency !== stkTx.currency.trim().toUpperCase()) {
         throw new HttpException(
           422,
           'CURRENCY_MISMATCH',
-          `Callback currency '${parsed.currency}' does not match requested currency '${stkTx.currency}'`,
+          `Callback currency '${callbackCurrency}' does not match requested currency '${stkTx.currency}'`,
         );
       }
 
@@ -424,7 +467,7 @@ export class StkPushService {
         providerTimestamp,
       );
 
-      // 1. Immutable Raw Evidence with actual JSON payload
+      // 1. Immutable Raw Evidence with actual original request payload bytes (without reserialization)
       await tx`
         INSERT INTO "raw_payment_evidence" (
           "id", "organization_id", "source_type", "device_id", "sender_address",
@@ -437,18 +480,32 @@ export class StkPushService {
           ${EvidenceSourceType.DIRECT_PROVIDER_API}::"EvidenceSourceType",
           NULL,
           ${`PROVIDER_API_${provider}`},
-          ${rawPayloadJson},
+          ${rawPayloadBytesStr},
           1,
           ${providerTimestamp},
           ${typeof verificationReq.headers['x-signature'] === 'string' ? verificationReq.headers['x-signature'] : null},
-          NULL,
+          ${typeof verificationReq.headers['x-nonce'] === 'string' ? verificationReq.headers['x-nonce'] : null},
           NULL,
           '1.0.0',
           'OBSERVED'
         )
       `;
 
-      // 2. Normalized Payment created directly from verified provider data
+      // 2. Durable payment reference claim registration (enforcing platform-wide uniqueness)
+      await tx`
+        INSERT INTO "payment_reference_claims" (
+          "provider", "provider_reference", "organization_id", "checkout_id", "payment_id"
+        )
+        VALUES (
+          ${provider}::"PaymentProvider",
+          ${providerRef},
+          ${orgId},
+          ${stkTx.id},
+          ${paymentId}
+        )
+      `;
+
+      // 3. Normalized Payment created directly from verified provider data
       await tx`
         INSERT INTO "normalized_payments" (
           "id", "organization_id", "device_id", "raw_evidence_id", "provider",
@@ -478,7 +535,7 @@ export class StkPushService {
         )
       `;
 
-      // 3. Invoice Settlement via Reconciliation Service
+      // 4. Invoice Settlement via Reconciliation Service
       let settledPaymentId: string | undefined = paymentId;
       if (targetInvoiceId) {
         const settlement = await this.reconciliationService.verifyPayment(
@@ -495,7 +552,7 @@ export class StkPushService {
         settledPaymentId = settlement.payment.id;
       }
 
-      // 4. Update STK Push Transaction to SUCCESS
+      // 5. Update STK Push Transaction to SUCCESS
       await tx`
         UPDATE "stk_push_transactions"
         SET
@@ -504,12 +561,12 @@ export class StkPushService {
           "result_code" = ${parsed.resultCode ?? 0},
           "result_description" = ${parsed.resultDescription ?? 'Success'},
           "settled_payment_id" = ${settledPaymentId},
-          "raw_callback_payload" = ${rawPayloadJson}::jsonb,
+          "raw_callback_payload" = ${rawCallbackJson}::jsonb,
           "updated_at" = NOW()
         WHERE "id" = ${stkTx.id} AND "organization_id" = ${orgId}
       `;
 
-      // 5. Outbox Event
+      // 6. Outbox Event
       await dbStore.insertOutboxEvent(
         {
           organizationId: orgId,

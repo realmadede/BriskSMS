@@ -34,6 +34,9 @@ export class TestCallbackVerifier implements ProviderCallbackVerifier {
     public readonly provider: PaymentProvider,
     private readonly options: TestVerifierOptions,
   ) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('SECURITY VIOLATION: TestCallbackVerifier cannot be instantiated in production environment');
+    }
     this.signatureHeader = (options.signatureHeader || 'x-signature').toLowerCase();
     this.timestampHeader = (options.timestampHeader || 'x-timestamp').toLowerCase();
     this.toleranceSeconds = options.toleranceSeconds ?? 300; // 5 minutes

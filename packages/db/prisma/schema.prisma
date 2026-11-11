@@ -219,6 +219,7 @@ model Organization {
   smsGateWebhookEvents  SmsGateWebhookEvent[]
   messageIdempotencyRecords MessageIdempotencyRecord[]
   stkPushTransactions   StkPushTransaction[]
+  paymentReferenceClaims PaymentReferenceClaim[]
 
   @@map("organizations")
 }
@@ -1173,3 +1174,21 @@ model StkPushTransaction {
   @@index([phoneNumber])
   @@map("stk_push_transactions")
 }
+
+model PaymentReferenceClaim {
+  id                String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  provider          PaymentProvider
+  providerReference String          @map("provider_reference") @db.VarChar(100)
+  organizationId    String          @map("organization_id") @db.Uuid
+  checkoutId        String?         @map("checkout_id") @db.VarChar(64)
+  paymentId         String?         @map("payment_id") @db.Uuid
+  claimedAt         DateTime        @default(now()) @map("claimed_at") @db.Timestamptz(6)
+
+  organization      Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerReference])
+  @@index([organizationId])
+  @@index([provider, providerReference])
+  @@map("payment_reference_claims")
+}
+

@@ -36,6 +36,7 @@ export class MpesaStkAdapter implements StkPushAdapter {
 
       let providerReference: string | undefined;
       let amountCents: bigint | undefined;
+      let currency: string | undefined = payload.currency || cb.Currency;
       let phoneNumber: string | undefined;
       let providerTimestamp: Date | undefined;
 
@@ -45,6 +46,8 @@ export class MpesaStkAdapter implements StkPushAdapter {
             providerReference = String(item.Value).trim().toUpperCase();
           } else if (item.Name === 'Amount' && item.Value !== undefined) {
             amountCents = toMinorUnits(item.Value);
+          } else if (item.Name === 'Currency' && item.Value) {
+            currency = String(item.Value).trim().toUpperCase();
           } else if (item.Name === 'PhoneNumber' && item.Value) {
             phoneNumber = String(item.Value);
           } else if (item.Name === 'TransactionDate' && item.Value) {
@@ -68,6 +71,7 @@ export class MpesaStkAdapter implements StkPushAdapter {
         success: isSuccess,
         providerReference,
         amountCents,
+        currency: currency ? String(currency).trim().toUpperCase() : undefined,
         phoneNumber,
         providerTimestamp,
         resultCode,

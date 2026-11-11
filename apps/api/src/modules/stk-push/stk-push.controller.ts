@@ -151,6 +151,7 @@ export function registerStkPushRoutes(router: Router): void {
       provider,
       headers: req.headers,
       rawBody: req.rawBody,
+      rawBodyBuffer: req.rawBodyBuffer,
       body: req.body,
       query: req.query,
       urlPath: req.path,
