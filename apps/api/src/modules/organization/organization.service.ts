@@ -22,10 +22,17 @@ export interface UpdateRoleDto {
   role: UserRole;
 }
 
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export class OrganizationService {
   async createOrganization(userId: string, dto: CreateOrgDto): Promise<{ organization: OrganizationRecord; role: UserRole }> {
     if (!dto.name || !dto.name.trim()) {
       throw new HttpException(400, 'INVALID_PAYLOAD', 'Organization name is required');
+    }
+
+    const countryCode = (dto.countryCode || 'TZA').trim().toUpperCase();
+    if (!/^[A-Z]{2,3}$/.test(countryCode)) {
+      throw new HttpException(400, 'VALIDATION_ERROR', 'countryCode must be a valid 2- or 3-letter ISO country code');
     }
 
     const rawSlug = dto.slug || dto.name;
@@ -33,12 +40,12 @@ export class OrganizationService {
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-|-$/g, '');
-    const uniqueSlug = `${baseSlug}-${randomUUID().slice(0, 6)}`;
+    const uniqueSlug = `${baseSlug || 'org'}-${randomUUID().slice(0, 6)}`;
 
     const { org, membership } = await dbStore.createOrganization({
       name: dto.name.trim(),
       slug: uniqueSlug,
-      countryCode: dto.countryCode || 'TZA',
+      countryCode,
       creatorUserId: userId,
     });
 
@@ -79,6 +86,11 @@ export class OrganizationService {
       throw new HttpException(400, 'INVALID_PAYLOAD', 'Email and role are required');
     }
 
+    const emailNorm = dto.email.trim().toLowerCase();
+    if (!EMAIL_PATTERN.test(emailNorm) || emailNorm.length > 255) {
+      throw new HttpException(400, 'INVALID_EMAIL', 'A valid email address is required');
+    }
+
     if (dto.role === UserRole.OWNER) {
       throw new HttpException(400, 'INVALID_ROLE', 'Cannot invite a member with role OWNER');
     }
@@ -91,13 +103,13 @@ export class OrganizationService {
 
       await entitlementService.enforceMemberQuota(orgId, tx);
 
-      let user = await dbStore.findUserByEmail(dto.email, tx);
+      let user = await dbStore.findUserByEmail(emailNorm, tx);
       if (!user) {
         user = await dbStore.createUser(
           {
-            email: dto.email,
-            fullName: dto.fullName || dto.email.split('@')[0] || 'Team Member',
-            passwordHash: 'pending_invitation_setup',
+            email: emailNorm,
+            fullName: dto.fullName?.trim() || emailNorm.split('@')[0] || 'Team Member',
+            passwordHash: undefined,
           },
           tx,
         );
@@ -166,6 +178,14 @@ export class OrganizationService {
 
     if (newRole === UserRole.OWNER) {
       throw new HttpException(400, 'INVALID_ROLE', 'Cannot reassign primary OWNER role via update');
+    }
+
+    const targetMem = await dbStore.getMembership(orgId, targetUserId);
+    if (!targetMem) {
+      throw new HttpException(404, 'MEMBER_NOT_FOUND', 'Target user is not a member of this organization');
+    }
+    if (targetMem.role === UserRole.OWNER) {
+      throw new HttpException(403, 'CANNOT_MODIFY_OWNER', 'The organization OWNER role cannot be demoted or reassigned');
     }
 
     return dbStore.updateMemberRole({

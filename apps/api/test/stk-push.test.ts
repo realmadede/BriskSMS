@@ -17,7 +17,7 @@ import { dbStore } from '../src/core/store.js';
 import { ApiKeyService } from '../src/modules/developer/api-key.service.js';
 import { IngestionService } from '../src/modules/ingestion/ingestion.service.js';
 import { ReconciliationService } from '../src/modules/reconciliation/reconciliation.service.js';
-import { stkPushService, TestCallbackVerifier } from '../src/modules/stk-push/index.js';
+import { stkPushService, TestCallbackVerifier, TestStkAdapter } from '../src/modules/stk-push/index.js';
 
 describe('Carrier STK Push & Asynchronous Reconciliation Engine', () => {
   const router = createApp();
@@ -102,6 +102,7 @@ describe('Carrier STK Push & Asynchronous Reconciliation Engine', () => {
   beforeEach(async () => {
     await dbStore.reset();
     stkPushService.verifierRegistry.resetToDefaults();
+    stkPushService.adapterRegistry.resetToDefaults();
 
     await dbStore.seedOrganizationDirect({
       id: orgId,
@@ -139,7 +140,37 @@ describe('Carrier STK Push & Asynchronous Reconciliation Engine', () => {
   });
 
   describe('1. Carrier Prefix Routing & Initiation', () => {
-    it('initiates Vodacom M-Pesa STK Push for 075x / 076x / 074x', async () => {
+    it('fails closed by default when no live carrier dispatch adapter is configured', async () => {
+      for (const phoneNumber of ['0754 123 456', '+255 713-000-111', '0784 999 888', '0622 111 222']) {
+        const res = await makeRequest(
+          'POST',
+          '/v1/payments/stk-push',
+          {
+            Authorization: `Bearer ${validApiKey}`,
+            'Content-Type': 'application/json',
+          },
+          { phoneNumber, amount: 15000, memo: 'Default fail-closed check' },
+        );
+        assert.equal(res.statusCode, 503);
+        assert.equal(res.json?.success, false);
+        assert.equal(res.json?.error?.code, 'PROVIDER_DISPATCH_DISABLED');
+      }
+
+      const ttclRes = await makeRequest(
+        'POST',
+        '/v1/payments/stk-push',
+        {
+          Authorization: `Bearer ${validApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        { phoneNumber: '0732 111 222', amount: 15000 },
+      );
+      assert.equal(ttclRes.statusCode, 422);
+      assert.equal(ttclRes.json?.error?.code, 'UNSUPPORTED_STK_PROVIDER');
+    });
+
+    it('initiates Vodacom M-Pesa STK Push for 075x / 076x / 074x under test harness', async () => {
+      stkPushService.adapterRegistry.registerAdapter(new TestStkAdapter(PaymentProvider.MPESA));
       const res = await makeRequest(
         'POST',
         '/v1/payments/stk-push',
@@ -161,10 +192,11 @@ describe('Carrier STK Push & Asynchronous Reconciliation Engine', () => {
       assert.equal(res.json?.data?.amountCents, '2500000');
       assert.equal(res.json?.data?.status, StkPushStatus.PENDING);
       assert.ok(res.json?.data?.checkoutId.startsWith('stk_'));
-      assert.ok(res.json?.data?.customerPrompt.includes('M-Pesa'));
+      assert.ok(res.json?.data?.customerPrompt.includes('MPESA'));
     });
 
-    it('initiates Tigo Pesa (Mixx by Yas) STK Push for 071x / 065x / 067x', async () => {
+    it('initiates Tigo Pesa (Mixx by Yas) STK Push for 071x / 065x / 067x under test harness', async () => {
+      stkPushService.adapterRegistry.registerAdapter(new TestStkAdapter(PaymentProvider.MIXX));
       const res = await makeRequest(
         'POST',
         '/v1/payments/stk-push',
@@ -182,10 +214,11 @@ describe('Carrier STK Push & Asynchronous Reconciliation Engine', () => {
       assert.equal(res.json?.data?.provider, PaymentProvider.MIXX);
       assert.equal(res.json?.data?.phoneNumber, '255713000111');
       assert.equal(res.json?.data?.amountCents, '1500000');
-      assert.ok(res.json?.data?.customerPrompt.includes('Mixx'));
+      assert.ok(res.json?.data?.customerPrompt.includes('MIXX'));
     });
 
-    it('initiates Airtel Money STK Push for 078x / 068x / 069x', async () => {
+    it('initiates Airtel Money STK Push for 078x / 068x / 069x under test harness', async () => {
+      stkPushService.adapterRegistry.registerAdapter(new TestStkAdapter(PaymentProvider.AIRTEL_MONEY));
       const res = await makeRequest(
         'POST',
         '/v1/payments/stk-push',
@@ -203,10 +236,11 @@ describe('Carrier STK Push & Asynchronous Reconciliation Engine', () => {
       assert.equal(res.json?.data?.provider, PaymentProvider.AIRTEL_MONEY);
       assert.equal(res.json?.data?.phoneNumber, '255784999888');
       assert.equal(res.json?.data?.amountCents, '5000000');
-      assert.ok(res.json?.data?.customerPrompt.includes('Airtel Money'));
+      assert.ok(res.json?.data?.customerPrompt.includes('AIRTEL_MONEY'));
     });
 
-    it('initiates HaloPesa STK Push for 062x / 061x', async () => {
+    it('initiates HaloPesa STK Push for 062x / 061x under test harness', async () => {
+      stkPushService.adapterRegistry.registerAdapter(new TestStkAdapter(PaymentProvider.HALOPESA));
       const res = await makeRequest(
         'POST',
         '/v1/payments/stk-push',
@@ -284,6 +318,7 @@ describe('Carrier STK Push & Asynchronous Reconciliation Engine', () => {
     });
 
     it('polls transaction status via GET /v1/payments/stk-push/:checkoutId', async () => {
+      stkPushService.adapterRegistry.registerAdapter(new TestStkAdapter(PaymentProvider.MPESA));
       const initRes = await makeRequest(
         'POST',
         '/v1/payments/stk-push',
@@ -317,6 +352,11 @@ describe('Carrier STK Push & Asynchronous Reconciliation Engine', () => {
   });
 
   describe('3. P0 Trust Boundary & Settlement Authorization Suite', () => {
+    beforeEach(() => {
+      stkPushService.adapterRegistry.registerAdapter(new TestStkAdapter(PaymentProvider.MPESA));
+      stkPushService.adapterRegistry.registerAdapter(new TestStkAdapter(PaymentProvider.MIXX));
+    });
+
     it('1. Unauthenticated callback cannot settle an invoice (fails with HTTP 403 or 401)', async () => {
       const invoice = await reconciliationService.createInvoice(orgId, {
         referenceNumber: 'INV-UNAUTH-1',
@@ -1039,6 +1079,11 @@ describe('Carrier STK Push & Asynchronous Reconciliation Engine', () => {
   });
 
   describe('4. P0.1 Provider Reference Uniqueness & Callback Integrity Suite', () => {
+    beforeEach(() => {
+      stkPushService.adapterRegistry.registerAdapter(new TestStkAdapter(PaymentProvider.MPESA));
+      stkPushService.adapterRegistry.registerAdapter(new TestStkAdapter(PaymentProvider.MIXX));
+    });
+
     it('P0.1-1: Two different checkout IDs concurrently presenting the same provider reference', async () => {
       const testVerifier = new TestCallbackVerifier(PaymentProvider.MPESA, {
         secretKey: TEST_CALLBACK_SECRET,
@@ -1222,7 +1267,7 @@ describe('Carrier STK Push & Asynchronous Reconciliation Engine', () => {
 
       const resB = await makeRequest('POST', '/v1/payments/stk-push/callback/mpesa', createSignedCallbackHeaders(payloadB), payloadB);
       assert.equal(resB.statusCode, 409);
-      assert.equal(resB.json?.error?.code, 'REFERENCE_ALREADY_USED');
+      assert.equal(resB.json?.error?.code, 'REFERENCE_ALREADY_SETTLED');
 
       // Org B invoice remains UNPAID
       const checkInvB = await reconciliationService.findInvoiceById(otherOrgId, invB.id);
@@ -1234,24 +1279,35 @@ describe('Carrier STK Push & Asynchronous Reconciliation Engine', () => {
       assert.equal(checkStkB.status, StkPushStatus.PENDING);
     });
 
-    it('P0.1-3: Duplicate reference claims across normalized_payments and stk_push_transactions are rejected', async () => {
+    it('P0.1-3: Same-org provisional SMS upgrades cleanly on STK confirmation and already-settled SMS invoices block duplicate STK reuse', async () => {
       const testVerifier = new TestCallbackVerifier(PaymentProvider.MPESA, {
         secretKey: TEST_CALLBACK_SECRET,
       });
       stkPushService.verifierRegistry.registerVerifier(testVerifier);
 
       const smsRef = 'QC77BB88AA';
-      // 1. Ingest an SMS notification first (creates normalized_payments entry)
-      await ingestionService.ingestEvidence({
+      const settledInvoice = await reconciliationService.createInvoice(orgId, {
+        referenceNumber: 'INV-SMS-SETTLED',
+        totalAmountCents: 2500000n,
+      });
+      // 1. Ingest SMS notification first and manually verify/settle it against INV-SMS-SETTLED
+      const smsAck = await ingestionService.ingestEvidence({
         organizationId: orgId,
         sourceType: EvidenceSourceType.ANDROID_NOTIFICATION_RELAY,
         senderAddress: 'M-PESA',
-        rawPayload: `${smsRef} Imethibitishwa. Umepokea Tsh25,000.00 kutoka kwa JOHN DOE 255754111222 tarehe 11/11/2026 saa 10:00 AM. Salio lako jipya la M-Pesa ni Tsh100,000.00.`,
+        rawPayload: `${smsRef} Imethibitishwa. Umepokea Tsh25,000.00 kutoka kwa JOHN DOE 255754111222 tarehe 11/11/2026 saa 10:00 AM. Kumbukumbu namba: INV-SMS-SETTLED. Salio lako jipya la M-Pesa ni Tsh100,000.00.`,
         deviceTimestamp: new Date(),
       });
+      await reconciliationService.verifyPayment(orgId, {
+        paymentId: smsAck.paymentId!,
+        invoiceId: settledInvoice.id,
+        verificationMethod: 'MANUAL_FINANCE_APPROVAL' as any,
+        externalVerificationRef: 'M-PESA-STMT-001',
+        notes: 'Manually verified against merchant till statement',
+      });
 
-      // 2. STK Push is initiated
-      const invoice = await reconciliationService.createInvoice(orgId, {
+      // 2. Second invoice initiates STK Push
+      const secondInvoice = await reconciliationService.createInvoice(orgId, {
         referenceNumber: 'INV-SMS-DUP',
         totalAmountCents: 2500000n,
       });
@@ -1259,11 +1315,11 @@ describe('Carrier STK Push & Asynchronous Reconciliation Engine', () => {
         'POST',
         '/v1/payments/stk-push',
         { Authorization: `Bearer ${validApiKey}`, 'Content-Type': 'application/json' },
-        { phoneNumber: '0754 111 222', amount: 25000, invoiceId: invoice.id },
+        { phoneNumber: '0754 111 222', amount: 25000, invoiceId: secondInvoice.id },
       );
       const checkoutId = initRes.json?.data?.checkoutId;
 
-      // 3. Callback arrives with same receipt number as the already-ingested SMS
+      // 3. Callback arrives reusing the same receipt number for a DIFFERENT invoice
       const payload = {
         Body: {
           stkCallback: {
@@ -1286,8 +1342,8 @@ describe('Carrier STK Push & Asynchronous Reconciliation Engine', () => {
       assert.equal(res.statusCode, 409);
       assert.equal(res.json?.error?.code, 'REFERENCE_ALREADY_USED');
 
-      // Invoice remains unpaid
-      const invCheck = await reconciliationService.findInvoiceById(orgId, invoice.id);
+      // Second invoice remains unpaid
+      const invCheck = await reconciliationService.findInvoiceById(orgId, secondInvoice.id);
       assert.equal(invCheck?.status, InvoiceStatus.UNPAID);
     });
 
@@ -1386,13 +1442,15 @@ describe('Carrier STK Push & Asynchronous Reconciliation Engine', () => {
       stkPushService.verifierRegistry.registerVerifier(testVerifier);
 
       const existingRef = 'ALREADY_TAKEN_REF';
-      // Seed an existing claim in payment_reference_claims
+      // Seed an existing confirmed claim in payment_reference_claims
       await sql`
         INSERT INTO "payment_reference_claims" (
-          "id", "provider", "provider_reference", "organization_id", "checkout_id", "claimed_at"
+          "id", "provider", "provider_reference", "organization_id", "checkout_id",
+          "status", "evidence_tier", "claimed_at", "confirmed_at"
         )
         VALUES (
-          gen_random_uuid(), 'MPESA'::"PaymentProvider", ${existingRef}, ${otherOrgId}, 'stk_prior', NOW()
+          gen_random_uuid(), 'MPESA'::"PaymentProvider", ${existingRef}, ${otherOrgId}, 'stk_prior',
+          'CONFIRMED_PROVIDER'::"claim_status", 'AUTHORITATIVE_PROVIDER'::"claim_evidence_tier", NOW(), NOW()
         )
       `;
 
@@ -1681,6 +1739,84 @@ describe('Carrier STK Push & Asynchronous Reconciliation Engine', () => {
         () => stkPushService.handleCarrierCallback(PaymentProvider.MPESA, { checkoutId: 'dummy' }),
         (err: any) => err instanceof HttpException && err.statusCode === 401 && err.code === 'MISSING_SIGNATURE',
       );
+    });
+  });
+
+  describe('P2-8: Explicit Provider Selection & MNP Ported-Number Routing Integrity', () => {
+    it('routes an MNP-ported 0754 number explicitly to AIRTEL_MONEY instead of prefix-only MPESA', async () => {
+      stkPushService.adapterRegistry.registerAdapter(new TestStkAdapter(PaymentProvider.AIRTEL_MONEY));
+      const res = await makeRequest(
+        'POST',
+        '/v1/payments/stk-push',
+        {
+          Authorization: `Bearer ${validApiKey}`,
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'mnp-explicit-001',
+        },
+        {
+          phoneNumber: '0754 123 456', // Historical Vodacom prefix, ported to Airtel Money
+          provider: PaymentProvider.AIRTEL_MONEY,
+          amount: 20000,
+          memo: 'Ported MNP checkout',
+        },
+      );
+
+      assert.equal(res.statusCode, 201);
+      assert.equal(res.json?.data?.provider, PaymentProvider.AIRTEL_MONEY);
+      assert.equal(res.json?.data?.routingResolution, 'EXPLICIT');
+      assert.ok(res.json?.data?.customerPrompt.includes('AIRTEL_MONEY'));
+
+      // Reusing same idempotency key with a different provider fails closed with 409 conflict
+      const conflictRes = await makeRequest(
+        'POST',
+        '/v1/payments/stk-push',
+        {
+          Authorization: `Bearer ${validApiKey}`,
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'mnp-explicit-001',
+        },
+        {
+          phoneNumber: '0754 123 456',
+          provider: PaymentProvider.MPESA,
+          amount: 20000,
+          memo: 'Ported MNP checkout',
+        },
+      );
+      assert.equal(conflictRes.statusCode, 409);
+    });
+
+    it('rejects invalid explicit provider values fail-closed with 400 and marks omitted provider as PREFIX_HEURISTIC', async () => {
+      const badProvider = await makeRequest(
+        'POST',
+        '/v1/payments/stk-push',
+        {
+          Authorization: `Bearer ${validApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        {
+          phoneNumber: '0754 123 456',
+          provider: 'INVALID_MNO',
+          amount: 10000,
+        },
+      );
+      assert.equal(badProvider.statusCode, 400);
+
+      stkPushService.adapterRegistry.registerAdapter(new TestStkAdapter(PaymentProvider.MPESA));
+      const heuristicRes = await makeRequest(
+        'POST',
+        '/v1/payments/stk-push',
+        {
+          Authorization: `Bearer ${validApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        {
+          phoneNumber: '0754 123 456',
+          amount: 10000,
+        },
+      );
+      assert.equal(heuristicRes.statusCode, 201);
+      assert.equal(heuristicRes.json?.data?.provider, PaymentProvider.MPESA);
+      assert.equal(heuristicRes.json?.data?.routingResolution, 'PREFIX_HEURISTIC');
     });
   });
 });

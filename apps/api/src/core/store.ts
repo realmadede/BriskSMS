@@ -101,6 +101,8 @@ export interface DeviceRecord {
   androidVersion: string;
   appVersion: string;
   publicKeyPem: string;
+  publicKeyFingerprint: string | null;
+  keyAlgorithm: string;
   status: DeviceStatus;
   ingestionMode: DeviceIngestionMode;
   deviceTokenHash: string;
@@ -462,6 +464,10 @@ export interface StkPushTransactionRecord {
   invoiceId?: string | null;
   referenceNumber?: string | null;
   memo?: string | null;
+  idempotencyKey?: string | null;
+  requestFingerprint?: string | null;
+  providerCheckoutId?: string | null;
+  dispatchOutcome?: string | null;
   providerReference?: string | null;
   resultCode?: number | null;
   resultDescription?: string | null;
@@ -626,6 +632,8 @@ export function mapDeviceRow(row: Record<string, any>): DeviceRecord {
     androidVersion: row.android_version,
     appVersion: row.app_version,
     publicKeyPem: row.public_key_pem,
+    publicKeyFingerprint: row.public_key_fingerprint ?? null,
+    keyAlgorithm: row.key_algorithm ?? 'EC_P256',
     deviceTokenHash: row.device_token_hash,
     status: row.status as DeviceStatus,
     ingestionMode: row.ingestion_mode as DeviceIngestionMode,
@@ -751,6 +759,10 @@ export function mapStkPushTransactionRow(row: Record<string, any>): StkPushTrans
     invoiceId: row.invoice_id ?? null,
     referenceNumber: row.reference_number ?? null,
     memo: row.memo ?? null,
+    idempotencyKey: row.idempotency_key ?? null,
+    requestFingerprint: row.request_fingerprint ?? null,
+    providerCheckoutId: row.provider_checkout_id ?? null,
+    dispatchOutcome: row.dispatch_outcome ?? null,
     providerReference: row.provider_reference ?? null,
     resultCode: row.result_code !== null && row.result_code !== undefined ? Number(row.result_code) : null,
     resultDescription: row.result_description ?? null,
@@ -1185,6 +1197,8 @@ export class PostgresStore {
       androidVersion: string;
       appVersion: string;
       publicKeyPem: string;
+      publicKeyFingerprint?: string | null;
+      keyAlgorithm?: string;
       ingestionMode: DeviceIngestionMode;
       tokenHash: string;
       status?: DeviceStatus;
@@ -1195,15 +1209,17 @@ export class PostgresStore {
     return withTransaction(async (tx) => {
       const id = data.id || randomUUID();
       const status = data.status || DeviceStatus.ACTIVE;
+      const keyAlgorithm = data.keyAlgorithm || 'EC_P256';
       const rows = await tx`
         INSERT INTO "devices" (
           "id", "organization_id", "label", "device_model", "manufacturer",
-          "android_version", "app_version", "public_key_pem", "device_token_hash",
-          "status", "ingestion_mode", "last_sync_at"
+          "android_version", "app_version", "public_key_pem", "public_key_fingerprint",
+          "key_algorithm", "device_token_hash", "status", "ingestion_mode", "last_sync_at"
         )
         VALUES (
           ${id}, ${data.organizationId}, ${data.label}, ${data.deviceModel}, ${data.manufacturer},
-          ${data.androidVersion}, ${data.appVersion}, ${data.publicKeyPem}, ${data.tokenHash},
+          ${data.androidVersion}, ${data.appVersion}, ${data.publicKeyPem}, ${data.publicKeyFingerprint ?? null},
+          ${keyAlgorithm}, ${data.tokenHash},
           ${status}::"DeviceStatus", ${data.ingestionMode}::"DeviceIngestionMode", NOW()
         )
         RETURNING *
@@ -1332,6 +1348,21 @@ export class PostgresStore {
       if (!rows[0]) {
         throw new Error('Device not found in organization');
       }
+
+      await tx`
+        UPDATE "device_commands"
+        SET
+          "status" = 'CANCELLED'::"DeviceCommandStatus",
+          "cancelled_at" = NOW(),
+          "cancelled_by_id" = ${actorId},
+          "cancellation_reason" = ${reason ?? 'Device revoked'},
+          "lease_token" = NULL,
+          "lease_expires_at" = NULL,
+          "updated_at" = NOW()
+        WHERE "organization_id" = ${organizationId}
+          AND "device_id" = ${deviceId}
+          AND "status" IN ('PENDING', 'DELIVERED')
+      `;
 
       await this.recordAudit(
         {
@@ -1984,19 +2015,24 @@ export class PostgresStore {
       invoiceId?: string | null;
       referenceNumber?: string | null;
       memo?: string | null;
+      idempotencyKey?: string | null;
+      requestFingerprint?: string | null;
+      providerCheckoutId?: string | null;
+      dispatchOutcome?: string | null;
       metadata?: Record<string, unknown> | null;
     },
     tx: SqlExecutor = sql,
   ): Promise<StkPushTransactionRecord> {
     assertTenantContext({ organizationId: data.organizationId });
     const currency = data.currency || 'TZS';
-    const status = data.status || StkPushStatus.PENDING;
+    const status = data.status || StkPushStatus.INITIATING;
 
     const rows = await tx`
       INSERT INTO "stk_push_transactions" (
         "id", "organization_id", "provider", "phone_number",
         "amount_cents", "currency", "status", "invoice_id",
-        "reference_number", "memo", "metadata"
+        "reference_number", "memo", "idempotency_key", "request_fingerprint",
+        "provider_checkout_id", "dispatch_outcome", "metadata"
       )
       VALUES (
         ${data.id},
@@ -2009,6 +2045,10 @@ export class PostgresStore {
         ${data.invoiceId ?? null},
         ${data.referenceNumber ?? null},
         ${data.memo ?? null},
+        ${data.idempotencyKey ?? null},
+        ${data.requestFingerprint ?? null},
+        ${data.providerCheckoutId ?? null},
+        ${data.dispatchOutcome ?? null},
         ${data.metadata ? JSON.stringify(data.metadata) : null}::jsonb
       )
       RETURNING *
@@ -2049,6 +2089,8 @@ export class PostgresStore {
     organizationId: string,
     updates: {
       status: StkPushStatus;
+      providerCheckoutId?: string | null;
+      dispatchOutcome?: string | null;
       providerReference?: string | null;
       resultCode?: number | null;
       resultDescription?: string | null;
@@ -2063,6 +2105,8 @@ export class PostgresStore {
       UPDATE "stk_push_transactions"
       SET
         "status" = ${updates.status}::"StkPushStatus",
+        "provider_checkout_id" = COALESCE(${updates.providerCheckoutId ?? null}, "provider_checkout_id"),
+        "dispatch_outcome" = COALESCE(${updates.dispatchOutcome ?? null}, "dispatch_outcome"),
         "provider_reference" = COALESCE(${updates.providerReference ?? null}, "provider_reference"),
         "result_code" = COALESCE(${updates.resultCode ?? null}, "result_code"),
         "result_description" = COALESCE(${updates.resultDescription ?? null}, "result_description"),

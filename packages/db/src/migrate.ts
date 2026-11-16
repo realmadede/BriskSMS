@@ -47,8 +47,14 @@ async function ensureMigrationsTable(): Promise<void> {
  * Applies all pending version-controlled SQL migrations in `packages/db/prisma/migrations/`.
  * Works from an empty database and safely skips already-applied migrations on existing dev databases.
  */
-export async function migrateDeploy(): Promise<{ applied: string[]; skipped: string[] }> {
+export async function migrateDeploy(options?: {
+  strictChecksums?: boolean;
+}): Promise<{ applied: string[]; skipped: string[]; checksumMismatches: string[] }> {
   await ensureMigrationsTable();
+
+  const strictChecksums =
+    options?.strictChecksums ??
+    (process.env.NODE_ENV === 'production' || process.env.STRICT_MIGRATION_CHECKSUMS === 'true');
 
   const migrationsDir = getMigrationsDir();
   const entries = readdirSync(migrationsDir, { withFileTypes: true })
@@ -65,6 +71,7 @@ export async function migrateDeploy(): Promise<{ applied: string[]; skipped: str
 
   const applied: string[] = [];
   const skipped: string[] = [];
+  const checksumMismatches: string[] = [];
 
   for (const folderName of entries) {
     const sqlPath = join(migrationsDir, folderName, 'migration.sql');
@@ -73,7 +80,16 @@ export async function migrateDeploy(): Promise<{ applied: string[]; skipped: str
     const sqlContent = readFileSync(sqlPath, 'utf-8');
     const checksum = createHash('sha256').update(sqlContent, 'utf-8').digest('hex');
 
-    if (appliedMap.has(folderName)) {
+    const existing = appliedMap.get(folderName);
+    if (existing) {
+      if (existing.checksum !== checksum) {
+        checksumMismatches.push(folderName);
+        if (strictChecksums) {
+          throw new Error(
+            `Migration checksum mismatch for '${folderName}': expected ${existing.checksum}, got ${checksum}`,
+          );
+        }
+      }
       skipped.push(folderName);
       continue;
     }
@@ -109,7 +125,7 @@ export async function migrateDeploy(): Promise<{ applied: string[]; skipped: str
     applied.push(folderName);
   }
 
-  return { applied, skipped };
+  return { applied, skipped, checksumMismatches };
 }
 
 /**
@@ -193,6 +209,7 @@ export async function resetTestDatabaseState(): Promise<void> {
       "outbox_events",
       "audit_logs",
       "sms_delivery_attempts",
+      "outbound_sms_jobs",
       "sms_messages",
       "sms_campaign_recipients",
       "sms_campaigns",
@@ -203,12 +220,18 @@ export async function resetTestDatabaseState(): Promise<void> {
       "automation_rules",
       "invoice_payments",
       "invoice_items",
+      "payment_reference_claim_events",
+      "payment_reference_claim_collisions",
+      "payment_reference_claims",
+      "stk_push_transactions",
       "payment_verifications",
       "normalized_payments",
       "raw_payment_evidence",
       "invoices",
       "customers",
+      "device_commands",
       "device_telemetry",
+      "device_pairing_challenges",
       "pairing_tokens",
       "devices",
       "revoked_sessions",

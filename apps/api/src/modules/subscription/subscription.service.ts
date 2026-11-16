@@ -83,24 +83,145 @@ export class SubscriptionService {
         );
       }
 
+      // Serialize concurrent subscription checkouts for the same organization
+      await tx`
+        SELECT "id" FROM "organizations"
+        WHERE "id" = ${organizationId}::uuid
+        FOR UPDATE
+      `;
+
       const existingSub = await dbStore.getOrganizationSubscription(organizationId, tx);
       const now = new Date();
       const periodDays = dto.billingInterval === BillingInterval.ANNUALLY ? 365 : 30;
       const periodStart = now;
-      const periodEnd = new Date(now.getTime() + periodDays * 24 * 3600 * 1000);
+
+      let status: SubscriptionStatus;
+      let periodEnd: Date;
+      let trialEndsAt: Date | null = null;
+      let isPaid = false;
+      let paidAt: Date | null = null;
+      let verifiedPaymentProviderRef: string | null = null;
+
+      if (matchedPrice.amountCents === 0n) {
+        status = SubscriptionStatus.ACTIVE;
+        periodEnd = new Date(now.getTime() + periodDays * 24 * 3600 * 1000);
+        isPaid = true;
+        paidAt = now;
+        verifiedPaymentProviderRef = 'FREE_TIER';
+      } else if (dto.paymentMethodRef && dto.paymentMethodRef.trim().length > 0) {
+        const refNorm = dto.paymentMethodRef.trim();
+        // Verify settled/verified payment evidence inside the same organization and currency,
+        // locking matching rows FOR UPDATE and excluding customer-invoice or disputed claims.
+        const verifiedStkRows = await tx<{ id: string; provider_reference: string | null }>`
+          SELECT "id", "provider_reference"
+          FROM "stk_push_transactions"
+          WHERE "organization_id" = ${organizationId}
+            AND "status" = 'SUCCESS'::"StkPushStatus"
+            AND "invoice_id" IS NULL
+            AND "settled_payment_id" IS NULL
+            AND "currency" = ${matchedPrice.currency}
+            AND "amount_cents" >= ${matchedPrice.amountCents.toString()}::bigint
+            AND ("provider_reference" = ${refNorm} OR "id"::text = ${refNorm})
+          LIMIT 1
+          FOR UPDATE
+        `;
+        const verifiedNormRows =
+          verifiedStkRows.length === 0
+            ? await tx<{ id: string; reference: string }>`
+                SELECT np."id", np."reference"
+                FROM "normalized_payments" np
+                WHERE np."organization_id" = ${organizationId}
+                  AND np."state" = 'VERIFIED'::"TransactionState"
+                  AND np."currency" = ${matchedPrice.currency}
+                  AND np."amount_cents" >= ${matchedPrice.amountCents.toString()}::bigint
+                  AND (np."reference" = ${refNorm} OR np."id"::text = ${refNorm})
+                  AND NOT EXISTS (
+                    SELECT 1 FROM "invoice_payments" ip
+                    WHERE ip."payment_id" = np."id"
+                  )
+                  AND NOT EXISTS (
+                    SELECT 1 FROM "payment_reference_claims" prc
+                    WHERE prc."payment_id" = np."id"
+                      AND prc."status" IN ('DISPUTED'::"claim_status", 'UNRESOLVED_COLLISION'::"claim_status")
+                  )
+                LIMIT 1
+                FOR UPDATE OF np
+              `
+            : [];
+
+        if (verifiedStkRows.length === 0 && verifiedNormRows.length === 0) {
+          throw new BriskError(
+            'PAYMENT_VERIFICATION_REQUIRED',
+            `Payment reference '${refNorm}' has not been verified for ${matchedPrice.currency} ${matchedPrice.amountCents.toString()} minor units.`,
+            402,
+            { planCode: dto.planCode, paymentMethodRef: refNorm },
+          );
+        }
+
+        const matchedEvidenceId = verifiedStkRows[0]?.id ?? verifiedNormRows[0]?.id ?? refNorm;
+        const canonicalRef =
+          verifiedStkRows[0]?.provider_reference ?? verifiedNormRows[0]?.reference ?? refNorm;
+
+        // Serialize checkouts targeting the same provider reference or internal evidence ID
+        await tx`SELECT pg_advisory_xact_lock(hashtext('sub_pay_ref:' || ${canonicalRef}))`;
+        await tx`SELECT pg_advisory_xact_lock(hashtext('sub_pay_id:' || ${matchedEvidenceId}))`;
+
+        const alreadyUsedRows = await tx<{ id: string }>`
+          SELECT "id"
+          FROM "subscription_billing_invoices"
+          WHERE "is_paid" = true
+            AND "payment_provider_ref" IN (${canonicalRef}, ${refNorm}, ${matchedEvidenceId})
+          LIMIT 1
+        `;
+        if (alreadyUsedRows.length > 0) {
+          throw new BriskError(
+            'PAYMENT_REFERENCE_ALREADY_USED',
+            `Payment reference '${refNorm}' has already been applied to a subscription invoice.`,
+            409,
+            { planCode: dto.planCode, paymentMethodRef: refNorm },
+          );
+        }
+
+        status = SubscriptionStatus.ACTIVE;
+        periodEnd = new Date(now.getTime() + periodDays * 24 * 3600 * 1000);
+        isPaid = true;
+        paidAt = now;
+        verifiedPaymentProviderRef = canonicalRef;
+      } else if (
+        currentVersion.trialPeriodDays > 0 &&
+        (!existingSub || (existingSub.status === SubscriptionStatus.TRIALING && (!existingSub.trialEndsAt || existingSub.trialEndsAt > now)))
+      ) {
+        const computedTrialEnd =
+          existingSub?.status === SubscriptionStatus.TRIALING && existingSub.trialEndsAt
+            ? existingSub.trialEndsAt
+            : new Date(now.getTime() + currentVersion.trialPeriodDays * 24 * 3600 * 1000);
+        status = SubscriptionStatus.TRIALING;
+        trialEndsAt = computedTrialEnd;
+        periodEnd = computedTrialEnd;
+        isPaid = false;
+        paidAt = null;
+        verifiedPaymentProviderRef = null;
+      } else {
+        throw new BriskError(
+          'PAYMENT_VERIFICATION_REQUIRED',
+          `Verified payment reference is required to activate paid plan '${dto.planCode}'.`,
+          402,
+          { planCode: dto.planCode, currency: matchedPrice.currency, billingInterval: dto.billingInterval },
+        );
+      }
 
       const subId = existingSub?.id ?? randomUUID();
       const subscriptionRecord: OrganizationSubscriptionRecord = {
         id: subId,
         organizationId,
         planVersionId: currentVersion.id,
-        status: SubscriptionStatus.ACTIVE,
+        status,
         currency: matchedPrice.currency,
         unitPriceCents: matchedPrice.amountCents,
         billingInterval: matchedPrice.billingInterval,
         currentPeriodStart: periodStart,
         currentPeriodEnd: periodEnd,
-        trialEndsAt: null,
+        trialEndsAt,
         canceledAt: null,
         cancelAtPeriodEnd: false,
         createdAt: existingSub?.createdAt ?? now,
@@ -123,7 +244,7 @@ export class SubscriptionService {
           ${currentVersion.id},
           ${existingSub ? 'UPGRADED' : 'CREATED'},
           ${existingSub ? existingSub.status : null}::"SubscriptionStatus",
-          ${SubscriptionStatus.ACTIVE}::"SubscriptionStatus",
+          ${status}::"SubscriptionStatus",
           ${matchedPrice.amountCents.toString()}::bigint,
           ${matchedPrice.currency},
           ${matchedPrice.billingInterval}::"BillingInterval",
@@ -132,7 +253,7 @@ export class SubscriptionService {
         )
       `;
 
-      // Generate immutable snapshot billing invoice
+      // Generate immutable snapshot billing invoice reflecting real payment settlement status
       const invoiceNumber = `INV-SUB-${Date.now().toString(36).toUpperCase()}-${randomUUID().substring(0, 4).toUpperCase()}`;
       const invoice: SubscriptionBillingInvoiceRecord = {
         id: randomUUID(),
@@ -143,9 +264,9 @@ export class SubscriptionService {
         currency: matchedPrice.currency,
         periodStart,
         periodEnd,
-        isPaid: true,
-        paidAt: now,
-        paymentProviderRef: dto.paymentMethodRef ?? 'PAID_INSTANT',
+        isPaid,
+        paidAt,
+        paymentProviderRef: verifiedPaymentProviderRef,
         createdAt: now,
       };
       await dbStore.createSubscriptionInvoice(invoice, tx);

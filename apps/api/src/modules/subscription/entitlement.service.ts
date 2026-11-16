@@ -24,7 +24,14 @@ export class EntitlementService {
       result[feat.key] = feat.defaultValue;
     }
 
-    if (sub && (sub.status === SubscriptionStatus.ACTIVE || sub.status === SubscriptionStatus.TRIALING)) {
+    const now = new Date();
+    const isPeriodActive =
+      sub &&
+      sub.currentPeriodEnd > now &&
+      (sub.status === SubscriptionStatus.ACTIVE ||
+        (sub.status === SubscriptionStatus.TRIALING && (!sub.trialEndsAt || sub.trialEndsAt > now)));
+
+    if (isPeriodActive) {
       const planEntitlements = await dbStore.getPlanEntitlements(sub.planVersionId, tx);
       for (const ent of planEntitlements) {
         result[ent.featureKey] = ent.value;

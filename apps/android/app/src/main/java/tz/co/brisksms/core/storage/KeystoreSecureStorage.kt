@@ -45,6 +45,8 @@ class KeystoreSecureStorage(private val context: Context) {
         private const val KEY_SMSGATE_API_TOKEN = "smsgate_api_token"
         private const val KEY_PAYMENT_INTELLIGENCE_ENABLED = "payment_intelligence_enabled"
         private const val KEY_BULK_MESSAGING_ENABLED = "bulk_messaging_enabled"
+        private const val KEY_PENDING_COMMAND_ACKS = "pending_command_acks_json"
+        private const val KEY_PENDING_SMS_JOB_RESULTS = "pending_sms_job_results_json"
 
         const val DEFAULT_API_BASE_URL = "https://api.brisksms.co.tz"
         const val DEFAULT_SMSGATE_BASE_URL = "https://gateway.brisksms.com/api/v1"
@@ -187,6 +189,42 @@ class KeystoreSecureStorage(private val context: Context) {
     var preferredSimSlot: Int
         get() = prefs.getInt("preferred_sim_slot", 1)
         set(value) = prefs.edit().putInt("preferred_sim_slot", value).apply()
+
+    var pendingCommandAcksJson: String?
+        get() = prefs.getString(KEY_PENDING_COMMAND_ACKS, null)?.let { decrypt(it) }
+        set(value) {
+            if (value != null) {
+                prefs.edit().putString(KEY_PENDING_COMMAND_ACKS, encrypt(value)).apply()
+            } else {
+                prefs.edit().remove(KEY_PENDING_COMMAND_ACKS).apply()
+            }
+        }
+
+    var pendingSmsJobResultsJson: String?
+        get() = prefs.getString(KEY_PENDING_SMS_JOB_RESULTS, null)?.let { decrypt(it) }
+        set(value) {
+            if (value != null) {
+                prefs.edit().putString(KEY_PENDING_SMS_JOB_RESULTS, encrypt(value)).apply()
+            } else {
+                prefs.edit().remove(KEY_PENDING_SMS_JOB_RESULTS).apply()
+            }
+        }
+
+    /**
+     * Clears device identity, tokens, and queued ACKs after backend revocation while preserving revocation state.
+     */
+    fun clearRevokedIdentity() {
+        prefs.edit()
+            .putBoolean(KEY_IS_REVOKED, true)
+            .putBoolean(KEY_IS_PAIRED, false)
+            .remove(KEY_DEVICE_TOKEN)
+            .remove(KEY_DEVICE_ID)
+            .remove(KEY_ORGANIZATION_ID)
+            .remove(KEY_SMSGATE_API_TOKEN)
+            .remove(KEY_PENDING_COMMAND_ACKS)
+            .remove(KEY_PENDING_SMS_JOB_RESULTS)
+            .apply()
+    }
 
     /**
      * Wipes device credentials and resets application state on disconnection or revocation

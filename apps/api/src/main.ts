@@ -1,9 +1,10 @@
 /// <reference types="node" />
 import { createServer } from 'node:http';
+import { closeDbPool, closeRedisClient } from '@brisksms/db';
 import { createApp } from './app.js';
 import { validateProductionEncryptionConfig } from './core/crypto.js';
 
-// Enforce fail-closed production encryption configuration on boot
+// Enforce fail-closed production encryption and JWT configuration on boot
 validateProductionEncryptionConfig();
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
@@ -19,6 +20,10 @@ const server = createServer((req, res) => {
   });
 });
 
+server.requestTimeout = 30_000;
+server.headersTimeout = 15_000;
+server.keepAliveTimeout = 65_000;
+
 server.listen(PORT, () => {
   console.log(`[BriskSMS API] Modular Backend listening on port ${PORT}`);
   console.log(`[BriskSMS API] Health Endpoint: http://localhost:${PORT}/v1/health`);
@@ -27,8 +32,13 @@ server.listen(PORT, () => {
 // Graceful shutdown
 function shutdown(signal: string) {
   console.log(`[BriskSMS API] Received ${signal}. Shutting down gracefully...`);
-  server.close(() => {
-    console.log('[BriskSMS API] HTTP server closed.');
+  server.close(async () => {
+    try {
+      await Promise.allSettled([closeDbPool(), closeRedisClient()]);
+    } catch {
+      // Ignore shutdown cleanup errors
+    }
+    console.log('[BriskSMS API] HTTP server and connections closed.');
     process.exit(0);
   });
 }

@@ -1,6 +1,6 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, generateKeyPairSync, randomUUID, sign as cryptoSign } from 'node:crypto';
 import {
   DeviceStatus,
   DeviceIngestionMode,
@@ -19,6 +19,8 @@ import { sql, QUEUE_NAMES, setSimulatedDatabaseOutage } from '@brisksms/db';
 import { AuthService } from '../src/modules/auth/auth.service.js';
 import { OrganizationService } from '../src/modules/organization/organization.service.js';
 import { DeviceService } from '../src/modules/device/device.service.js';
+import { buildPairingChallengeTranscript } from '../src/modules/device/device-crypto.js';
+import { hashToken } from '../src/core/crypto.js';
 import { IngestionService } from '../src/modules/ingestion/ingestion.service.js';
 import { ReconciliationService } from '../src/modules/reconciliation/reconciliation.service.js';
 import { MessagingService } from '../src/modules/messaging/messaging.service.js';
@@ -85,12 +87,38 @@ describe('BriskSMS Milestone 3: End-to-End Product Integration & Commercial Read
       assert.ok(expiryDeltaSeconds > 280 && expiryDeltaSeconds <= 300, `Pairing token expiry should be ~300s (5m), got ${expiryDeltaSeconds}s`);
       assert.ok(tokenRecord.qrPayload.includes(tokenRecord.expiresAt));
 
-      // 4. Android companion app scans QR code and submits enrollment handshake
-      const mockPublicKeyPem = `-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE+mockEcdsaKey${randomUUID().slice(0, 8)}=\n-----END PUBLIC KEY-----`;
+      // 4. Android companion app scans QR code and submits PoP enrollment handshake
+      const { publicKey, privateKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+      const devicePublicKeyPem = publicKey.export({ type: 'spki', format: 'pem' }).toString().trim();
+      const fingerprint = createHash('sha256')
+        .update(publicKey.export({ type: 'spki', format: 'der' }))
+        .digest('hex');
+      const challenge = await deviceService.createPairingChallenge({
+        enrollmentToken: tokenRecord.pairingToken,
+        publicKeyPem: devicePublicKeyPem,
+      });
+      const challengeSignature = cryptoSign(
+        'sha256',
+        buildPairingChallengeTranscript({
+          challengeId: challenge.challengeId,
+          enrollmentId: challenge.enrollmentId,
+          organizationId: challenge.organizationId,
+          pairingTokenHash: hashToken(tokenRecord.pairingToken),
+          publicKeyFingerprint: fingerprint,
+          keyAlgorithm: challenge.keyAlgorithm,
+          signatureAlgorithm: challenge.signatureAlgorithm,
+          challengeNonce: challenge.challenge,
+          expiresAtIso: challenge.expiresAt,
+        }),
+        { key: privateKey, dsaEncoding: 'der' },
+      ).toString('base64');
+
       const pairResult = await deviceService.pairDevice({
         enrollmentToken: tokenRecord.pairingToken,
+        challengeId: challenge.challengeId,
+        challengeSignature,
         label: 'Samsung Galaxy A15 Dual SIM',
-        publicKeyPem: mockPublicKeyPem,
+        publicKeyPem: devicePublicKeyPem,
         deviceModel: 'SM-A155F',
         manufacturer: 'Samsung',
         androidVersion: '14.0',
@@ -107,8 +135,10 @@ describe('BriskSMS Milestone 3: End-to-End Product Integration & Commercial Read
         () =>
           deviceService.pairDevice({
             enrollmentToken: tokenRecord.pairingToken,
+            challengeId: challenge.challengeId,
+            challengeSignature,
             label: 'Replay Attempt',
-            publicKeyPem: mockPublicKeyPem,
+            publicKeyPem: devicePublicKeyPem,
             deviceModel: 'SM-A155F',
             manufacturer: 'Samsung',
             androidVersion: '14.0',

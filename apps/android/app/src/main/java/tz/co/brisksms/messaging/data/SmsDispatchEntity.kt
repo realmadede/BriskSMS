@@ -24,6 +24,8 @@ data class SmsDispatchEntity(
     val id: String = UUID.randomUUID().toString(),
     val organizationId: String,
     val campaignId: String? = null,
+    val jobId: String? = null,
+    val leaseToken: String? = null,
     val recipientPhone: String,
     val messageText: String,
     val simSlot: Int = 1,
@@ -42,6 +44,12 @@ interface SmsDispatchDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(entity: SmsDispatchEntity)
 
+    @Query("SELECT * FROM sms_dispatch_queue WHERE id = :id LIMIT 1")
+    suspend fun findById(id: String): SmsDispatchEntity?
+
+    @Query("SELECT * FROM sms_dispatch_queue WHERE jobId = :jobId LIMIT 1")
+    suspend fun findByJobId(jobId: String): SmsDispatchEntity?
+
     @Query("SELECT * FROM sms_dispatch_queue WHERE status = 'QUEUED' ORDER BY createdAt ASC LIMIT :limit")
     suspend fun getPendingDispatches(limit: Int = 20): List<SmsDispatchEntity>
 
@@ -50,6 +58,9 @@ interface SmsDispatchDao {
 
     @Query("UPDATE sms_dispatch_queue SET status = :status, providerMessageId = :providerId, updatedAt = :now WHERE id = :id")
     suspend fun updateStatus(id: String, status: String, providerId: String? = null, now: Long = System.currentTimeMillis())
+
+    @Query("UPDATE sms_dispatch_queue SET status = :status, errorMessage = :error, updatedAt = :now WHERE id = :id")
+    suspend fun updateStatusWithError(id: String, status: String, error: String?, now: Long = System.currentTimeMillis())
 
     @Query("UPDATE sms_dispatch_queue SET status = 'FAILED', errorMessage = :error, attempts = attempts + 1, updatedAt = :now WHERE id = :id")
     suspend fun markFailed(id: String, error: String, now: Long = System.currentTimeMillis())

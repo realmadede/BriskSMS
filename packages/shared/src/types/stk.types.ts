@@ -4,24 +4,40 @@ import { PaymentProvider } from '../enums/payment-provider.enum.js';
  * Status lifecycle of a Carrier STK / USSD Push
  */
 export enum StkPushStatus {
+  INITIATING = 'INITIATING',
   PENDING = 'PENDING',
   SUCCESS = 'SUCCESS',
   FAILED = 'FAILED',
   CANCELLED = 'CANCELLED',
   EXPIRED = 'EXPIRED',
+  DISPATCH_UNCERTAIN = 'DISPATCH_UNCERTAIN',
+  UNSUPPORTED = 'UNSUPPORTED',
 }
+
+/**
+ * Typed carrier dispatch outcome at the external transport boundary
+ */
+export type StkDispatchOutcome =
+  | 'ACCEPTED'
+  | 'UNCONFIGURED'
+  | 'UNSUPPORTED'
+  | 'DEFINITIVE_FAILURE'
+  | 'UNCERTAIN';
 
 /**
  * Request payload for initiating an STK Push
  */
 export interface StkPushRequestDto {
   phoneNumber: string;
+  /** Optional explicit wallet provider override (required for MNP-ported numbers). */
+  provider?: PaymentProvider;
   amount: number;
   currency?: string;
   invoiceId?: string;
   referenceNumber?: string;
   customerName?: string;
   memo?: string;
+  idempotencyKey?: string;
   metadata?: Record<string, unknown>;
 }
 
@@ -32,10 +48,13 @@ export interface StkPushResponseDto {
   checkoutId: string;
   organizationId: string;
   provider: PaymentProvider;
+  routingResolution?: 'EXPLICIT' | 'PREFIX_HEURISTIC';
   phoneNumber: string;
   amountCents: string;
   currency: string;
   status: StkPushStatus;
+  providerCheckoutId?: string | null;
+  dispatchOutcome?: StkDispatchOutcome;
   invoiceId?: string;
   referenceNumber?: string;
   customerPrompt: string;
@@ -53,6 +72,8 @@ export interface StkPushStatusDto {
   amountCents: string;
   currency: string;
   status: StkPushStatus;
+  providerCheckoutId?: string | null;
+  dispatchOutcome?: string | null;
   providerReference?: string | null;
   invoiceId?: string | null;
   referenceNumber?: string | null;

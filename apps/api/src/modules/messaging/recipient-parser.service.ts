@@ -1,47 +1,29 @@
 import {
   CampaignRecipientRow,
+  normalizeTanzanianPhone,
   RecipientValidationResult,
 } from '@brisksms/shared';
-
-// Supported Tanzanian Mobile Carrier Prefixes (E.164 without '+')
-const TZ_CARRIER_PREFIXES = [
-  '25574', '25575', '25576', // Vodacom
-  '25571', '25565', '25567', // Mixx by Yas (Tigo)
-  '25578', '25568', '25569', // Airtel
-  '25562',                   // Halotel
-  '25573',                   // TTCL
-];
 
 export class RecipientParserService {
   private readonly defaultMaxBatch = 1000;
 
   /**
-   * Sanitizes and normalizes a Tanzanian mobile phone number to E.164 format
+   * Sanitizes and normalizes a Tanzanian mobile phone number to E.164 format (+255...)
+   * using the canonical TCRA numbering-plan prefix list (including 061/077), decoupled
+   * from mobile carrier routing (MNP-safe).
    */
   normalizePhoneNumber(rawNumber: string): string | null {
-    if (!rawNumber) return null;
-
-    // Strip whitespaces, dashes, parentheses
-    let cleaned = rawNumber.replace(/[\s\-\(\)\.]+/g, '');
-
-    // Format local Tanzanian format (07... / 06...) -> +255...
-    if (cleaned.startsWith('0') && cleaned.length === 10) {
-      cleaned = `+255${cleaned.substring(1)}`;
-    } else if (cleaned.startsWith('255') && cleaned.length === 12) {
-      cleaned = `+${cleaned}`;
-    }
-
-    if (!cleaned.startsWith('+255') || cleaned.length !== 13) {
+    if (!rawNumber || typeof rawNumber !== 'string') return null;
+    const trimmed = rawNumber.trim();
+    if (!trimmed || !/^[+\d\s().-]+$/.test(trimmed)) {
       return null;
     }
 
-    // Verify carrier prefix
-    const prefix = cleaned.substring(1, 6);
-    if (!TZ_CARRIER_PREFIXES.includes(prefix)) {
+    try {
+      return normalizeTanzanianPhone(trimmed, true);
+    } catch {
       return null;
     }
-
-    return cleaned;
   }
 
   /**

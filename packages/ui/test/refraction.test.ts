@@ -51,8 +51,16 @@ describe('UI Refraction & Liquid Glass Engine', () => {
   });
 
   it('should instantiate RefractionManager with safe capability fallback', () => {
-    const manager = new RefractionManager();
+    const manager = new RefractionManager({ maxConcurrentFilters: 2 });
     assert.ok(manager);
     assert.equal(manager.detectHardwareCapability(), false);
+  });
+
+  it('should wire --lg-filter and dark-mode contrast pill text tokens in glisse-tokens.css', async () => {
+    const { readFileSync } = await import('node:fs');
+    const css = readFileSync(new URL('../src/styles/glisse-tokens.css', import.meta.url), 'utf8');
+    assert.match(css, /--lg-filter/);
+    assert.match(css, /--brisk-contrast-pill-text:\s*#121212/);
+    assert.match(css, /color:\s*var\(--brisk-contrast-pill-text\)/);
   });
 });

@@ -65,6 +65,13 @@ class SimManager(private val context: Context) {
     }
 
     /**
+     * Resolves subscription ID only if the exact 1-based SIM slot (1 or 2) is active.
+     */
+    fun resolveExactSubscriptionId(slotNumber: Int): Int? {
+        return getActiveSimSlots().find { it.simNumber == slotNumber && it.isReady }?.subscriptionId
+    }
+
+    /**
      * Resolves subscription ID for a requested 1-based SIM slot (1 or 2)
      */
     fun resolveSubscriptionId(preferredSlot: Int = 1): Int? {

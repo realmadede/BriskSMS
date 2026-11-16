@@ -25,6 +25,7 @@ import kotlinx.coroutines.withContext
 import tz.co.brisksms.core.storage.KeystoreSecureStorage
 import tz.co.brisksms.data.local.BriskDatabase
 import tz.co.brisksms.messaging.service.SmsGateRelayService
+import tz.co.brisksms.security.KeystoreManager
 import tz.co.brisksms.ui.theme.BriskColors
 import tz.co.brisksms.ui.theme.BriskShapes
 
@@ -286,8 +287,12 @@ fun SettingsScreen(
                             // Cancel background workers
                             WorkManager.getInstance(context).cancelAllWork()
 
-                            // Clear storage
+                            // Clear local Room tables, secure storage, and wipe local hardware identity key
+                            withContext(Dispatchers.IO) {
+                                BriskDatabase.getInstance(context).clearAllTables()
+                            }
                             secureStorage.clear()
+                            runCatching { KeystoreManager().deleteKey() }
 
                             withContext(Dispatchers.Main) {
                                 onUnpaired()

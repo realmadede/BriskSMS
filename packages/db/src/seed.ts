@@ -5,7 +5,7 @@ import {
   FeatureKey,
   ProductType,
 } from '@brisksms/shared';
-import { SqlExecutor, sql, withTransaction } from './client.js';
+import { SqlExecutor, withTransaction } from './client.js';
 
 export interface SeedCatalogSummary {
   featuresSeeded: number;
@@ -272,5 +272,5 @@ export async function seedCommercialCatalog(customExecutor?: SqlExecutor): Promi
       productsSeeded: products.length,
       plansSeeded: plans.length,
     };
-  }, customExecutor ?? sql);
+  }, customExecutor);
 }

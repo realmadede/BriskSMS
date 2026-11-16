@@ -5,6 +5,7 @@ import {
   MessageDispatchPayload,
   MessageDispatchResult,
   NormalizedDeliveryEvent,
+  isProhibitedNetworkDestination,
 } from '@brisksms/shared';
 import { MessagingProvider } from '../interfaces/messaging-provider.interface.js';
 
@@ -64,31 +65,11 @@ export class SmsGateProvider implements MessagingProvider {
       throw new Error(`Malformed gateway URL: "${baseUrl}"`);
     }
 
-    // SSRF Destination Validation
-    const host = urlObj.hostname.toLowerCase();
+    // SSRF Destination Validation (handles IPv4, IPv6, hex IPv4-mapped IPv6, metadata & private ranges)
+    const host = urlObj.hostname.toLowerCase().replace(/^\[|\]$/g, '');
     const isPrivateAllowed = process.env.ALLOW_PRIVATE_GATEWAY_NETWORKS === 'true';
 
-    const isLoopback =
-      host === 'localhost' ||
-      host === '127.0.0.1' ||
-      host === '0.0.0.0' ||
-      host === '::1' ||
-      /^127\.\d+\.\d+\.\d+$/.test(host);
-
-    const isLinkLocalOrMetadata =
-      host.startsWith('169.254.') ||
-      host.startsWith('fe80:') ||
-      host === 'metadata.google.internal' ||
-      host === 'instance-data';
-
-    const isPrivateIpv4 =
-      /^10\.\d+\.\d+\.\d+$/.test(host) ||
-      /^192\.168\.\d+\.\d+$/.test(host) ||
-      /^172\.(1[6-9]|2\d|3[01])\.\d+\.\d+$/.test(host);
-
-    const isPrivateIpv6 = /^f[cd][0-9a-f]{2}:/i.test(host);
-
-    if ((isLoopback || isLinkLocalOrMetadata || isPrivateIpv4 || isPrivateIpv6) && !isPrivateAllowed) {
+    if (isProhibitedNetworkDestination(host) && !isPrivateAllowed) {
       throw new Error(
         `Gateway URL resolves to prohibited internal or private network destination: "${host}". Only public internet endpoints are permitted.`,
       );

@@ -54,12 +54,17 @@ export const sendSmsAction = {
         },
       });
 
-      return response.json;
+      if (response.status >= 400) {
+        throw new Error(`Send SMS failed with HTTP status ${response.status}`);
+      }
+
+      const raw = response.json as Record<string, unknown>;
+      return (raw?.data as Record<string, unknown> | undefined) ?? raw;
     },
     sample: {
       success: true,
       messageId: 'msg_882910482',
-      status: 'SENT',
+      status: 'QUEUED',
       recipientPhone: '+255754000111',
       costCredits: 1,
     },

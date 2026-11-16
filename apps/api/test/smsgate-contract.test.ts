@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import { randomUUID, createHmac } from 'node:crypto';
 import { GatewayMode } from '@brisksms/shared';
 import { SmsGateProvider } from '../src/modules/messaging/providers/smsgate.provider.js';
-import { smsGateKeyService } from '../src/modules/messaging/services/smsgate-key.service.js';
+import { SmsGateKeyService } from '../src/modules/messaging/services/smsgate-key.service.js';
 
 describe('Milestone 2.4: SMSGate Protocol Verification, Webhook Security & Credential Hardening', () => {
   const provider = new SmsGateProvider();
+  const smsGateKeyService = new SmsGateKeyService({ memoryOnly: true });
   const orgAId = randomUUID();
   const orgBId = randomUUID();
 

@@ -105,4 +105,27 @@ class ProviderNotificationParserTest {
         assertNull(ProviderNotificationParser.parse("MPESA", ""))
         assertNull(ProviderNotificationParser.parse("MPESA", "    "))
     }
+
+    @Test
+    fun parseSpoofedPhoneSenderOrOutgoingTransfer_returnsNull() {
+        val mpesaIncoming = "09J8K7L6M5 Imethibitishwa. Umepokea Tsh 45,000 kutoka kwa John Doe 0754123456 tarehe 05/11/2026."
+        assertNull(ProviderNotificationParser.parse("+255754111222", mpesaIncoming))
+
+        val outgoingMpesa = "09J8K7L6M9 Imethibitishwa. Umetuma Tsh 45,000 kwenda John Doe 0754123456 tarehe 05/11/2026."
+        assertNull(ProviderNotificationParser.parse("M-PESA", outgoingMpesa))
+    }
+
+    @Test
+    fun parseAirtelWithDecimalsAndCrdbCredit_succeeds() {
+        val airtelMsg = "Kumbukumbu Namba: AM112233 Umepokea Tsh 15,250.50 kutoka Baraka Juma 0784112233."
+        val airtel = ProviderNotificationParser.parse("AIRTELMONEY", airtelMsg)
+        assertNotNull(airtel)
+        assertEquals(1525050L, airtel?.amountCents)
+
+        val crdbMsg = "CRDB Alert: Credit of TZS 150,000.00 to A/C 01J204839200 from KIBWANA SAIDI Ref: FT2631589402 on 05-Nov-2026."
+        val crdb = ProviderNotificationParser.parse("CRDB", crdbMsg)
+        assertNotNull(crdb)
+        assertEquals("FT2631589402", crdb?.reference)
+        assertEquals(15000000L, crdb?.amountCents)
+    }
 }

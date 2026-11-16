@@ -20,6 +20,8 @@ data class OfflineEvidenceEntity(
     val signature: String? = null,
     val isUploaded: Boolean = false,
     val uploadedAt: Long? = null,
+    val isPermanentFailure: Boolean = false,
+    val lastError: String? = null,
     val retryCount: Int = 0,
     val createdAt: Long = System.currentTimeMillis()
 )

@@ -1,5 +1,9 @@
 import { Router, RouteRequest, ApiResponse, HttpException } from '../../core/http.js';
-import { authenticate } from '../../core/guards.js';
+import {
+  authenticate,
+  assertHumanSessionAuth,
+  resolveAuthorizedTenantOrgId,
+} from '../../core/guards.js';
 import { OAuthService } from './oauth.service.js';
 import { dbStore } from '../../core/store.js';
 import { ApiKeyScope, UserRole } from '@brisksms/shared';
@@ -25,12 +29,10 @@ export function registerOAuthRoutes(router: Router): void {
   // 1. Register OAuth Client Application (e.g. Zapier App, Third-party ERP)
   router.post('/v1/oauth/clients', async (req: RouteRequest): Promise<ApiResponse> => {
     await authenticate(req);
+    assertHumanSessionAuth(req, 'OAuth client registration');
     const userId = req.context.userId!;
     const body = req.body as Record<string, any>;
-    const orgId = (body.organizationId as string) || req.context.organizationId;
-    if (!orgId) {
-      throw new HttpException(400, 'VALIDATION_ERROR', 'organizationId is required');
-    }
+    const orgId = resolveAuthorizedTenantOrgId(req, body.organizationId);
     await assertDeveloperAccess(orgId, userId);
 
     if (!body.name || !body.redirectUris || !Array.isArray(body.redirectUris) || body.redirectUris.length === 0) {
@@ -62,6 +64,7 @@ export function registerOAuthRoutes(router: Router): void {
   // 2. RFC 7636 Authorization Endpoint (Issues authorization code with PKCE challenge)
   router.get('/v1/oauth/authorize', async (req: RouteRequest): Promise<ApiResponse> => {
     await authenticate(req);
+    assertHumanSessionAuth(req, 'OAuth authorization approval');
     const userId = req.context.userId!;
     const clientId = req.query.client_id;
     const redirectUri = req.query.redirect_uri;
@@ -84,12 +87,21 @@ export function registerOAuthRoutes(router: Router): void {
       throw new HttpException(404, 'INVALID_CLIENT', `OAuth client '${clientId}' not found`);
     }
 
-    // Ensure user belongs to the client's organization
+    // Ensure authenticated session belongs to the client's organization
+    resolveAuthorizedTenantOrgId(req, client.organizationId);
     await assertDeveloperAccess(client.organizationId, userId);
 
-    const scopes = rawScope
-      ? (rawScope.split(/[\s,]+/).filter(Boolean) as ApiKeyScope[])
-      : [ApiKeyScope.SMS_SEND, ApiKeyScope.PAYMENTS_READ];
+    const allowedScopes = new Set<string>(Object.values(ApiKeyScope));
+    const parsedScopes = rawScope ? rawScope.split(/[\s,]+/).filter(Boolean) : [];
+    for (const s of parsedScopes) {
+      if (!allowedScopes.has(s)) {
+        throw new HttpException(400, 'INVALID_SCOPE', `Unsupported OAuth scope '${s}'`);
+      }
+    }
+    const scopes =
+      parsedScopes.length > 0
+        ? (parsedScopes as ApiKeyScope[])
+        : [ApiKeyScope.SMS_SEND, ApiKeyScope.PAYMENTS_READ];
 
     const code = await oauthService.generateAuthorizationCode({
       clientId,
@@ -181,5 +193,19 @@ export function registerOAuthRoutes(router: Router): void {
       'UNSUPPORTED_GRANT_TYPE',
       'grant_type must be either "authorization_code" or "refresh_token"',
     );
+  });
+
+  // 4. RFC 7009 Token Revocation Endpoint
+  router.post('/v1/oauth/revoke', async (req: RouteRequest): Promise<ApiResponse> => {
+    const body = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, any>;
+    const token = typeof body.token === 'string' ? body.token.trim() : '';
+    if (!token) {
+      throw new HttpException(400, 'INVALID_REQUEST', 'token is required');
+    }
+    const revoked = await oauthService.revokeToken(token);
+    return {
+      success: true,
+      data: { revoked },
+    };
   });
 }

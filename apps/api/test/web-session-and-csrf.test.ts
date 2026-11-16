@@ -25,6 +25,7 @@ describe('Web Console Session Security & CSRF Protection', () => {
 
   beforeEach(async () => {
     await dbStore.reset();
+    await authService.clearRateLimits();
 
     const reg = await authService.register({
       email: 'merchant@brisksms.co.tz',
@@ -141,10 +142,12 @@ describe('Web Console Session Security & CSRF Protection', () => {
       const prevEnv = process.env.NODE_ENV;
       const prevMasterKey = process.env.ENCRYPTION_MASTER_KEY;
       const prevCsrfSecret = process.env.CSRF_SECRET;
+      const prevJwtSecret = process.env.JWT_ACCESS_SECRET;
 
       process.env.NODE_ENV = 'production';
       process.env.ENCRYPTION_MASTER_KEY = randomBytes(32).toString('hex');
       process.env.CSRF_SECRET = randomBytes(32).toString('hex');
+      process.env.JWT_ACCESS_SECRET = randomBytes(32).toString('hex');
 
       try {
         const res = await makeRequest('POST', '/v1/auth/login', {}, {
@@ -160,6 +163,7 @@ describe('Web Console Session Security & CSRF Protection', () => {
         process.env.NODE_ENV = prevEnv;
         process.env.ENCRYPTION_MASTER_KEY = prevMasterKey;
         process.env.CSRF_SECRET = prevCsrfSecret;
+        if (prevJwtSecret !== undefined) process.env.JWT_ACCESS_SECRET = prevJwtSecret; else delete process.env.JWT_ACCESS_SECRET;
       }
     });
 

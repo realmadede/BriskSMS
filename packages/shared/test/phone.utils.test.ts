@@ -4,6 +4,8 @@ import {
   normalizeTanzanianPhone,
   isValidTanzanianMobileNumber,
   detectTanzanianCarrier,
+  inferCarrierHintFromPrefix,
+  TANZANIAN_MOBILE_PREFIXES,
   PaymentProvider,
 } from '../src/index.js';
 
@@ -57,5 +59,12 @@ describe('Phone Utilities & Carrier Detection', () => {
 
     // TTCL
     assert.equal(detectTanzanianCarrier('0734123456'), PaymentProvider.TTCL_PESA);
+  });
+
+  it('exports canonical Tanzanian numbering prefixes and inferCarrierHintFromPrefix including 061/077', () => {
+    assert.ok(TANZANIAN_MOBILE_PREFIXES.includes('61'));
+    assert.ok(TANZANIAN_MOBILE_PREFIXES.includes('77'));
+    assert.equal(inferCarrierHintFromPrefix('0612123456'), PaymentProvider.HALOPESA);
+    assert.equal(inferCarrierHintFromPrefix('0773123456'), PaymentProvider.MIXX);
   });
 });

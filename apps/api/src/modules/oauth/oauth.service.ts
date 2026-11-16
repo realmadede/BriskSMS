@@ -1,7 +1,37 @@
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { ApiKeyScope } from '@brisksms/shared';
 import { sql, SqlExecutor, withTransaction } from '@brisksms/db';
 import { OAuthClientRecord } from '../../core/store.js';
+import { HttpException } from '../../core/http.js';
+
+function constantTimeStringEqual(a: string, b: string): boolean {
+  const bufA = Buffer.from(a, 'utf8');
+  const bufB = Buffer.from(b, 'utf8');
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
+}
+
+function validateRedirectUri(uri: string): string {
+  const trimmed = uri.trim();
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw new HttpException(400, 'INVALID_REDIRECT_URI', `Malformed redirect_uri '${uri}'`);
+  }
+  const isHttps = parsed.protocol === 'https:';
+  const isLoopbackHttp =
+    parsed.protocol === 'http:' &&
+    (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1' || parsed.hostname === '::1');
+  if (!isHttps && !isLoopbackHttp) {
+    throw new HttpException(
+      400,
+      'INVALID_REDIRECT_URI',
+      'redirect_uri must use https:// (or http://localhost / 127.0.0.1 for local development)',
+    );
+  }
+  return trimmed;
+}
 
 export interface RegisterOAuthClientDto {
   organizationId: string;
@@ -66,11 +96,18 @@ export class OAuthService {
    */
   public async registerClient(dto: RegisterOAuthClientDto): Promise<OAuthClientRecord> {
     const id = randomUUID();
+    const isPublic = dto.isPublic ?? true;
+    if (!isPublic && (!dto.clientSecret || dto.clientSecret.trim().length < 16)) {
+      throw new HttpException(
+        400,
+        'CLIENT_SECRET_REQUIRED',
+        'Confidential OAuth clients (isPublic=false) must provide a clientSecret of at least 16 characters',
+      );
+    }
     const clientSecretHash = dto.clientSecret
       ? createHash('sha256').update(dto.clientSecret).digest('hex')
       : null;
-    const redirectUris = dto.redirectUris.map((u) => u.trim());
-    const isPublic = dto.isPublic ?? true;
+    const redirectUris = dto.redirectUris.map(validateRedirectUri);
     const now = new Date();
 
     const inserted = await sql<Record<string, any>>`
@@ -104,27 +141,31 @@ export class OAuthService {
       SELECT * FROM oauth_clients WHERE id = ${dto.clientId} LIMIT 1
     `;
     if (clientRows.length === 0) {
-      throw new Error(`Invalid OAuth client_id: ${dto.clientId}`);
+      throw new HttpException(404, 'INVALID_CLIENT', `Invalid OAuth client_id: ${dto.clientId}`);
     }
 
     const client = this.mapClientRow(clientRows[0]!);
     if (client.organizationId !== dto.organizationId) {
-      throw new Error('OAuth client does not belong to the specified organization');
+      throw new HttpException(403, 'CROSS_ORGANIZATION_FORBIDDEN', 'OAuth client does not belong to the specified organization');
     }
 
     if (!client.redirectUris.includes(dto.redirectUri)) {
-      throw new Error(`Unauthorized redirect_uri: ${dto.redirectUri}`);
+      throw new HttpException(400, 'INVALID_REDIRECT_URI', `Unauthorized redirect_uri: ${dto.redirectUri}`);
     }
 
     if (!dto.codeChallenge) {
-      throw new Error('PKCE code_challenge is required');
+      throw new HttpException(400, 'INVALID_REQUEST', 'PKCE code_challenge is required');
+    }
+
+    const method = dto.codeChallengeMethod ?? 'S256';
+    if (method !== 'S256') {
+      throw new HttpException(400, 'INVALID_REQUEST', 'Only PKCE code_challenge_method="S256" is permitted');
     }
 
     const code = `code_${randomBytes(24).toString('hex')}`;
     const now = new Date();
     const expiresAt = new Date(now.getTime() + 10 * 60 * 1000);
     const scopes = [...dto.scopes];
-    const method = dto.codeChallengeMethod ?? 'S256';
 
     await sql`
       INSERT INTO oauth_authorization_codes (
@@ -148,14 +189,14 @@ export class OAuthService {
     method: 'S256' | 'plain',
   ): boolean {
     if (method === 'plain') {
-      return codeVerifier === challenge;
+      return constantTimeStringEqual(codeVerifier, challenge);
     }
 
     const computedHash = createHash('sha256')
       .update(codeVerifier, 'ascii')
       .digest('base64url');
 
-    return computedHash === challenge;
+    return constantTimeStringEqual(computedHash, challenge);
   }
 
   /**
@@ -167,17 +208,17 @@ export class OAuthService {
         SELECT * FROM oauth_clients WHERE id = ${dto.clientId} LIMIT 1
       `;
       if (clientRows.length === 0) {
-        throw new Error(`Invalid client_id: ${dto.clientId}`);
+        throw new HttpException(401, 'INVALID_CLIENT', `Invalid client_id: ${dto.clientId}`);
       }
       const client = this.mapClientRow(clientRows[0]!);
 
-      if (!client.isPublic && client.clientSecretHash) {
-        if (!dto.clientSecret) {
-          throw new Error('client_secret is required for confidential clients');
+      if (!client.isPublic) {
+        if (!dto.clientSecret || !client.clientSecretHash) {
+          throw new HttpException(401, 'INVALID_CLIENT', 'client_secret is required for confidential clients');
         }
         const secretHash = createHash('sha256').update(dto.clientSecret).digest('hex');
-        if (secretHash !== client.clientSecretHash) {
-          throw new Error('Invalid client_secret');
+        if (!constantTimeStringEqual(secretHash, client.clientSecretHash)) {
+          throw new HttpException(401, 'INVALID_CLIENT', 'Invalid client_secret');
         }
       }
 
@@ -185,24 +226,24 @@ export class OAuthService {
         SELECT * FROM oauth_authorization_codes WHERE code = ${dto.code} FOR UPDATE
       `;
       if (codeRows.length === 0) {
-        throw new Error('Invalid authorization code');
+        throw new HttpException(400, 'INVALID_GRANT', 'Invalid authorization code');
       }
       const codeRecord = codeRows[0]!;
 
       if (codeRecord.used_at) {
-        throw new Error('Authorization code has already been used');
+        throw new HttpException(400, 'INVALID_GRANT', 'Authorization code has already been used');
       }
 
       if (new Date() > new Date(codeRecord.expires_at)) {
-        throw new Error('Authorization code has expired');
+        throw new HttpException(400, 'INVALID_GRANT', 'Authorization code has expired');
       }
 
       if (codeRecord.client_id !== dto.clientId) {
-        throw new Error('Authorization code was issued to a different client');
+        throw new HttpException(400, 'INVALID_GRANT', 'Authorization code was issued to a different client');
       }
 
       if (codeRecord.redirect_uri !== dto.redirectUri) {
-        throw new Error('redirect_uri does not match original authorization request');
+        throw new HttpException(400, 'INVALID_GRANT', 'redirect_uri does not match original authorization request');
       }
 
       const isPkceValid = this.verifyCodeChallenge(
@@ -212,7 +253,19 @@ export class OAuthService {
       );
 
       if (!isPkceValid) {
-        throw new Error('Invalid PKCE code_verifier');
+        throw new HttpException(400, 'INVALID_GRANT', 'Invalid PKCE code_verifier');
+      }
+
+      const userMemRows = await tx<{ is_active: boolean; role: string }>`
+        SELECT u."is_active", uo."role"
+        FROM "users" u
+        JOIN "users_organizations" uo ON uo."user_id" = u."id"
+        WHERE u."id" = ${codeRecord.user_id}
+          AND uo."organization_id" = ${codeRecord.organization_id}
+        LIMIT 1
+      `;
+      if (!userMemRows[0] || !userMemRows[0].is_active) {
+        throw new HttpException(403, 'ACCESS_DENIED', 'User account is inactive or no longer a member of the organization');
       }
 
       const now = new Date();
@@ -242,25 +295,63 @@ export class OAuthService {
     const refreshTokenHash = createHash('sha256').update(dto.refreshToken).digest('hex');
 
     return withTransaction(async (tx) => {
+      const clientRows = await tx<Record<string, any>>`
+        SELECT * FROM oauth_clients WHERE id = ${dto.clientId} LIMIT 1
+      `;
+      if (clientRows.length === 0) {
+        throw new HttpException(401, 'INVALID_CLIENT', `Invalid client_id: ${dto.clientId}`);
+      }
+      const client = this.mapClientRow(clientRows[0]!);
+      if (!client.isPublic) {
+        if (!dto.clientSecret || !client.clientSecretHash) {
+          throw new HttpException(401, 'INVALID_CLIENT', 'client_secret is required for confidential clients');
+        }
+        const secretHash = createHash('sha256').update(dto.clientSecret).digest('hex');
+        if (!constantTimeStringEqual(secretHash, client.clientSecretHash)) {
+          throw new HttpException(401, 'INVALID_CLIENT', 'Invalid client_secret');
+        }
+      }
+
       const tokenRows = await tx<Record<string, any>>`
         SELECT * FROM oauth_tokens WHERE refresh_token_hash = ${refreshTokenHash} FOR UPDATE
       `;
       if (tokenRows.length === 0) {
-        throw new Error('Invalid refresh token');
+        throw new HttpException(400, 'INVALID_GRANT', 'Invalid refresh token');
       }
 
       const tokenRecord = tokenRows[0]!;
 
       if (tokenRecord.revoked_at) {
-        throw new Error('Token has been revoked');
+        // Replay detected: revoke all active tokens for this client + user + org
+        await tx`
+          UPDATE oauth_tokens
+          SET revoked_at = NOW()
+          WHERE client_id = ${tokenRecord.client_id}
+            AND user_id = ${tokenRecord.user_id}
+            AND organization_id = ${tokenRecord.organization_id}
+            AND revoked_at IS NULL
+        `;
+        throw new HttpException(401, 'TOKEN_REVOKED', 'Token has been revoked');
       }
 
       if (new Date() > new Date(tokenRecord.refresh_token_expires_at)) {
-        throw new Error('Refresh token has expired');
+        throw new HttpException(400, 'INVALID_GRANT', 'Refresh token has expired');
       }
 
       if (tokenRecord.client_id !== dto.clientId) {
-        throw new Error('Refresh token was issued to a different client');
+        throw new HttpException(400, 'INVALID_GRANT', 'Refresh token was issued to a different client');
+      }
+
+      const userMemRows = await tx<{ is_active: boolean }>`
+        SELECT u."is_active"
+        FROM "users" u
+        JOIN "users_organizations" uo ON uo."user_id" = u."id"
+        WHERE u."id" = ${tokenRecord.user_id}
+          AND uo."organization_id" = ${tokenRecord.organization_id}
+        LIMIT 1
+      `;
+      if (!userMemRows[0] || !userMemRows[0].is_active) {
+        throw new HttpException(403, 'ACCESS_DENIED', 'User account is inactive or removed from organization');
       }
 
       const now = new Date();
@@ -317,6 +408,18 @@ export class OAuthService {
         : record.scopes;
     const scopes: ApiKeyScope[] = Array.isArray(rawScopes) ? rawScopes : [];
     if (requiredScope && !scopes.includes(requiredScope)) {
+      return null;
+    }
+
+    const userMemRows = await sql<{ is_active: boolean }>`
+      SELECT u."is_active"
+      FROM "users" u
+      JOIN "users_organizations" uo ON uo."user_id" = u."id"
+      WHERE u."id" = ${record.user_id}
+        AND uo."organization_id" = ${record.organization_id}
+      LIMIT 1
+    `;
+    if (!userMemRows[0] || !userMemRows[0].is_active) {
       return null;
     }
 

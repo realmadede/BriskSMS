@@ -19,6 +19,7 @@ describe('Refresh-Token Family Revocation Security Suite', () => {
 
   beforeEach(async () => {
     await dbStore.reset();
+    await authService.clearRateLimits();
   });
 
   interface HttpResponse {

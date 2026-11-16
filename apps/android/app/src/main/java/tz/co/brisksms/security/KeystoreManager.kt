@@ -11,10 +11,11 @@ import java.security.KeyStore
 import java.security.PrivateKey
 import java.security.PublicKey
 import java.security.Signature
+import java.security.spec.ECGenParameterSpec
 
 /**
  * Android Keystore Device Identity & Signing Manager
- * Generates and maintains hardware-backed asymmetric key pairs without private key export.
+ * Generates and maintains hardware-backed EC P-256 asymmetric key pairs without private key export.
  */
 class KeystoreManager {
 
@@ -22,6 +23,7 @@ class KeystoreManager {
         private const val ANDROID_KEYSTORE = "AndroidKeyStore"
         private const val KEY_ALIAS = "brisksms_device_identity_key"
         private const val SIGNATURE_ALGORITHM = "SHA256withECDSA"
+        private const val EC_CURVE_NAME = "secp256r1"
     }
 
     private val keyStore: KeyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply {
@@ -51,6 +53,7 @@ class KeystoreManager {
             KEY_ALIAS,
             KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY
         )
+            .setAlgorithmParameterSpec(ECGenParameterSpec(EC_CURVE_NAME))
             .setDigests(KeyProperties.DIGEST_SHA256)
             .setUserAuthenticationRequired(false)
 
@@ -86,7 +89,23 @@ class KeystoreManager {
     }
 
     /**
-     * Returns the base64-encoded public key for device registration with the backend
+     * Returns whether an identity key alias is currently stored in Android Keystore.
+     */
+    fun hasDeviceKeyPair(): Boolean {
+        return keyStore.containsAlias(KEY_ALIAS)
+    }
+
+    /**
+     * Permanently deletes the device identity key from Android Keystore on unpair or remote wipe.
+     */
+    fun deleteKey() {
+        if (keyStore.containsAlias(KEY_ALIAS)) {
+            keyStore.deleteEntry(KEY_ALIAS)
+        }
+    }
+
+    /**
+     * Returns the base64-encoded X.509 SPKI public key DER bytes.
      */
     fun getPublicKeyBase64(): String {
         val (publicKey, _) = getOrCreateDeviceKeyPair()
@@ -94,7 +113,23 @@ class KeystoreManager {
     }
 
     /**
-     * Signs data using the Keystore private key with SHA256withECDSA
+     * Returns the standard PEM-encoded X.509 SPKI public key for device pairing registration.
+     */
+    fun getPublicKeyPem(): String {
+        val (publicKey, _) = getOrCreateDeviceKeyPair()
+        return DevicePairingProtocol.encodePublicKeyPem(publicKey.encoded)
+    }
+
+    /**
+     * Returns the lowercase SHA-256 hex fingerprint of the local X.509 SPKI public key DER bytes.
+     */
+    fun getPublicKeyFingerprintHex(): String {
+        val (publicKey, _) = getOrCreateDeviceKeyPair()
+        return DevicePairingProtocol.computePublicKeyFingerprint(publicKey.encoded)
+    }
+
+    /**
+     * Signs canonical payload bytes using the Keystore private key with SHA256withECDSA (ASN.1 DER).
      */
     fun sign(data: ByteArray): String {
         val (_, privateKey) = getOrCreateDeviceKeyPair()

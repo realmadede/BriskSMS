@@ -6,15 +6,21 @@ export class AirtelAdapter extends BaseProviderAdapter {
   readonly provider = PaymentProvider.AIRTEL_MONEY;
 
   canParse(senderAddress: string, body: string): boolean {
+    if (this.isPersonalPhoneSender(senderAddress)) {
+      return false;
+    }
     const address = senderAddress.toUpperCase();
     if (address.includes('AIRTEL')) {
       return true;
     }
-    return /Airtel\s*Money/i.test(body);
+    return /Airtel\s*Money.*(?:Umepokea|You have received)/i.test(body);
   }
 
   parse(body: string, defaultDate: Date = new Date()): ParsedPaymentResult | null {
     const text = this.cleanText(body);
+    if (!this.isIncomingCreditMessage(text)) {
+      return null;
+    }
 
     // Extract Transaction ID / Namba ya muamala
     const refMatch = text.match(/(?:Namba ya muamala|Trans(?:action)?\s*(?:ID|No\.?))\s*(?::|ni)?\s*([A-Za-z0-9.]+)/i);
@@ -24,7 +30,7 @@ export class AirtelAdapter extends BaseProviderAdapter {
     const reference = refMatch[1].replace(/\.$/, '').toUpperCase();
 
     // Extract Amount
-    const amountMatch = text.match(/(?:Tsh|TZS)\s*([\d,]+(?:\.\d{2})?)/i);
+    const amountMatch = text.match(/(?:Tsh|TZS)\s*(\d[\d,]*(?:\.\d{1,2})?)/i);
     if (!amountMatch || !amountMatch[1]) {
       return null;
     }
@@ -54,7 +60,7 @@ export class AirtelAdapter extends BaseProviderAdapter {
       senderName,
       recipientAccount: null,
       customerMemo: null,
-      providerTimestamp: defaultDate,
+      providerTimestamp: this.extractTimestamp(text, defaultDate),
       rawText: body,
     };
   }

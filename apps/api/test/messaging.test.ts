@@ -29,12 +29,15 @@ describe('Product B: BriskSMS Cellular Gateway & Messaging Engine', () => {
       assert.equal(recipientParserService.normalizePhoneNumber('0682112233'), '+255682112233');
 
       assert.equal(recipientParserService.normalizePhoneNumber('0624556677'), '+255624556677');
+      assert.equal(recipientParserService.normalizePhoneNumber('0612556677'), '+255612556677');
+      assert.equal(recipientParserService.normalizePhoneNumber('0773556677'), '+255773556677');
     });
 
     it('should reject invalid or non-Tanzanian numbers', () => {
       assert.equal(recipientParserService.normalizePhoneNumber('0700123456'), null);
       assert.equal(recipientParserService.normalizePhoneNumber('12345'), null);
       assert.equal(recipientParserService.normalizePhoneNumber('+18005550199'), null);
+      assert.equal(recipientParserService.normalizePhoneNumber('tel0754123456'), null);
     });
 
     it('should deduplicate recipients and extract template variables', () => {

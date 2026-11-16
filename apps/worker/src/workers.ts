@@ -4,6 +4,10 @@ import {
   SmsStatus,
   CreditLedgerEntryType,
   CampaignStatus,
+  decryptSecret,
+  isEncryptedSecret,
+  validateOutboundHttpUrl,
+  validateResolvedOutboundUrl,
 } from '@brisksms/shared';
 import {
   sql,
@@ -54,6 +58,38 @@ export type CustomFetchHandler = (
   url: string,
   init: RequestInit,
 ) => Promise<{ status: number; ok: boolean }>;
+
+function buildGatewayAuthHeader(encryptedOrPlain: string): string {
+  const rawAuth = isEncryptedSecret(encryptedOrPlain)
+    ? decryptSecret(encryptedOrPlain)
+    : encryptedOrPlain;
+  if (rawAuth.trim().startsWith('{')) {
+    const parsedAuth = JSON.parse(rawAuth);
+    if (parsedAuth.type === 'BASIC') {
+      return `Basic ${Buffer.from(`${parsedAuth.username}:${parsedAuth.password}`).toString('base64')}`;
+    }
+    if (parsedAuth.type === 'BEARER') {
+      return `Bearer ${String(parsedAuth.token ?? '').replace(/^Bearer\s+/i, '')}`;
+    }
+  }
+  return rawAuth.startsWith('Bearer ') || rawAuth.startsWith('Basic ')
+    ? rawAuth
+    : `Bearer ${rawAuth}`;
+}
+
+function resolveSmsGateMessagesEndpoint(baseUrl?: string | null): string {
+  const candidate = (baseUrl || 'https://api.sms-gate.app/3rdparty/v1').trim();
+  validateOutboundHttpUrl(candidate, {
+    allowPrivateEnvVar: 'ALLOW_PRIVATE_GATEWAY_NETWORKS',
+    allowHttpInProd: true,
+    label: 'Gateway URL',
+  });
+  const clean = candidate.replace(/\/+$/, '');
+  if (clean.endsWith('/messages') || clean.endsWith('/message')) {
+    return clean;
+  }
+  return `${clean}/messages`;
+}
 
 export function computeWebhookSignature(
   payloadString: string,
@@ -228,26 +264,37 @@ export async function processWebhookDeliveryJob(
   let failureReason: string | null = null;
 
   for (const ep of endpoints) {
-    const signature = computeWebhookSignature(payloadString, ep.secret, timestampSeconds);
-
     try {
-      let status = 200;
-      let ok = true;
+      const plainSecret = isEncryptedSecret(ep.secret) ? decryptSecret(ep.secret) : ep.secret;
+      const signature = computeWebhookSignature(payloadString, plainSecret, timestampSeconds);
 
-      if (customFetch) {
-        const res = await customFetch(ep.url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-BriskSMS-Event': row.event_type,
-            'X-BriskSMS-Delivery': row.id,
-            'X-BriskSMS-Signature': signature,
-          },
-          body: payloadString,
-        });
-        status = res.status;
-        ok = res.ok;
-      }
+      await validateResolvedOutboundUrl(ep.url, {
+        allowPrivateEnvVar: 'ALLOW_PRIVATE_WEBHOOK_NETWORKS',
+        allowHttpInProd: process.env.ALLOW_INSECURE_WEBHOOK_HTTP === 'true',
+        label: 'Webhook URL',
+      });
+
+      const fetchImpl =
+        customFetch ??
+        ((url: string, init: RequestInit) =>
+          fetch(url, {
+            ...init,
+            redirect: 'error',
+            signal: AbortSignal.timeout(10_000),
+          }));
+
+      const res = await fetchImpl(ep.url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-BriskSMS-Event': row.event_type,
+          'X-BriskSMS-Delivery': row.id,
+          'X-BriskSMS-Signature': signature,
+        },
+        body: payloadString,
+      });
+      const status = res.status;
+      const ok = res.ok;
 
       await sql`
         INSERT INTO webhook_deliveries (
@@ -325,6 +372,7 @@ export async function processWebhookDeliveryJob(
  */
 export async function processSmsCampaignJob(
   job: BullJob<SmsCampaignJobData>,
+  customFetch?: CustomFetchHandler,
 ): Promise<{ sentCount: number; failedCount: number }> {
   const { organizationId, campaignId } = job.data;
 
@@ -348,6 +396,19 @@ export async function processSmsCampaignJob(
     WHERE id = ${campaignId} AND organization_id = ${organizationId}
   `;
 
+  const acctRows = await sql<Record<string, any>>`
+    SELECT * FROM messaging_accounts
+    WHERE organization_id = ${organizationId}
+    LIMIT 1
+  `;
+  const acct = acctRows[0];
+  const hasGatewayCreds = Boolean(acct?.encrypted_api_token);
+  const gatewayProvider = acct?.gateway_mode ?? 'MANAGED_GATEWAY';
+
+  if (!hasGatewayCreds && process.env.NODE_ENV === 'production') {
+    throw new Error(`Campaign ${campaignId} aborted: organization ${organizationId} has no configured gateway credentials`);
+  }
+
   const recipients = await sql<Record<string, any>>`
     SELECT * FROM sms_campaign_recipients
     WHERE campaign_id = ${campaignId}
@@ -363,7 +424,61 @@ export async function processSmsCampaignJob(
     const renderedText: string = rec.interpolated_text || campaign.message_template;
     const now = new Date();
     const msgId = randomUUID();
-    const providerMessageId = `queued_${campaignId.slice(0, 8)}_${rec.id.slice(0, 8)}`;
+    let msgStatus: SmsStatus = SmsStatus.QUEUED;
+    let providerMessageId: string | null = null;
+    let lastError: string | null = null;
+    let deliveryMeta: Record<string, any> = { queuedForRelay: true, awaitingGatewayDispatch: true };
+
+    if (hasGatewayCreds && acct) {
+      try {
+        const endpoint = resolveSmsGateMessagesEndpoint(acct.gateway_base_url);
+        const authHeader = buildGatewayAuthHeader(acct.encrypted_api_token);
+        const reqBody = {
+          phoneNumbers: [rec.recipient_phone],
+          textMessage: { text: renderedText },
+          simNumber: Number(acct.default_sim_slot || 1),
+          withDeliveryReport: true,
+        };
+        const fetchImpl =
+          customFetch ??
+          ((url: string, init: RequestInit) =>
+            fetch(url, {
+              ...init,
+              redirect: 'error',
+              signal: AbortSignal.timeout(15_000),
+            }));
+        const res = await fetchImpl(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: authHeader,
+            'X-Idempotency-Key': `campaign_${campaignId}_${rec.id}`,
+          },
+          body: JSON.stringify(reqBody),
+        });
+        if (res.ok) {
+          msgStatus = SmsStatus.SUBMITTED;
+          const jsonBody =
+            typeof (res as Response).json === 'function'
+              ? ((await (res as Response).json().catch(() => null)) as Record<string, any> | null)
+              : null;
+          providerMessageId = (jsonBody?.id as string) || (jsonBody?.messageId as string) || null;
+          deliveryMeta = { statusCode: res.status, gatewayAccepted: true };
+        } else if (SMSGATE_DEFINITIVE_REJECTION_STATUSES.has(res.status)) {
+          msgStatus = SmsStatus.FAILED;
+          lastError = `Gateway rejected campaign recipient with HTTP ${res.status}`;
+          deliveryMeta = { statusCode: res.status, error: lastError };
+        } else {
+          msgStatus = SmsStatus.QUEUED;
+          lastError = `GATEWAY_UNCERTAIN: HTTP ${res.status}`;
+          deliveryMeta = { statusCode: res.status, uncertain: true };
+        }
+      } catch (err: unknown) {
+        msgStatus = SmsStatus.QUEUED;
+        lastError = `GATEWAY_UNCERTAIN: ${err instanceof Error ? err.message : String(err)}`;
+        deliveryMeta = { error: lastError, uncertain: true };
+      }
+    }
 
     await withTransaction(async (tx) => {
       await tx`
@@ -373,62 +488,86 @@ export async function processSmsCampaignJob(
           attempt_count, last_error, delivered_at, created_at, updated_at
         ) VALUES (
           ${msgId}, ${organizationId}, ${campaignId}, ${rec.recipient_phone}, ${renderedText},
-          ${SmsStatus.SUBMITTED}::"SmsStatus", 1, 1, ${providerMessageId}, 'MANAGED_GATEWAY',
-          1, NULL, NULL, ${now}, ${now}
+          ${msgStatus}::"SmsStatus", 1, ${Number(acct?.default_sim_slot || 1)}, ${providerMessageId}, ${gatewayProvider},
+          1, ${lastError}, NULL, ${now}, ${now}
         )
       `;
 
-      await tx`
-        INSERT INTO sms_delivery_attempts (
-          id, organization_id, message_id, attempt_number, gateway_provider,
-          provider_message_id, status, error_message, raw_response, attempted_at
-        ) VALUES (
-          ${randomUUID()}, ${organizationId}, ${msgId}, 1, 'MANAGED_GATEWAY',
-          ${providerMessageId}, ${SmsStatus.SUBMITTED}::"SmsStatus", NULL,
-          ${JSON.stringify({ queuedByWorker: true })}::jsonb, ${now}
-        )
-      `;
+      if (msgStatus === SmsStatus.SUBMITTED || msgStatus === SmsStatus.FAILED) {
+        await tx`
+          INSERT INTO sms_delivery_attempts (
+            id, organization_id, message_id, attempt_number, gateway_provider,
+            provider_message_id, status, error_message, raw_response, attempted_at
+          ) VALUES (
+            ${randomUUID()}, ${organizationId}, ${msgId}, 1, ${gatewayProvider},
+            ${providerMessageId}, ${msgStatus}::"SmsStatus", ${lastError},
+            ${JSON.stringify(deliveryMeta)}::jsonb, ${now}
+          )
+        `;
+      }
 
       await tx`
         UPDATE sms_campaign_recipients
-        SET status = ${SmsStatus.SUBMITTED}::"SmsStatus",
+        SET status = ${msgStatus}::"SmsStatus",
             message_id = ${msgId},
             updated_at = ${now}
         WHERE id = ${rec.id} AND organization_id = ${organizationId}
       `;
 
-      const acctRows = await tx<Record<string, any>>`
+      const lockedAcct = await tx<Record<string, any>>`
         SELECT * FROM messaging_accounts
         WHERE organization_id = ${organizationId}
         FOR UPDATE
       `;
-      const currentBalance = Number(acctRows[0]!.credit_balance);
-      const currentReserved = Number(acctRows[0]!.reserved_credits);
+      const currentBalance = Number(lockedAcct[0]!.credit_balance);
+      const currentReserved = Number(lockedAcct[0]!.reserved_credits);
       const nextReserved = Math.max(0, currentReserved - 1);
 
-      await tx`
-        UPDATE messaging_accounts
-        SET reserved_credits = ${nextReserved}, updated_at = ${now}
-        WHERE organization_id = ${organizationId}
-      `;
-
-      await tx`
-        INSERT INTO messaging_credit_ledger (
-          id, organization_id, entry_type, amount_credits, balance_after, reserved_after, reference_id, created_at
-        ) VALUES (
-          ${randomUUID()}, ${organizationId}, ${CreditLedgerEntryType.USAGE_DEDUCTION}::"CreditLedgerEntryType",
-          1, ${currentBalance}, ${nextReserved}, ${`campaign_msg_${msgId}`}, ${now}
-        )
-      `;
+      if (msgStatus === SmsStatus.FAILED) {
+        const nextBalance = currentBalance + 1;
+        await tx`
+          UPDATE messaging_accounts
+          SET credit_balance = ${nextBalance}, reserved_credits = ${nextReserved}, updated_at = ${now}
+          WHERE organization_id = ${organizationId}
+        `;
+        await tx`
+          INSERT INTO messaging_credit_ledger (
+            id, organization_id, entry_type, amount_credits, balance_after, reserved_after, reference_id, created_at
+          ) VALUES (
+            ${randomUUID()}, ${organizationId}, ${CreditLedgerEntryType.RELEASE}::"CreditLedgerEntryType",
+            1, ${nextBalance}, ${nextReserved}, ${`campaign_msg_failed_${msgId}`}, ${now}
+          )
+        `;
+      } else {
+        await tx`
+          UPDATE messaging_accounts
+          SET reserved_credits = ${nextReserved}, updated_at = ${now}
+          WHERE organization_id = ${organizationId}
+        `;
+        await tx`
+          INSERT INTO messaging_credit_ledger (
+            id, organization_id, entry_type, amount_credits, balance_after, reserved_after, reference_id, created_at
+          ) VALUES (
+            ${randomUUID()}, ${organizationId}, ${CreditLedgerEntryType.USAGE_DEDUCTION}::"CreditLedgerEntryType",
+            1, ${currentBalance}, ${nextReserved}, ${`campaign_msg_${msgId}`}, ${now}
+          )
+        `;
+      }
     });
 
-    sentCount++;
+    if (msgStatus === SmsStatus.FAILED) {
+      failedCount++;
+    } else {
+      sentCount++;
+    }
   }
 
   const now = new Date();
+  const finalCampaignStatus =
+    failedCount > 0 && sentCount === 0 ? CampaignStatus.CANCELLED : CampaignStatus.COMPLETED;
   await sql`
     UPDATE sms_campaigns
-    SET status = ${CampaignStatus.COMPLETED}::"CampaignStatus",
+    SET status = ${finalCampaignStatus}::"CampaignStatus",
         completed_at = ${now},
         updated_at = ${now}
     WHERE id = ${campaignId} AND organization_id = ${organizationId}
@@ -527,7 +666,7 @@ export async function processPaymentProcessingJob(
   }
 
   const payment = paymentRows[0]!;
-  if (payment.state === 'VERIFIED' || payment.state === 'SETTLED' || payment.state === 'REJECTED') {
+  if (payment.state === 'VERIFIED' || payment.state === 'REJECTED') {
     return { processed: true, state: payment.state };
   }
 
@@ -616,29 +755,39 @@ export async function processSmsDeliveryRetryJob(
   job: BullJob<SmsDeliveryRetryJobData>,
 ): Promise<{ status: string; refunded: boolean }> {
   const { organizationId, messageId } = job.data;
-
-  const msgRows = await sql<Record<string, any>>`
-    SELECT * FROM sms_messages
-    WHERE id = ${messageId} AND organization_id = ${organizationId}
-    LIMIT 1
-  `;
-
-  if (msgRows.length === 0) {
-    throw new Error(`Tenant isolation or missing record: Message ${messageId} not found for org ${organizationId}`);
-  }
-
-  const msg = msgRows[0]!;
-  if (msg.status === SmsStatus.DELIVERED || msg.status === SmsStatus.FAILED) {
-    return { status: msg.status, refunded: false };
-  }
-
-  const currentAttempts = Number(msg.attempt_count || 1);
   const maxAttempts = 3;
   const now = new Date();
 
-  if (currentAttempts >= maxAttempts) {
-    // Terminal failure: mark FAILED and refund reserved/deducted credit atomically
-    return withTransaction(async (tx) => {
+  return withTransaction(async (tx) => {
+    const msgRows = await tx<Record<string, any>>`
+      SELECT * FROM sms_messages
+      WHERE id = ${messageId} AND organization_id = ${organizationId}
+      FOR UPDATE
+    `;
+
+    if (msgRows.length === 0) {
+      throw new Error(`Tenant isolation or missing record: Message ${messageId} not found for org ${organizationId}`);
+    }
+
+    const msg = msgRows[0]!;
+    if (msg.status === SmsStatus.DELIVERED || msg.status === SmsStatus.FAILED) {
+      return { status: msg.status, refunded: false };
+    }
+
+    const currentAttempts = Number(msg.attempt_count || 1);
+
+    if (currentAttempts >= maxAttempts) {
+      const priorRefunds = await tx<{ id: string }>`
+        SELECT id FROM messaging_credit_ledger
+        WHERE organization_id = ${organizationId}
+          AND entry_type = ${CreditLedgerEntryType.REFUND}::"CreditLedgerEntryType"
+          AND (
+            reference_id = ${`retry_failed_refund_${messageId}`}
+            OR metadata->>'messageId' = ${messageId}
+          )
+        LIMIT 1
+      `;
+
       await tx`
         UPDATE sms_messages
         SET status = ${SmsStatus.FAILED}::"SmsStatus",
@@ -647,54 +796,56 @@ export async function processSmsDeliveryRetryJob(
         WHERE id = ${messageId} AND organization_id = ${organizationId}
       `;
 
-      const acctRows = await tx<Record<string, any>>`
-        SELECT * FROM messaging_accounts
-        WHERE organization_id = ${organizationId}
-        FOR UPDATE
-      `;
-
       let refunded = false;
-      if (acctRows.length > 0) {
-        const costCredits = Number(msg.cost_credits || 1);
-        const currentBalance = Number(acctRows[0]!.credit_balance);
-        const currentReserved = Number(acctRows[0]!.reserved_credits);
-        const nextBalance = currentBalance + costCredits;
-
-        await tx`
-          UPDATE messaging_accounts
-          SET credit_balance = ${nextBalance},
-              updated_at = ${now}
+      if (priorRefunds.length === 0) {
+        const acctRows = await tx<Record<string, any>>`
+          SELECT * FROM messaging_accounts
           WHERE organization_id = ${organizationId}
+          FOR UPDATE
         `;
 
-        await tx`
-          INSERT INTO messaging_credit_ledger (
-            id, organization_id, entry_type, amount_credits, balance_after, reserved_after, reference_id, created_at
-          ) VALUES (
-            ${randomUUID()}, ${organizationId}, ${CreditLedgerEntryType.REFUND}::"CreditLedgerEntryType",
-            ${costCredits}, ${nextBalance}, ${currentReserved}, ${`retry_failed_refund_${messageId}`}, ${now}
-          )
-        `;
-        refunded = true;
+        if (acctRows.length > 0) {
+          const costCredits = Number(msg.cost_credits || 1);
+          const currentBalance = Number(acctRows[0]!.credit_balance);
+          const currentReserved = Number(acctRows[0]!.reserved_credits);
+          const nextBalance = currentBalance + costCredits;
+
+          await tx`
+            UPDATE messaging_accounts
+            SET credit_balance = ${nextBalance},
+                updated_at = ${now}
+            WHERE organization_id = ${organizationId}
+          `;
+
+          await tx`
+            INSERT INTO messaging_credit_ledger (
+              id, organization_id, entry_type, amount_credits, balance_after, reserved_after, reference_id, metadata, created_at
+            ) VALUES (
+              ${randomUUID()}, ${organizationId}, ${CreditLedgerEntryType.REFUND}::"CreditLedgerEntryType",
+              ${costCredits}, ${nextBalance}, ${currentReserved}, ${`retry_failed_refund_${messageId}`},
+              ${JSON.stringify({ messageId })}::jsonb, ${now}
+            )
+          `;
+          refunded = true;
+        }
       }
 
       return { status: SmsStatus.FAILED, refunded };
-    });
-  }
+    }
 
-  // Still has retries remaining
-  await sql`
-    UPDATE sms_messages
-    SET attempt_count = ${currentAttempts + 1},
-        updated_at = ${now}
-    WHERE id = ${messageId} AND organization_id = ${organizationId}
-  `;
+    await tx`
+      UPDATE sms_messages
+      SET attempt_count = ${currentAttempts + 1},
+          updated_at = ${now}
+      WHERE id = ${messageId} AND organization_id = ${organizationId}
+    `;
 
-  return { status: SmsStatus.SUBMITTED, refunded: false };
+    return { status: msg.status, refunded: false };
+  });
 }
 
 /** Bounded so the durable dispatch lease (60s) always outlives a healthy request. */
-const SMSGATE_DEFINITIVE_REJECTION_STATUSES = new Set([400, 401, 403, 404, 413, 422, 429]);
+const SMSGATE_DEFINITIVE_REJECTION_STATUSES = new Set([400, 401, 403, 404, 413, 422]);
 const DISPATCH_LEASE_SECONDS = 60;
 
 /**
@@ -717,6 +868,25 @@ export async function expireDispatchLeases(recordId?: string): Promise<number> {
     WHERE id IN (SELECT message_id FROM expired)
     RETURNING id
   `;
+
+  await sql`
+    WITH expired_jobs AS (
+      UPDATE "outbound_sms_jobs"
+      SET "status" = 'UNCERTAIN'::"OutboundSmsJobStatus",
+          "failure_code" = 'DISPATCH_LEASE_EXPIRED',
+          "error_message" = 'GATEWAY_UNCERTAIN: device dispatch lease expired before outcome was reported',
+          "updated_at" = NOW()
+      WHERE "status" = 'DISPATCHING'::"OutboundSmsJobStatus"
+        AND "lease_expires_at" IS NOT NULL
+        AND "lease_expires_at" <= NOW()
+      RETURNING "message_id"
+    )
+    UPDATE "sms_messages"
+    SET "last_error" = 'GATEWAY_UNCERTAIN: device dispatch lease expired before outcome was reported',
+        "updated_at" = NOW()
+    WHERE "id" IN (SELECT "message_id" FROM expired_jobs)
+  `;
+
   return expired.length;
 }
 
@@ -798,6 +968,21 @@ export async function defaultRecoverStaleDispatches(
         recordId: claimed.id,
         organizationId: claimed.organization_id,
       });
+      await withTransaction(async (tx) => {
+        await tx`
+          UPDATE message_idempotency_records
+          SET status = 'UNCERTAIN', lease_expires_at = NULL, updated_at = NOW()
+          WHERE id = ${claimed.id} AND claimed_by = ${claimant} AND status = 'DISPATCHING'
+        `;
+        if (messageRows.length > 0) {
+          await tx`
+            UPDATE sms_messages
+            SET last_error = 'GATEWAY_CREDENTIALS_MISSING: cannot resume dispatch',
+                updated_at = NOW()
+            WHERE id = ${claimed.message_id} AND organization_id = ${claimed.organization_id}
+          `;
+        }
+      });
       continue;
     }
 
@@ -805,23 +990,28 @@ export async function defaultRecoverStaleDispatches(
     const acct = acctRows[0]!;
 
     let authHeader = '';
+    let endpoint = '';
     try {
-      const rawAuth = acct.encrypted_api_token;
-      if (rawAuth.startsWith('{')) {
-        const parsedAuth = JSON.parse(rawAuth);
-        if (parsedAuth.type === 'BASIC') {
-          authHeader = `Basic ${Buffer.from(`${parsedAuth.username}:${parsedAuth.password}`).toString('base64')}`;
-        } else {
-          authHeader = `Bearer ${parsedAuth.token}`;
-        }
-      } else {
-        authHeader = `Bearer ${rawAuth}`;
-      }
-    } catch {
-      authHeader = `Bearer ${acct.encrypted_api_token}`;
+      authHeader = buildGatewayAuthHeader(acct.encrypted_api_token);
+      endpoint = resolveSmsGateMessagesEndpoint(acct.gateway_base_url);
+    } catch (err: unknown) {
+      const configErr = err instanceof Error ? err.message : String(err);
+      await withTransaction(async (tx) => {
+        await tx`
+          UPDATE message_idempotency_records
+          SET status = 'UNCERTAIN', lease_expires_at = NULL, updated_at = NOW()
+          WHERE id = ${claimed.id} AND claimed_by = ${claimant} AND status = 'DISPATCHING'
+        `;
+        await tx`
+          UPDATE sms_messages
+          SET last_error = ${`GATEWAY_CONFIG_INVALID: ${configErr}`},
+              updated_at = NOW()
+          WHERE id = ${msg.id} AND organization_id = ${claimed.organization_id}
+        `;
+      });
+      continue;
     }
 
-    const endpoint = (acct.gateway_base_url || 'https://api.sms-gate.app/3rdparty/v1').replace(/\/+$/, '') + '/messages';
     const requestBody = {
       phoneNumbers: [msg.recipient_phone],
       textMessage: { text: msg.message_text },
@@ -886,8 +1076,8 @@ export async function defaultRecoverStaleDispatches(
           `msg_${Date.now()}`;
         rawResponseObj = respJson;
       } else {
-        // BriskSMS policy: HTTP 400, 401, 403, 404, 413, 422, 429 are definitive rejections.
-        // HTTP 408, 409, 5xx, timeouts, resets are UNCERTAIN. Never refunded blindly, never re-dispatched.
+        // BriskSMS policy: only explicit pre-queue rejections (400, 401, 403, 404, 413, 422) are FAILED.
+        // HTTP 408, 409, 429, 5xx, timeouts, resets are UNCERTAIN. Never refunded blindly, never re-dispatched.
         const definitive = SMSGATE_DEFINITIVE_REJECTION_STATUSES.has(respStatus);
         outcome = definitive ? 'FAILED' : 'UNCERTAIN';
         errorText = definitive
@@ -1157,7 +1347,7 @@ export class BriskWorkerRuntime {
     this.campaignWorker = new BullWorker<SmsCampaignJobData>(
       QUEUE_NAMES.SMS_CAMPAIGN,
       async (job) => {
-        await processSmsCampaignJob(job);
+        await processSmsCampaignJob(job, customFetch);
       },
       { concurrency: 2, pollIntervalMs: 50 },
     );

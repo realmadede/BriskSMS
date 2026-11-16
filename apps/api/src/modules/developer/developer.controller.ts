@@ -1,10 +1,16 @@
 import { Router, RouteRequest, ApiResponse, HttpException } from '../../core/http.js';
-import { authenticate } from '../../core/guards.js';
+import {
+  authenticate,
+  assertHumanSessionAuth,
+  assertOAuthScope,
+  resolveAuthorizedTenantOrgId,
+} from '../../core/guards.js';
 import { ApiKeyService } from './api-key.service.js';
 import { WebhookService } from './webhook.service.js';
 import { DeveloperActionService } from './developer-action.service.js';
 import { dbStore } from '../../core/store.js';
-import { ApiKeyScope, UserRole } from '@brisksms/shared';
+import { ApiKeyScope, BriskError, UserRole } from '@brisksms/shared';
+import { DatabaseUnavailableError } from '@brisksms/db';
 import { MessagingService } from '../messaging/messaging.service.js';
 
 const apiKeyService = new ApiKeyService();
@@ -31,11 +37,9 @@ export function registerDeveloperRoutes(router: Router): void {
   // 1. List API Keys
   router.get('/v1/developer/api-keys', async (req: RouteRequest): Promise<ApiResponse> => {
     await authenticate(req);
+    assertHumanSessionAuth(req, 'API key management');
     const userId = req.context.userId!;
-    const orgId = req.query.organizationId || req.context.organizationId;
-    if (!orgId) {
-      throw new HttpException(400, 'VALIDATION_ERROR', 'organizationId is required');
-    }
+    const orgId = resolveAuthorizedTenantOrgId(req, req.query.organizationId);
     await assertDeveloperAccess(orgId, userId);
 
     const apiKeys = await apiKeyService.listApiKeys(orgId);
@@ -48,12 +52,10 @@ export function registerDeveloperRoutes(router: Router): void {
   // 2. Create API Key
   router.post('/v1/developer/api-keys', async (req: RouteRequest): Promise<ApiResponse> => {
     await authenticate(req);
+    assertHumanSessionAuth(req, 'API key provisioning');
     const userId = req.context.userId!;
     const body = req.body as Record<string, any>;
-    const orgId = (body.organizationId as string) || req.context.organizationId;
-    if (!orgId) {
-      throw new HttpException(400, 'VALIDATION_ERROR', 'organizationId is required');
-    }
+    const orgId = resolveAuthorizedTenantOrgId(req, body.organizationId);
     await assertDeveloperAccess(orgId, userId);
 
     if (!body.name || !body.scopes || !Array.isArray(body.scopes) || body.scopes.length === 0) {
@@ -76,12 +78,10 @@ export function registerDeveloperRoutes(router: Router): void {
   // 3. Revoke API Key
   router.delete('/v1/developer/api-keys/:id', async (req: RouteRequest): Promise<ApiResponse> => {
     await authenticate(req);
+    assertHumanSessionAuth(req, 'API key revocation');
     const userId = req.context.userId!;
     const keyId = req.params.id || '';
-    const orgId = req.query.organizationId || req.context.organizationId;
-    if (!orgId) {
-      throw new HttpException(400, 'VALIDATION_ERROR', 'organizationId is required');
-    }
+    const orgId = resolveAuthorizedTenantOrgId(req, req.query.organizationId);
     await assertDeveloperAccess(orgId, userId);
 
     const revoked = await apiKeyService.revokeApiKey(orgId, keyId);
@@ -98,11 +98,9 @@ export function registerDeveloperRoutes(router: Router): void {
   // 4. List Registered Webhooks
   router.get('/v1/developer/webhooks', async (req: RouteRequest): Promise<ApiResponse> => {
     await authenticate(req);
+    assertOAuthScope(req, [ApiKeyScope.WEBHOOKS_MANAGE]);
     const userId = req.context.userId!;
-    const orgId = req.query.organizationId || req.context.organizationId;
-    if (!orgId) {
-      throw new HttpException(400, 'VALIDATION_ERROR', 'organizationId is required');
-    }
+    const orgId = resolveAuthorizedTenantOrgId(req, req.query.organizationId);
     await assertDeveloperAccess(orgId, userId);
 
     const endpoints = await webhookService.listEndpoints(orgId);
@@ -115,12 +113,10 @@ export function registerDeveloperRoutes(router: Router): void {
   // 5. Register Webhook Endpoint
   router.post('/v1/developer/webhooks', async (req: RouteRequest): Promise<ApiResponse> => {
     await authenticate(req);
+    assertOAuthScope(req, [ApiKeyScope.WEBHOOKS_MANAGE]);
     const userId = req.context.userId!;
     const body = req.body as Record<string, any>;
-    const orgId = (body.organizationId as string) || req.context.organizationId;
-    if (!orgId) {
-      throw new HttpException(400, 'VALIDATION_ERROR', 'organizationId is required');
-    }
+    const orgId = resolveAuthorizedTenantOrgId(req, body.organizationId);
     await assertDeveloperAccess(orgId, userId);
 
     if (!body.url || !body.subscribedEvents || !Array.isArray(body.subscribedEvents)) {
@@ -143,12 +139,10 @@ export function registerDeveloperRoutes(router: Router): void {
   // 6. Delete Webhook Endpoint
   router.delete('/v1/developer/webhooks/:id', async (req: RouteRequest): Promise<ApiResponse> => {
     await authenticate(req);
+    assertOAuthScope(req, [ApiKeyScope.WEBHOOKS_MANAGE]);
     const userId = req.context.userId!;
     const endpointId = req.params.id || '';
-    const orgId = req.query.organizationId || req.context.organizationId;
-    if (!orgId) {
-      throw new HttpException(400, 'VALIDATION_ERROR', 'organizationId is required');
-    }
+    const orgId = resolveAuthorizedTenantOrgId(req, req.query.organizationId);
     await assertDeveloperAccess(orgId, userId);
 
     const deleted = await webhookService.deleteEndpoint(orgId, endpointId);
@@ -241,7 +235,7 @@ export function registerDeveloperRoutes(router: Router): void {
           data: result,
         };
       } catch (err: any) {
-        if (err instanceof HttpException) {
+        if (err instanceof HttpException || err instanceof BriskError || err instanceof DatabaseUnavailableError) {
           throw err;
         }
         const errMsg = err?.message || 'API key authorization failed';
@@ -251,14 +245,27 @@ export function registerDeveloperRoutes(router: Router): void {
         if (errMsg.includes('Idempotency') || errMsg.includes('DUPLICATE_IDEMPOTENCY')) {
           throw new HttpException(409, 'DUPLICATE_IDEMPOTENCY', errMsg);
         }
-        throw new HttpException(401, 'UNAUTHORIZED', errMsg);
+        if (errMsg.includes('API key')) {
+          throw new HttpException(401, 'UNAUTHORIZED', errMsg);
+        }
+        throw new HttpException(400, 'SMS_DISPATCH_FAILED', errMsg);
       }
     }
 
-    // Otherwise standard JWT user authentication
+    // Otherwise JWT user session or OAuth access token authentication
     await authenticate(req);
+    if (req.context.authType === 'oauth') {
+      const scopes = req.context.oauthScopes ?? [];
+      if (!scopes.includes(ApiKeyScope.SMS_SEND)) {
+        throw new HttpException(403, 'INSUFFICIENT_SCOPE', 'OAuth token requires sms:send scope');
+      }
+    }
     const userId = req.context.userId!;
-    const orgId = (body.organizationId as string) || req.context.organizationId;
+    const requestedOrgId = typeof body.organizationId === 'string' ? body.organizationId.trim() : '';
+    if (req.context.organizationId && requestedOrgId && requestedOrgId !== req.context.organizationId) {
+      throw new HttpException(403, 'CROSS_ORGANIZATION_FORBIDDEN', 'Cannot send SMS for another organization');
+    }
+    const orgId = requestedOrgId || req.context.organizationId;
     if (!orgId) {
       throw new HttpException(400, 'VALIDATION_ERROR', 'organizationId is required');
     }

@@ -19,11 +19,18 @@ import {
 } from '../../core/cookies.js';
 
 function extractClientIp(req: RouteRequest): string {
-  const forwarded = req.headers['x-forwarded-for'];
-  if (typeof forwarded === 'string') {
-    return forwarded.split(',')[0]?.trim() || '';
+  const remoteIp = req.rawReq?.socket?.remoteAddress || '';
+  const trustProxy = process.env.TRUST_PROXY === 'true';
+  const isProdOrStaging = process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'staging';
+
+  if (trustProxy || (!isProdOrStaging && !remoteIp)) {
+    const forwarded = req.headers['x-forwarded-for'];
+    if (typeof forwarded === 'string') {
+      const first = forwarded.split(',')[0]?.trim();
+      if (first) return first;
+    }
   }
-  return req.rawReq?.socket?.remoteAddress || '';
+  return remoteIp || 'unknown';
 }
 
 export function registerAuthRoutes(router: Router): void {
@@ -47,7 +54,12 @@ export function registerAuthRoutes(router: Router): void {
     }
 
     // If browser sent CSRF cookie or token, validate it
-    if (req.cookies[CSRF_COOKIE_NAME] || req.headers['x-csrf-token']) {
+    if (
+      req.cookies[SESSION_COOKIE_NAME] ||
+      req.cookies[REFRESH_COOKIE_NAME] ||
+      req.cookies[CSRF_COOKIE_NAME] ||
+      req.headers['x-csrf-token']
+    ) {
       validateCsrf(req);
     }
 
@@ -87,12 +99,24 @@ export function registerAuthRoutes(router: Router): void {
       throw new HttpException(403, 'CSRF_CROSS_SITE_FORBIDDEN', 'Cross-site login blocked by Fetch Metadata policy');
     }
 
-    // If browser sent CSRF cookie or token, validate it
-    if (req.cookies[CSRF_COOKIE_NAME] || req.headers['x-csrf-token']) {
+    // If browser sent session/refresh/CSRF cookie or token, enforce CSRF
+    if (
+      req.cookies[CSRF_COOKIE_NAME] ||
+      req.headers['x-csrf-token']
+    ) {
       validateCsrf(req);
     }
 
     const dto = req.body as unknown as LoginDto;
+    const clientIp = extractClientIp(req);
+    if (clientIp) {
+      await authService.checkRateLimit(`login_ip_${clientIp}`, 20, 60_000);
+    }
+    if (dto?.email && typeof dto.email === 'string') {
+      const emailHash = hashToken(`login:${dto.email.trim().toLowerCase()}`).slice(0, 32);
+      await authService.checkRateLimit(`login_acct_${emailHash}`, 10, 60_000);
+    }
+
     const result = await authService.login(dto);
     const csrfToken = generateCsrfToken();
 
@@ -188,7 +212,12 @@ export function registerAuthRoutes(router: Router): void {
     }
 
     // If browser sent CSRF cookie or token, validate it
-    if (req.cookies[CSRF_COOKIE_NAME] || req.headers['x-csrf-token']) {
+    if (
+      req.cookies[SESSION_COOKIE_NAME] ||
+      req.cookies[REFRESH_COOKIE_NAME] ||
+      req.cookies[CSRF_COOKIE_NAME] ||
+      req.headers['x-csrf-token']
+    ) {
       validateCsrf(req);
     }
 
@@ -241,6 +270,11 @@ export function registerAuthRoutes(router: Router): void {
       throw new HttpException(400, 'INVALID_PAYLOAD', 'Refresh token is required');
     }
 
+    const clientIp = extractClientIp(req);
+    if (clientIp) {
+      await authService.checkRateLimit(`refresh_ip_${clientIp}`, 30, 60_000);
+    }
+
     const tokens = await authService.refreshToken(token, req.tokenBlacklist);
     const csrfToken = generateCsrfToken();
 
@@ -267,7 +301,12 @@ export function registerAuthRoutes(router: Router): void {
     if (req.headers['sec-fetch-site'] === 'cross-site') {
       throw new HttpException(403, 'CSRF_CROSS_SITE_FORBIDDEN', 'Cross-site logout blocked by Fetch Metadata policy');
     }
-    if (req.cookies[CSRF_COOKIE_NAME] || req.headers['x-csrf-token']) {
+    if (
+      req.cookies[SESSION_COOKIE_NAME] ||
+      req.cookies[REFRESH_COOKIE_NAME] ||
+      req.cookies[CSRF_COOKIE_NAME] ||
+      req.headers['x-csrf-token']
+    ) {
       validateCsrf(req);
     }
 
@@ -378,7 +417,12 @@ export function registerAuthRoutes(router: Router): void {
     }
 
     // Validate CSRF if cookie or header is present
-    if (req.cookies[CSRF_COOKIE_NAME] || req.headers['x-csrf-token']) {
+    if (
+      req.cookies[SESSION_COOKIE_NAME] ||
+      req.cookies[REFRESH_COOKIE_NAME] ||
+      req.cookies[CSRF_COOKIE_NAME] ||
+      req.headers['x-csrf-token']
+    ) {
       validateCsrf(req);
     }
 

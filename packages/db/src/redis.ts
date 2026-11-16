@@ -222,13 +222,46 @@ export class BriskRedisClient {
           }
         });
 
-        this.socket = sock;
-        this.connectingPromise = null;
-        resolve(sock);
+        void (async () => {
+          try {
+            if (cfg.password) {
+              await this.sendCommandOnSocket(sock, 'AUTH', cfg.password);
+            }
+            if (cfg.db && cfg.db > 0) {
+              await this.sendCommandOnSocket(sock, 'SELECT', cfg.db);
+            }
+            this.socket = sock;
+            this.connectingPromise = null;
+            resolve(sock);
+          } catch (authErr) {
+            sock.destroy();
+            if (this.socket === sock) this.socket = null;
+            this.connectingPromise = null;
+            reject(
+              new RedisUnavailableError(
+                `Redis authentication/DB selection failed: ${authErr instanceof Error ? authErr.message : String(authErr)}`,
+                authErr,
+              ),
+            );
+          }
+        })();
       });
     });
 
     return this.connectingPromise;
+  }
+
+  private sendCommandOnSocket<T = RespValue>(
+    sock: net.Socket,
+    ...args: Array<string | number>
+  ): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      this.pendingQueue.push({
+        resolve: (val) => resolve(val as unknown as T),
+        reject,
+      });
+      sock.write(encodeRespCommand(args));
+    });
   }
 
   async sendCommand<T = RespValue>(...args: Array<string | number>): Promise<T> {
@@ -351,7 +384,27 @@ export class BriskRedisClient {
   }
 
   async keys(pattern: string): Promise<string[]> {
-    return (await this.sendCommand<string[]>('KEYS', pattern)) ?? [];
+    const collected = new Set<string>();
+    let cursor = '0';
+    do {
+      const reply = await this.sendCommand<[string, string[]] | null>(
+        'SCAN',
+        cursor,
+        'MATCH',
+        pattern,
+        'COUNT',
+        200,
+      );
+      if (!Array.isArray(reply) || reply.length < 2) {
+        break;
+      }
+      cursor = String(reply[0] ?? '0');
+      const batch = Array.isArray(reply[1]) ? reply[1] : [];
+      for (const k of batch) {
+        collected.add(k);
+      }
+    } while (cursor !== '0');
+    return Array.from(collected);
   }
 
   async incr(key: string): Promise<number> {

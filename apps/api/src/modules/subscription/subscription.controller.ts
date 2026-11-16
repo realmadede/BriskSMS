@@ -1,10 +1,42 @@
+import { timingSafeEqual } from 'node:crypto';
 import { Router, RouteRequest, ApiResponse, HttpException } from '../../core/http.js';
-import { authenticate } from '../../core/guards.js';
+import {
+  authenticate,
+  assertHumanSessionAuth,
+  resolveAuthorizedTenantOrgId,
+} from '../../core/guards.js';
 import { UserRole, BillingInterval } from '@brisksms/shared';
 import { dbStore } from '../../core/store.js';
 import { catalogService } from './catalog.service.js';
 import { subscriptionService } from './subscription.service.js';
 import { entitlementService } from './entitlement.service.js';
+
+function assertPlatformAdmin(req: RouteRequest): void {
+  assertHumanSessionAuth(req, 'platform catalog administration');
+  const configuredSecret = process.env.PLATFORM_ADMIN_SECRET?.trim();
+  if (!configuredSecret || configuredSecret.length < 24) {
+    throw new HttpException(
+      503,
+      'PLATFORM_ADMIN_UNCONFIGURED',
+      'Platform admin catalog mutations are disabled until PLATFORM_ADMIN_SECRET is configured.',
+    );
+  }
+
+  const provided =
+    (typeof req.headers['x-platform-admin-key'] === 'string'
+      ? req.headers['x-platform-admin-key'].trim()
+      : undefined) || '';
+
+  if (!provided) {
+    throw new HttpException(403, 'PLATFORM_ADMIN_REQUIRED', 'Platform administrator credentials are required');
+  }
+
+  const a = Buffer.from(provided, 'utf8');
+  const b = Buffer.from(configuredSecret, 'utf8');
+  if (a.length !== b.length || !timingSafeEqual(a, b)) {
+    throw new HttpException(403, 'PLATFORM_ADMIN_FORBIDDEN', 'Invalid platform administrator credentials');
+  }
+}
 
 async function assertOrgMemberRole(orgId: string, userId: string, allowedRoles: UserRole[]): Promise<void> {
   const membership = await dbStore.getMembership(orgId, userId);
@@ -33,8 +65,9 @@ export function registerSubscriptionRoutes(router: Router): void {
   // 2. Tenant Subscription Detail (Authenticated, Any Org Member)
   router.get('/v1/organizations/:orgId/subscription', async (req: RouteRequest): Promise<ApiResponse> => {
     await authenticate(req);
+    assertHumanSessionAuth(req, 'reading organization subscription');
     const userId = req.context.userId!;
-    const orgId = req.params.orgId || '';
+    const orgId = resolveAuthorizedTenantOrgId(req, req.params.orgId);
     await assertOrgMemberRole(orgId, userId, [
       UserRole.OWNER,
       UserRole.ADMIN,
@@ -53,8 +86,9 @@ export function registerSubscriptionRoutes(router: Router): void {
   // 3. Tenant Subscription Checkout / Plan Upgrade (OWNER or ADMIN only)
   router.post('/v1/organizations/:orgId/subscription/checkout', async (req: RouteRequest): Promise<ApiResponse> => {
     await authenticate(req);
+    assertHumanSessionAuth(req, 'subscription checkout');
     const userId = req.context.userId!;
-    const orgId = req.params.orgId || '';
+    const orgId = resolveAuthorizedTenantOrgId(req, req.params.orgId);
     await assertOrgMemberRole(orgId, userId, [UserRole.OWNER, UserRole.ADMIN]);
 
     const body = req.body as unknown as {
@@ -82,8 +116,9 @@ export function registerSubscriptionRoutes(router: Router): void {
   // 4. Tenant Subscription Cancellation (OWNER only)
   router.post('/v1/organizations/:orgId/subscription/cancel', async (req: RouteRequest): Promise<ApiResponse> => {
     await authenticate(req);
+    assertHumanSessionAuth(req, 'subscription cancellation');
     const userId = req.context.userId!;
-    const orgId = req.params.orgId || '';
+    const orgId = resolveAuthorizedTenantOrgId(req, req.params.orgId);
     await assertOrgMemberRole(orgId, userId, [UserRole.OWNER]);
 
     const body = (req.body as unknown as { immediate?: boolean }) || {};
@@ -97,8 +132,9 @@ export function registerSubscriptionRoutes(router: Router): void {
   // 5. Tenant Entitlements Resolution (Any Org Member)
   router.get('/v1/organizations/:orgId/entitlements', async (req: RouteRequest): Promise<ApiResponse> => {
     await authenticate(req);
+    assertHumanSessionAuth(req, 'reading organization entitlements');
     const userId = req.context.userId!;
-    const orgId = req.params.orgId || '';
+    const orgId = resolveAuthorizedTenantOrgId(req, req.params.orgId);
     await assertOrgMemberRole(orgId, userId, [
       UserRole.OWNER,
       UserRole.ADMIN,
@@ -114,9 +150,10 @@ export function registerSubscriptionRoutes(router: Router): void {
     };
   });
 
-  // 6. Administrative Catalog Management: Create Plan (Privileged)
+  // 6. Administrative Catalog Management: Create Plan (Platform Admin Only)
   router.post('/v1/admin/catalog/plans', async (req: RouteRequest): Promise<ApiResponse> => {
     await authenticate(req);
+    assertPlatformAdmin(req);
     const body = req.body as any;
     if (!body.productCode || !body.code || !body.name || !body.prices || !body.entitlements) {
       throw new HttpException(
@@ -133,9 +170,10 @@ export function registerSubscriptionRoutes(router: Router): void {
     };
   });
 
-  // 7. Administrative Catalog Management: Create New Plan Version (Privileged)
+  // 7. Administrative Catalog Management: Create New Plan Version (Platform Admin Only)
   router.post('/v1/admin/catalog/plans/:code/versions', async (req: RouteRequest): Promise<ApiResponse> => {
     await authenticate(req);
+    assertPlatformAdmin(req);
     const planCode = req.params.code || '';
     const body = req.body as any;
     if (!body.prices || !body.entitlements) {

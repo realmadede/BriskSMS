@@ -5,6 +5,7 @@ import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
 import androidx.work.Constraints
+import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
@@ -53,14 +54,8 @@ class BriskNotificationListenerService : NotificationListenerService() {
         val rawPayload = if (bigText.isNotEmpty()) bigText else text
         if (rawPayload.isEmpty()) return
 
-        // 1. Check if source package is an authorized payment provider application
-        val isAuthorizedApp = PaymentProviderRegistry.isAuthorizedPackage(packageName)
-
-        // 2. Check if notification title or sender matches known provider shortcode
-        val isFinancialSender = PaymentProviderRegistry.isFinancialShortcode(title, rawPayload)
-
-        // Strictly discard any personal or unrelated notifications
-        if (!isAuthorizedApp && !isFinancialSender) {
+        // Enforce purpose-limited notification scope: authorized financial apps or verified SMS shortcodes only
+        if (!PaymentProviderRegistry.isEligibleNotificationSource(packageName, title, rawPayload)) {
             return
         }
 
@@ -103,6 +98,10 @@ class BriskNotificationListenerService : NotificationListenerService() {
             .setConstraints(constraints)
             .build()
 
-        WorkManager.getInstance(applicationContext).enqueue(uploadWorkRequest)
+        WorkManager.getInstance(applicationContext).enqueueUniqueWork(
+            "BrisksmsEvidenceUpload",
+            ExistingWorkPolicy.APPEND_OR_REPLACE,
+            uploadWorkRequest
+        )
     }
 }

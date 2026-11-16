@@ -1,23 +1,22 @@
 import {
   PaymentProvider,
   StkPushCallbackPayload,
-  formatTzs,
   toMinorUnits,
 } from '@brisksms/shared';
-import { StkInitiateParams, StkInitiateResult, StkPushAdapter } from './stk-adapter.interface.js';
+import {
+  buildFailClosedDispatchResult,
+  StkInitiateParams,
+  StkInitiateResult,
+  StkPushAdapter,
+} from './stk-adapter.interface.js';
 
 export class HalopesaStkAdapter implements StkPushAdapter {
   public readonly provider = PaymentProvider.HALOPESA;
+  public readonly isConfigured = false;
 
-  async initiatePush(params: StkInitiateParams): Promise<StkInitiateResult> {
-    const formattedAmount = formatTzs(params.amountCents);
-    const customerPrompt = `Tafadhali weka PIN yako ya HaloPesa kwenye simu yako kuthibitisha malipo ya ${formattedAmount}.`;
-
-    return {
-      success: true,
-      providerCheckoutId: `halo_${params.checkoutId}`,
-      customerPrompt,
-    };
+  async initiatePush(_params: StkInitiateParams): Promise<StkInitiateResult> {
+    // No official HaloPesa B2B STK transport is configured.
+    return buildFailClosedDispatchResult(this.provider, 'UNCONFIGURED');
   }
 
   parseCallback(payload: any): StkPushCallbackPayload {

@@ -22,11 +22,20 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import tz.co.brisksms.core.network.BriskApiClient
 import tz.co.brisksms.core.storage.KeystoreSecureStorage
 import tz.co.brisksms.data.local.BriskDatabase
+import tz.co.brisksms.messaging.OutboundSmsJobCoordinator
+import tz.co.brisksms.messaging.PendingSmsJobResultStore
+import tz.co.brisksms.messaging.SimSelectionOutcome
+import tz.co.brisksms.messaging.SimSlotCapability
 import tz.co.brisksms.messaging.data.DispatchState
+import tz.co.brisksms.messaging.data.SmsDispatchDao
+import tz.co.brisksms.messaging.data.SmsDispatchEntity
+import tz.co.brisksms.messaging.dispatcher.DispatchOutcome
 import tz.co.brisksms.messaging.dispatcher.SmsDispatcher
 import tz.co.brisksms.messaging.sim.SimManager
+import java.time.Instant
 
 /**
  * Android Foreground Cellular Gateway Relay Service (SMSGate Compatible)
@@ -48,6 +57,7 @@ class SmsGateRelayService : Service() {
     private var relayJob: Job? = null
 
     private lateinit var secureStorage: KeystoreSecureStorage
+    private lateinit var apiClient: BriskApiClient
     private lateinit var simManager: SimManager
     private lateinit var smsDispatcher: SmsDispatcher
 
@@ -59,13 +69,34 @@ class SmsGateRelayService : Service() {
             serviceScope.launch {
                 val db = BriskDatabase.getInstance(applicationContext)
                 val dao = db.smsDispatchDao()
+                val existing = dao.findById(dispatchId)
+                val carrierTimestamp = Instant.now().toString()
                 if (resultCode == Activity.RESULT_OK) {
                     Log.i(TAG, "Carrier ACK: SMS [$dispatchId] successfully submitted to tower.")
                     dao.updateStatus(dispatchId, DispatchState.SUBMITTED.name)
+                    if (existing?.jobId != null && existing.leaseToken != null) {
+                        val report = OutboundSmsJobCoordinator.buildSubmittedReport(
+                            jobId = existing.jobId,
+                            leaseToken = existing.leaseToken,
+                            simSlot = existing.simSlot,
+                            carrierTimestamp = carrierTimestamp
+                        )
+                        PendingSmsJobResultStore.submitOrPersist(secureStorage, apiClient, report)
+                    }
                 } else {
                     val errorMsg = "Carrier transmission failed with radio error code $resultCode"
                     Log.w(TAG, "Carrier NACK: SMS [$dispatchId]: $errorMsg")
                     dao.markFailed(dispatchId, errorMsg)
+                    if (existing?.jobId != null && existing.leaseToken != null) {
+                        val report = OutboundSmsJobCoordinator.buildRadioFailureReport(
+                            jobId = existing.jobId,
+                            leaseToken = existing.leaseToken,
+                            simSlot = existing.simSlot,
+                            radioResultCode = resultCode,
+                            errorMessage = errorMsg
+                        )
+                        PendingSmsJobResultStore.submitOrPersist(secureStorage, apiClient, report)
+                    }
                 }
             }
         }
@@ -77,8 +108,18 @@ class SmsGateRelayService : Service() {
             serviceScope.launch {
                 val db = BriskDatabase.getInstance(applicationContext)
                 val dao = db.smsDispatchDao()
+                val existing = dao.findById(dispatchId)
                 Log.i(TAG, "Delivery Receipt: SMS [$dispatchId] delivered to recipient handset.")
                 dao.updateStatus(dispatchId, DispatchState.DELIVERED.name)
+                if (existing?.jobId != null && existing.leaseToken != null) {
+                    val report = OutboundSmsJobCoordinator.buildDeliveredReport(
+                        jobId = existing.jobId,
+                        leaseToken = existing.leaseToken,
+                        simSlot = existing.simSlot,
+                        carrierTimestamp = Instant.now().toString()
+                    )
+                    PendingSmsJobResultStore.submitOrPersist(secureStorage, apiClient, report)
+                }
             }
         }
     }
@@ -86,6 +127,7 @@ class SmsGateRelayService : Service() {
     override fun onCreate() {
         super.onCreate()
         secureStorage = KeystoreSecureStorage(applicationContext)
+        apiClient = BriskApiClient(secureStorage)
         simManager = SimManager(applicationContext)
         smsDispatcher = SmsDispatcher(applicationContext, simManager)
 
@@ -147,26 +189,180 @@ class SmsGateRelayService : Service() {
         val db = BriskDatabase.getInstance(applicationContext)
         val dao = db.smsDispatchDao()
 
-        while (serviceScope.isActive) {
-            try {
-                if (secureStorage.isRevoked || !secureStorage.isBulkMessagingEnabled) {
-                    Log.w(TAG, "Relay terminated: device revoked or product entitlement disabled.")
-                    break
-                }
+        try {
+            while (serviceScope.isActive) {
+                try {
+                    if (secureStorage.isRevoked || !secureStorage.isBulkMessagingEnabled) {
+                        Log.w(TAG, "Relay terminated: device revoked or product entitlement disabled.")
+                        break
+                    }
 
-                // Process local queue
-                val pending = dao.getPendingDispatches(limit = 10)
-                for (dispatch in pending) {
-                    smsDispatcher.dispatchMessage(dispatch, dao)
-                    delay(DEFAULT_DISPATCH_PACING_MS) // Internal engineering delay between consecutive dispatches
-                }
+                    // 1. Flush durable encrypted job result reports BEFORE acquiring/sending new jobs
+                    PendingSmsJobResultStore.flushPending(secureStorage, apiClient)
 
-                delay(5000) // Queue poll interval
-            } catch (e: Exception) {
-                Log.e(TAG, "Exception in relay loop: ${e.message}")
-                delay(10000)
+                    // 2. Acquire eligible outbound jobs from backend when paired & active
+                    if (secureStorage.isPaired && !secureStorage.isRevoked && secureStorage.isBulkMessagingEnabled) {
+                        acquireAndQueueRemoteJobs(dao)
+                    }
+
+                    // 3. Process local QUEUED dispatches through the 2-step /dispatching gate
+                    val pending = dao.getPendingDispatches(limit = 10)
+                    for (dispatch in pending) {
+                        if (secureStorage.isRevoked || !secureStorage.isBulkMessagingEnabled) {
+                            break
+                        }
+                        executeGuardedDispatch(dispatch, dao)
+                        delay(DEFAULT_DISPATCH_PACING_MS) // Internal engineering delay between consecutive dispatches
+                    }
+
+                    delay(5000) // Queue poll interval
+                } catch (e: Exception) {
+                    Log.e(TAG, "Exception in relay loop: ${e.message}")
+                    delay(10000)
+                }
+            }
+        } finally {
+            if (secureStorage.isRevoked || !secureStorage.isBulkMessagingEnabled) {
+                stopSelf()
             }
         }
+    }
+
+    private suspend fun acquireAndQueueRemoteJobs(dao: SmsDispatchDao) {
+        val startOfDay = smsDispatcher.startOfTodayMillis()
+        val activeSims = simManager.getActiveSimSlots()
+        val simCapabilities = activeSims.map { slot ->
+            SimSlotCapability(
+                simNumber = slot.simNumber,
+                isReady = slot.isReady,
+                sentTodayCount = dao.countSlotSentSince(slot.simNumber, startOfDay)
+            )
+        }
+        val availableSimNumbers = simCapabilities.filter { it.isReady }.map { it.simNumber }
+        if (availableSimNumbers.isEmpty()) {
+            return
+        }
+
+        val acquireResult = apiClient.acquireOutboundSmsJobs(
+            limit = 5,
+            leaseSeconds = 60,
+            availableSimSlots = availableSimNumbers
+        )
+        val acquired = acquireResult.getOrNull() ?: return
+        if (!acquired.relayEnabled) {
+            Log.w(TAG, "Backend reported relayEnabled=false; disabling bulk messaging relay.")
+            secureStorage.isBulkMessagingEnabled = false
+            return
+        }
+
+        val pendingResultsSnapshot = PendingSmsJobResultStore.snapshot(secureStorage)
+        for (job in acquired.jobs) {
+            when (val validation = OutboundSmsJobCoordinator.validateAcquiredJob(job)) {
+                is tz.co.brisksms.messaging.JobValidationResult.Invalid -> {
+                    Log.w(TAG, "Invalid outbound SMS job [${job.id}]: ${validation.reason}")
+                    if (job.id.isNotBlank() && job.leaseToken.isNotBlank()) {
+                        val failReport = OutboundSmsJobCoordinator.buildPreRadioFailureReport(
+                            jobId = job.id,
+                            leaseToken = job.leaseToken,
+                            failureCode = validation.failureCode,
+                            errorMessage = validation.reason
+                        )
+                        PendingSmsJobResultStore.submitOrPersist(secureStorage, apiClient, failReport)
+                    }
+                    continue
+                }
+                is tz.co.brisksms.messaging.JobValidationResult.Valid -> Unit
+            }
+
+            val existingByJob = dao.findByJobId(job.id)
+            val idempKey = job.idempotencyKey?.takeIf { it.isNotBlank() } ?: "smsgate_job_${job.id}"
+            val existingByKey = dao.findByIdempotencyKey(idempKey)
+
+            if (OutboundSmsJobCoordinator.shouldSkipAcquiredJob(job, existingByJob, existingByKey, pendingResultsSnapshot)) {
+                Log.w(TAG, "Skipping duplicate re-acquired SMS job [${job.id}] already handled locally.")
+                continue
+            }
+
+            val slotSelection = OutboundSmsJobCoordinator.selectDispatchSimSlot(
+                requestedSlot = job.simSlot,
+                preferredDeviceSlot = secureStorage.preferredSimSlot,
+                activeSlots = simCapabilities,
+                dailyCapPerSim = SmsDispatcher.DEFAULT_SIM_DAILY_CAP
+            )
+
+            when (slotSelection) {
+                is SimSelectionOutcome.Unavailable -> {
+                    val failReport = OutboundSmsJobCoordinator.buildPreRadioFailureReport(
+                        jobId = job.id,
+                        leaseToken = job.leaseToken,
+                        failureCode = slotSelection.failureCode,
+                        errorMessage = slotSelection.reason
+                    )
+                    PendingSmsJobResultStore.submitOrPersist(secureStorage, apiClient, failReport)
+                }
+                is SimSelectionOutcome.Selected -> {
+                    val entity = OutboundSmsJobCoordinator.toLocalDispatchEntity(job, slotSelection.simSlot)
+                    dao.insert(entity)
+                }
+            }
+        }
+    }
+
+    private suspend fun executeGuardedDispatch(dispatch: SmsDispatchEntity, dao: SmsDispatchDao) {
+        val jobId = dispatch.jobId
+        val leaseToken = dispatch.leaseToken
+
+        if (jobId != null && leaseToken != null) {
+            val gateResult = apiClient.markOutboundSmsDispatching(
+                jobId = jobId,
+                leaseToken = leaseToken,
+                simSlot = dispatch.simSlot
+            )
+            if (!OutboundSmsJobCoordinator.canInvokeSmsManager(
+                    dispatchingResult = gateResult,
+                    relayEnabled = secureStorage.isBulkMessagingEnabled,
+                    deviceRevoked = secureStorage.isRevoked
+                )
+            ) {
+                if (!gateResult.retryable) {
+                    val reason = gateResult.errorMessage ?: gateResult.errorCode ?: "Server rejected /dispatching gate"
+                    Log.w(TAG, "Aborting dispatch for job [$jobId] before SmsManager: $reason")
+                    dao.markFailed(dispatch.id, reason)
+                } else {
+                    Log.w(TAG, "Transient error confirming /dispatching for job [$jobId]: ${gateResult.errorCode}; skipping SmsManager.")
+                }
+                return
+            }
+
+            when (val outcome = smsDispatcher.dispatchMessage(dispatch, dao)) {
+                is DispatchOutcome.Failed -> {
+                    val isPreRadio = outcome.reason.contains("Missing SEND_SMS") || outcome.reason.contains("absent") || outcome.reason.contains("daily")
+                    val report = if (isPreRadio) {
+                        OutboundSmsJobCoordinator.buildPreRadioFailureReport(
+                            jobId = jobId,
+                            leaseToken = leaseToken,
+                            failureCode = "ANDROID_DISPATCH_PRECHECK_FAILED",
+                            errorMessage = outcome.reason,
+                            simSlot = dispatch.simSlot
+                        )
+                    } else {
+                        OutboundSmsJobCoordinator.buildRadioFailureReport(
+                            jobId = jobId,
+                            leaseToken = leaseToken,
+                            simSlot = dispatch.simSlot,
+                            radioResultCode = -1,
+                            errorMessage = outcome.reason
+                        )
+                    }
+                    PendingSmsJobResultStore.submitOrPersist(secureStorage, apiClient, report)
+                }
+                is DispatchOutcome.Submitted, is DispatchOutcome.DuplicateIgnored -> Unit
+            }
+            return
+        }
+
+        // Legacy local-only Room queue item
+        smsDispatcher.dispatchMessage(dispatch, dao)
     }
 
     private fun stopRelay() {

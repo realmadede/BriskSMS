@@ -54,7 +54,7 @@ export const createInvoiceAction = {
     ],
     perform: async (z: ZapierZ, bundle: ZapierBundle<CreateInvoiceInput>) => {
       const response = await z.request({
-        url: 'https://api.brisksms.com/v1/invoices',
+        url: 'https://api.brisksms.com/v1/reconciliation/invoices',
         method: 'POST',
         headers: {
           Authorization: `Bearer ${bundle.authData.access_token}`,
@@ -69,7 +69,13 @@ export const createInvoiceAction = {
         },
       });
 
-      return response.json;
+      if (response.status >= 400) {
+        throw new Error(`Create invoice failed with HTTP status ${response.status}`);
+      }
+
+      const raw = response.json as Record<string, unknown>;
+      const data = raw?.data as Record<string, unknown> | undefined;
+      return (data?.invoice as Record<string, unknown> | undefined) ?? data ?? raw;
     },
     sample: {
       id: 'inv_882910482',

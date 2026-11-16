@@ -55,5 +55,39 @@ class PaymentProviderRegistryTest {
         // False positives should be rejected
         assertFalse(PaymentProviderRegistry.isFinancialShortcode("Dad", "Hello son, how are you?"))
         assertFalse(PaymentProviderRegistry.isFinancialShortcode("Uber", "Your ride has arrived"))
+        assertFalse(PaymentProviderRegistry.isFinancialShortcode("+255754000111", "Umepokea M-PESA Tsh 10,000"))
+        assertFalse(PaymentProviderRegistry.isFinancialShortcode("M-PESA", "Umetuma Tsh 10,000 kwenda John"))
+    }
+
+    @Test
+    fun isEligibleNotificationSource_blocksWhatsAppAndSocialAppsMentionsOfMpesa() {
+        assertFalse(
+            PaymentProviderRegistry.isEligibleNotificationSource(
+                "com.whatsapp",
+                "M-PESA",
+                "Umepokea Tsh 50,000 kutoka kwa Juma"
+            )
+        )
+        assertFalse(
+            PaymentProviderRegistry.isEligibleNotificationSource(
+                "com.google.android.apps.messaging",
+                "+255754123456",
+                "QA12BC34DE Imethibitishwa. Umepokea Tsh 50,000 kutoka kwa JOHN DOE 255754123456"
+            )
+        )
+        assertTrue(
+            PaymentProviderRegistry.isEligibleNotificationSource(
+                "com.google.android.apps.messaging",
+                "M-PESA",
+                "QA12BC34DE Imethibitishwa. Umepokea Tsh 50,000 kutoka kwa JOHN DOE 255754123456"
+            )
+        )
+        assertTrue(
+            PaymentProviderRegistry.isEligibleNotificationSource(
+                "com.vodacom.mpesa",
+                "M-Pesa",
+                "You have received Tsh 25,000 from Ali"
+            )
+        )
     }
 }

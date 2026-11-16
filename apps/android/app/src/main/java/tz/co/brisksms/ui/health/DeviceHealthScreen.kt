@@ -52,6 +52,7 @@ fun DeviceHealthScreen() {
     var lastSyncTime by remember { mutableStateOf("Pending report") }
     var isReporting by remember { mutableStateOf(false) }
     var reportFeedback by remember { mutableStateOf<String?>(null) }
+    var isReportError by remember { mutableStateOf(false) }
 
     fun refreshHealth() {
         val ifilter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
@@ -79,8 +80,10 @@ fun DeviceHealthScreen() {
 
         coroutineScope.launch {
             withContext(Dispatchers.IO) {
-                val dbFile = context.getDatabasePath("brisksms.db")
-                dbSizeBytes = if (dbFile.exists()) dbFile.length() else 0L
+                val dbFile = context.getDatabasePath(BriskDatabase.DB_NAME)
+                val walFile = java.io.File("${dbFile.absolutePath}-wal")
+                dbSizeBytes = (if (dbFile.exists()) dbFile.length() else 0L) +
+                    (if (walFile.exists()) walFile.length() else 0L)
 
                 val db = BriskDatabase.getInstance(context)
                 val p1 = db.evidenceDao().countPending()
@@ -277,7 +280,7 @@ fun DeviceHealthScreen() {
         if (reportFeedback != null) {
             Text(
                 text = reportFeedback ?: "",
-                color = BriskColors.StatusVerified,
+                color = if (isReportError) BriskColors.StatusRejected else BriskColors.StatusVerified,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.padding(top = 10.dp)
@@ -291,6 +294,7 @@ fun DeviceHealthScreen() {
             onClick = {
                 isReporting = true
                 reportFeedback = null
+                isReportError = false
                 coroutineScope.launch {
                     refreshHealth()
                     val req = DeviceTelemetryRequest(
@@ -306,8 +310,10 @@ fun DeviceHealthScreen() {
                     if (res.isSuccess) {
                         val fmt = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
                         lastSyncTime = fmt.format(Date())
+                        isReportError = false
                         reportFeedback = "Telemetry successfully delivered to backend"
                     } else {
+                        isReportError = true
                         reportFeedback = "Upload error: ${res.exceptionOrNull()?.message}"
                     }
                     isReporting = false

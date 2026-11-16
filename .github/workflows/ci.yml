@@ -139,6 +139,7 @@ jobs:
       - name: Verify Gradle Wrapper & Project Structure
         working-directory: apps/android
         run: |
+          set -e -o pipefail
           chmod +x gradlew
           ./gradlew --version
           ./gradlew projects --no-daemon 2>&1 | tee projects.log || {

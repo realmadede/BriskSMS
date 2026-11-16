@@ -146,4 +146,60 @@ export class SubscriptionPastDueError extends BriskError {
   }
 }
 
+/**
+ * Thrown when a reference is actively claimed or reserved by another organization
+ */
+export class ReferenceClaimedByAnotherOrgError extends BriskError {
+  constructor(reference: string, provider: string, claimingOrgId?: string) {
+    super(
+      'REFERENCE_CLAIMED_BY_ANOTHER_ORG',
+      `Reference '${reference}' for provider '${provider}' is already claimed by another organization.`,
+      409,
+      { reference, provider, claimingOrgId },
+    );
+  }
+}
+
+/**
+ * Thrown when a reference has already been settled and confirmed
+ */
+export class ReferenceAlreadySettledError extends BriskError {
+  constructor(reference: string, provider: string, settledOrgId?: string) {
+    super(
+      'REFERENCE_ALREADY_SETTLED',
+      `Reference '${reference}' for provider '${provider}' has already been settled and confirmed.`,
+      409,
+      { reference, provider, settledOrgId },
+    );
+  }
+}
+
+/**
+ * Thrown when a reference is locked in unresolved collision quarantine
+ */
+export class CollisionQuarantinedError extends BriskError {
+  constructor(reference: string, provider: string) {
+    super(
+      'COLLISION_QUARANTINED',
+      `Reference '${reference}' for provider '${provider}' is quarantined under an unresolved multi-tenant collision.`,
+      409,
+      { reference, provider },
+    );
+  }
+}
+
+/**
+ * Thrown when a cross-tenant collision or dispute is raised
+ */
+export class CrossTenantDisputeError extends BriskError {
+  constructor(reference: string, provider: string, message?: string) {
+    super(
+      'CROSS_TENANT_DISPUTE',
+      message || `Cross-tenant dispute raised for reference '${reference}' on provider '${provider}'.`,
+      409,
+      { reference, provider },
+    );
+  }
+}
+
 

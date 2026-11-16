@@ -1,8 +1,12 @@
 import { Router, RouteRequest, ApiResponse, HttpException } from '../../core/http.js';
-import { authenticate } from '../../core/guards.js';
+import {
+  authenticate,
+  assertOAuthScope,
+  resolveAuthorizedTenantOrgId,
+} from '../../core/guards.js';
 import { reconciliationService } from './reconciliation.service.js';
 import { dbStore } from '../../core/store.js';
-import { TransactionState, UserRole, VerificationMethod } from '@brisksms/shared';
+import { ApiKeyScope, TransactionState, UserRole, VerificationMethod } from '@brisksms/shared';
 
 async function assertOrgAccess(
   orgId: string,
@@ -27,11 +31,9 @@ export function registerReconciliationRoutes(router: Router): void {
   // 1. List Normalized Payments with Filters
   router.get('/v1/reconciliation/payments', async (req: RouteRequest): Promise<ApiResponse> => {
     await authenticate(req);
+    assertOAuthScope(req, [ApiKeyScope.PAYMENTS_READ]);
     const userId = req.context.userId!;
-    const orgId = req.query.organizationId || req.context.organizationId;
-    if (!orgId) {
-      throw new HttpException(400, 'VALIDATION_ERROR', 'organizationId is required');
-    }
+    const orgId = resolveAuthorizedTenantOrgId(req, req.query.organizationId);
     await assertOrgAccess(orgId, userId);
 
     const stateFilter = req.query.state as TransactionState | undefined;
@@ -51,12 +53,10 @@ export function registerReconciliationRoutes(router: Router): void {
   // 2. Get Normalized Payment Detail
   router.get('/v1/reconciliation/payments/:id', async (req: RouteRequest): Promise<ApiResponse> => {
     await authenticate(req);
+    assertOAuthScope(req, [ApiKeyScope.PAYMENTS_READ]);
     const userId = req.context.userId!;
     const paymentId = req.params.id || '';
-    const orgId = req.query.organizationId || req.context.organizationId;
-    if (!orgId) {
-      throw new HttpException(400, 'VALIDATION_ERROR', 'organizationId is required');
-    }
+    const orgId = resolveAuthorizedTenantOrgId(req, req.query.organizationId);
     await assertOrgAccess(orgId, userId);
 
     const payment = await reconciliationService.findPaymentById(orgId, paymentId);
@@ -84,12 +84,10 @@ export function registerReconciliationRoutes(router: Router): void {
   // 2b. Get Candidate Invoices for Review Queue Payment
   router.get('/v1/reconciliation/payments/:id/candidates', async (req: RouteRequest): Promise<ApiResponse> => {
     await authenticate(req);
+    assertOAuthScope(req, [ApiKeyScope.PAYMENTS_READ]);
     const userId = req.context.userId!;
     const paymentId = req.params.id || '';
-    const orgId = req.query.organizationId || req.context.organizationId;
-    if (!orgId) {
-      throw new HttpException(400, 'VALIDATION_ERROR', 'organizationId is required');
-    }
+    const orgId = resolveAuthorizedTenantOrgId(req, req.query.organizationId);
     await assertOrgAccess(orgId, userId);
 
     const candidates = await reconciliationService.findCandidateInvoicesForPayment(orgId, paymentId);
@@ -102,11 +100,9 @@ export function registerReconciliationRoutes(router: Router): void {
   // 3. List Invoices
   router.get('/v1/reconciliation/invoices', async (req: RouteRequest): Promise<ApiResponse> => {
     await authenticate(req);
+    assertOAuthScope(req, [ApiKeyScope.INVOICES_READ]);
     const userId = req.context.userId!;
-    const orgId = req.query.organizationId || req.context.organizationId;
-    if (!orgId) {
-      throw new HttpException(400, 'VALIDATION_ERROR', 'organizationId is required');
-    }
+    const orgId = resolveAuthorizedTenantOrgId(req, req.query.organizationId);
     await assertOrgAccess(orgId, userId);
 
     const invoices = await reconciliationService.listInvoices(orgId);
@@ -119,14 +115,11 @@ export function registerReconciliationRoutes(router: Router): void {
   // 4. Create Invoice
   router.post('/v1/reconciliation/invoices', async (req: RouteRequest): Promise<ApiResponse> => {
     await authenticate(req);
+    assertOAuthScope(req, [ApiKeyScope.INVOICES_WRITE]);
     const userId = req.context.userId!;
-    const orgId = (req.body.organizationId as string) || req.context.organizationId;
-    if (!orgId) {
-      throw new HttpException(400, 'VALIDATION_ERROR', 'organizationId is required');
-    }
-    await assertOrgAccess(orgId, userId, [UserRole.OWNER, UserRole.ADMIN, UserRole.FINANCE]);
-
     const body = req.body as Record<string, any>;
+    const orgId = resolveAuthorizedTenantOrgId(req, body.organizationId);
+    await assertOrgAccess(orgId, userId, [UserRole.OWNER, UserRole.ADMIN, UserRole.FINANCE]);
     if (!body.referenceNumber || body.totalAmountCents === undefined) {
       throw new HttpException(400, 'VALIDATION_ERROR', 'referenceNumber and totalAmountCents are required');
     }
@@ -152,12 +145,10 @@ export function registerReconciliationRoutes(router: Router): void {
   // 5. Get Specific Invoice Detail
   router.get('/v1/reconciliation/invoices/:id', async (req: RouteRequest): Promise<ApiResponse> => {
     await authenticate(req);
+    assertOAuthScope(req, [ApiKeyScope.INVOICES_READ]);
     const userId = req.context.userId!;
     const invoiceId = req.params.id || '';
-    const orgId = req.query.organizationId || req.context.organizationId;
-    if (!orgId) {
-      throw new HttpException(400, 'VALIDATION_ERROR', 'organizationId is required');
-    }
+    const orgId = resolveAuthorizedTenantOrgId(req, req.query.organizationId);
     await assertOrgAccess(orgId, userId);
 
     const invoice = await reconciliationService.findInvoiceById(orgId, invoiceId);
@@ -174,12 +165,10 @@ export function registerReconciliationRoutes(router: Router): void {
   // 6. Verify Payment (Manual or Independent Verification Settlement)
   router.post('/v1/reconciliation/verify', async (req: RouteRequest): Promise<ApiResponse> => {
     await authenticate(req);
+    assertOAuthScope(req, [ApiKeyScope.PAYMENTS_WRITE]);
     const userId = req.context.userId!;
     const body = req.body as Record<string, any>;
-    const orgId = (body.organizationId as string) || req.context.organizationId;
-    if (!orgId) {
-      throw new HttpException(400, 'VALIDATION_ERROR', 'organizationId is required');
-    }
+    const orgId = resolveAuthorizedTenantOrgId(req, body.organizationId);
     await assertOrgAccess(orgId, userId, [UserRole.OWNER, UserRole.ADMIN, UserRole.FINANCE]);
 
     if (!body.paymentId) {
@@ -195,6 +184,7 @@ export function registerReconciliationRoutes(router: Router): void {
       verifiedById: userId,
       externalVerificationRef: body.externalVerificationRef ? String(body.externalVerificationRef) : undefined,
       notes: body.notes ? String(body.notes) : undefined,
+      requireAuditMetadata: true,
     });
 
     return {
@@ -206,12 +196,10 @@ export function registerReconciliationRoutes(router: Router): void {
   // 7. Reject Payment (Manual Review Queue Rejection)
   router.post('/v1/reconciliation/reject', async (req: RouteRequest): Promise<ApiResponse> => {
     await authenticate(req);
+    assertOAuthScope(req, [ApiKeyScope.PAYMENTS_WRITE]);
     const userId = req.context.userId!;
     const body = req.body as Record<string, any>;
-    const orgId = (body.organizationId as string) || req.context.organizationId;
-    if (!orgId) {
-      throw new HttpException(400, 'VALIDATION_ERROR', 'organizationId is required');
-    }
+    const orgId = resolveAuthorizedTenantOrgId(req, body.organizationId);
     await assertOrgAccess(orgId, userId, [UserRole.OWNER, UserRole.ADMIN, UserRole.FINANCE]);
 
     if (!body.paymentId || !body.notes) {

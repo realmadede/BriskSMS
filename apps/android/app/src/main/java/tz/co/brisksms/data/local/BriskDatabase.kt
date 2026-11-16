@@ -7,13 +7,15 @@ import androidx.room.RoomDatabase
 import tz.co.brisksms.messaging.data.SmsDispatchDao
 import tz.co.brisksms.messaging.data.SmsDispatchEntity
 
-@Database(entities = [OfflineEvidenceEntity::class, SmsDispatchEntity::class], version = 2, exportSchema = false)
+@Database(entities = [OfflineEvidenceEntity::class, SmsDispatchEntity::class], version = 4, exportSchema = false)
 abstract class BriskDatabase : RoomDatabase() {
 
     abstract fun evidenceDao(): EvidenceDao
     abstract fun smsDispatchDao(): SmsDispatchDao
 
     companion object {
+        const val DB_NAME = "brisksms_relay.db"
+
         @Volatile
         private var INSTANCE: BriskDatabase? = null
 
@@ -22,7 +24,7 @@ abstract class BriskDatabase : RoomDatabase() {
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
                     BriskDatabase::class.java,
-                    "brisksms_relay.db"
+                    DB_NAME
                 ).fallbackToDestructiveMigration().build()
                 INSTANCE = instance
                 instance

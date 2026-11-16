@@ -4,9 +4,22 @@ import {
   timingSafeEqual,
   scryptSync,
   createHash,
-  createCipheriv,
-  createDecipheriv,
 } from 'node:crypto';
+import {
+  INSECURE_DEFAULT_KEYS,
+  encryptSecret,
+  decryptSecret,
+  isEncryptedSecret,
+  maskSecret,
+} from '@brisksms/shared';
+
+export {
+  INSECURE_DEFAULT_KEYS,
+  encryptSecret,
+  decryptSecret,
+  isEncryptedSecret,
+  maskSecret,
+};
 
 export interface JwtPayload {
   sub: string;
@@ -18,7 +31,28 @@ export interface JwtPayload {
   iat: number;
 }
 
-const JWT_DEFAULT_SECRET = process.env.JWT_ACCESS_SECRET || 'brisksms_dev_jwt_access_secret_min_32_characters_long';
+const JWT_DEV_DEFAULT_SECRET = 'brisksms_dev_jwt_access_secret_min_32_characters_long';
+
+/**
+ * Resolves the JWT HMAC-SHA256 secret, failing closed in production when unset or insecure.
+ */
+export function resolveJwtSecret(customSecret?: string): string {
+  const isProd = process.env.NODE_ENV === 'production';
+  const configured = customSecret ?? process.env.JWT_ACCESS_SECRET;
+
+  if (isProd) {
+    if (!configured || configured.trim().length === 0) {
+      throw new Error('FATAL: JWT_ACCESS_SECRET is not configured in production environment. Refusing operation.');
+    }
+    const trimmed = configured.trim();
+    if (trimmed === JWT_DEV_DEFAULT_SECRET || INSECURE_DEFAULT_KEYS.has(trimmed) || trimmed.length < 32) {
+      throw new Error('FATAL: Insecure or insufficient-entropy JWT_ACCESS_SECRET in production environment.');
+    }
+    return trimmed;
+  }
+
+  return configured && configured.trim().length > 0 ? configured.trim() : JWT_DEV_DEFAULT_SECRET;
+}
 
 /**
  * Hash password securely using scrypt with random salt
@@ -75,7 +109,8 @@ export function base64UrlDecode(str: string): string {
 /**
  * Issue a signed JWT token
  */
-export function signJwt(payload: Omit<JwtPayload, 'iat' | 'exp'>, expiresInSeconds: number = 900, secret: string = JWT_DEFAULT_SECRET): string {
+export function signJwt(payload: Omit<JwtPayload, 'iat' | 'exp'>, expiresInSeconds: number = 900, secret?: string): string {
+  const effectiveSecret = resolveJwtSecret(secret);
   const now = Math.floor(Date.now() / 1000);
   const fullPayload: JwtPayload = {
     ...payload,
@@ -87,7 +122,7 @@ export function signJwt(payload: Omit<JwtPayload, 'iat' | 'exp'>, expiresInSecon
   const encodedHeader = base64UrlEncode(JSON.stringify(header));
   const encodedPayload = base64UrlEncode(JSON.stringify(fullPayload));
 
-  const signature = createHmac('sha256', secret)
+  const signature = createHmac('sha256', effectiveSecret)
     .update(`${encodedHeader}.${encodedPayload}`)
     .digest();
 
@@ -98,15 +133,19 @@ export function signJwt(payload: Omit<JwtPayload, 'iat' | 'exp'>, expiresInSecon
 /**
  * Verify and decode JWT token
  */
-export function verifyJwt(token: string, secret: string = JWT_DEFAULT_SECRET): JwtPayload | null {
+export function verifyJwt(token: string, secret?: string): JwtPayload | null {
   try {
+    const effectiveSecret = resolveJwtSecret(secret);
     const parts = token.split('.');
     if (parts.length !== 3) return null;
 
     const [encodedHeader, encodedPayload, encodedSignature] = parts;
     if (!encodedHeader || !encodedPayload || !encodedSignature) return null;
 
-    const expectedSignature = createHmac('sha256', secret)
+    const header = JSON.parse(base64UrlDecode(encodedHeader)) as { alg?: string; typ?: string };
+    if (!header || header.alg !== 'HS256') return null;
+
+    const expectedSignature = createHmac('sha256', effectiveSecret)
       .update(`${encodedHeader}.${encodedPayload}`)
       .digest();
 
@@ -118,8 +157,11 @@ export function verifyJwt(token: string, secret: string = JWT_DEFAULT_SECRET): J
     }
 
     const payload: JwtPayload = JSON.parse(base64UrlDecode(encodedPayload));
+    if (typeof payload.exp !== 'number' || !Number.isFinite(payload.exp)) {
+      return null;
+    }
     const now = Math.floor(Date.now() / 1000);
-    if (payload.exp && payload.exp < now) {
+    if (payload.exp < now) {
       return null; // Expired
     }
 
@@ -142,16 +184,6 @@ export function generateSecureToken(prefix: string, lengthBytes: number = 32): s
 export function hashToken(token: string): string {
   return createHash('sha256').update(token, 'utf-8').digest('hex');
 }
-
-/**
- * Known insecure, development, and CI default keys that must NEVER be used in production.
- */
-export const INSECURE_DEFAULT_KEYS = new Set([
-  'brisksms_ci_encryption_master_key_32_bytes_min!',
-  'brisksms_dev_encryption_master_key_32_bytes_min!',
-  'dev_master_key_for_testing_only_1234567890',
-  'test_encryption_master_key_32_bytes_long!!',
-]);
 
 /**
  * Validates encryption configuration at startup or operation time.
@@ -179,85 +211,6 @@ export function validateProductionEncryptionConfig(): void {
     if (trimmed.length < 32) {
       throw new Error('FATAL: ENCRYPTION_MASTER_KEY must be at least 32 characters in production. Refusing to start.');
     }
+    resolveJwtSecret();
   }
-}
-
-/**
- * Resolves 32-byte key buffer for AES-256-GCM from ENCRYPTION_MASTER_KEY.
- * Fails closed if the master key is missing, empty, or unconfigured.
- * In production, strictly rejects any dev/CI default test key.
- */
-function getMasterKeyBuffer(customKey?: string): Buffer {
-  const isProd = process.env.NODE_ENV === 'production';
-  const rawKey = customKey || process.env.ENCRYPTION_MASTER_KEY;
-  if (!rawKey || typeof rawKey !== 'string' || rawKey.trim().length === 0) {
-    throw new Error('Encryption failed: ENCRYPTION_MASTER_KEY is not configured or empty');
-  }
-  const trimmed = rawKey.trim();
-
-  if (isProd) {
-    if (
-      INSECURE_DEFAULT_KEYS.has(trimmed) ||
-      trimmed.toLowerCase().includes('ci_encryption') ||
-      trimmed.toLowerCase().includes('dev_encryption')
-    ) {
-      throw new Error('Encryption failed: Insecure or test ENCRYPTION_MASTER_KEY detected in production');
-    }
-    if (trimmed.length < 32) {
-      throw new Error('Encryption failed: ENCRYPTION_MASTER_KEY must be at least 32 characters in production');
-    }
-  }
-
-  if (/^[0-9a-fA-F]{64}$/.test(trimmed)) {
-    return Buffer.from(trimmed, 'hex');
-  }
-  return createHash('sha256').update(trimmed, 'utf8').digest();
-}
-
-/**
- * Encrypts a secret at rest using AES-256-GCM.
- * Output format: "aes-256-gcm:ivHex:tagHex:cipherHex"
- */
-export function encryptSecret(plaintext: string, masterKey?: string): string {
-  if (plaintext === undefined || plaintext === null) {
-    throw new Error('Plaintext secret cannot be null or undefined');
-  }
-  const key = getMasterKeyBuffer(masterKey);
-  const iv = randomBytes(12); // Standard 96-bit IV for GCM
-  const cipher = createCipheriv('aes-256-gcm', key, iv);
-  const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  return `aes-256-gcm:${iv.toString('hex')}:${tag.toString('hex')}:${encrypted.toString('hex')}`;
-}
-
-/**
- * Decrypts an AES-256-GCM encrypted secret.
- * Throws if tampering is detected, format is invalid, or master key is incorrect.
- */
-export function decryptSecret(ciphertext: string, masterKey?: string): string {
-  if (!ciphertext || typeof ciphertext !== 'string') {
-    throw new Error('Ciphertext is required for decryption');
-  }
-  const key = getMasterKeyBuffer(masterKey);
-  const parts = ciphertext.split(':');
-  if (parts.length !== 4 || parts[0] !== 'aes-256-gcm') {
-    throw new Error('Invalid ciphertext format for AES-256-GCM');
-  }
-  const iv = Buffer.from(parts[1]!, 'hex');
-  const tag = Buffer.from(parts[2]!, 'hex');
-  const encrypted = Buffer.from(parts[3]!, 'hex');
-
-  const decipher = createDecipheriv('aes-256-gcm', key, iv);
-  decipher.setAuthTag(tag);
-  const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
-  return decrypted.toString('utf8');
-}
-
-/**
- * Checks whether a given string is formatted as an AES-256-GCM encrypted secret.
- */
-export function isEncryptedSecret(value: unknown): boolean {
-  if (typeof value !== 'string') return false;
-  const parts = value.split(':');
-  return parts.length === 4 && parts[0] === 'aes-256-gcm' && parts[1]!.length === 24 && parts[2]!.length === 32;
 }

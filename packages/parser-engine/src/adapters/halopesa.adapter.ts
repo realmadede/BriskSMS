@@ -6,20 +6,29 @@ export class HalopesaAdapter extends BaseProviderAdapter {
   readonly provider = PaymentProvider.HALOPESA;
 
   canParse(senderAddress: string, body: string): boolean {
+    if (this.isPersonalPhoneSender(senderAddress)) {
+      return false;
+    }
     const address = senderAddress.toUpperCase();
-    return address.includes('HALOPESA') || address.includes('HALOTEL') || /HaloPesa/i.test(body);
+    if (address.includes('HALOPESA') || address.includes('HALOTEL')) {
+      return true;
+    }
+    return /HaloPesa.*(?:Umepokea|You have received)/i.test(body);
   }
 
   parse(body: string, defaultDate: Date = new Date()): ParsedPaymentResult | null {
     const text = this.cleanText(body);
+    if (!this.isIncomingCreditMessage(text)) {
+      return null;
+    }
 
-    const refMatch = text.match(/(?:Kumbukumbu|Trans(?:action)?\s*ID|Ref)\s*(?::|ni)?\s*([A-Za-z0-9]+)/i);
+    const refMatch = text.match(/(?:Kumbukumbu(?:\s+namba)?|Namba ya muamala|Trans(?:action)?\s*ID|Ref)\s*(?::|ni)?\s*([A-Za-z0-9]+)/i);
     if (!refMatch || !refMatch[1]) {
       return null;
     }
     const reference = refMatch[1].toUpperCase();
 
-    const amountMatch = text.match(/(?:Tsh|TZS)\s*([\d,]+(?:\.\d{2})?)/i);
+    const amountMatch = text.match(/(?:Tsh|TZS)\s*(\d[\d,]*(?:\.\d{1,2})?)/i);
     if (!amountMatch || !amountMatch[1]) {
       return null;
     }
@@ -47,7 +56,7 @@ export class HalopesaAdapter extends BaseProviderAdapter {
       senderName,
       recipientAccount: null,
       customerMemo: null,
-      providerTimestamp: defaultDate,
+      providerTimestamp: this.extractTimestamp(text, defaultDate),
       rawText: body,
     };
   }

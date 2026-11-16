@@ -1,6 +1,6 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, generateKeyPairSync, randomUUID, sign as cryptoSign } from 'node:crypto';
 import {
   EvidenceSourceType,
   VerificationMethod,
@@ -13,6 +13,8 @@ import { dbStore } from '../src/core/store.js';
 import { AuthService } from '../src/modules/auth/auth.service.js';
 import { OrganizationService } from '../src/modules/organization/organization.service.js';
 import { DeviceService } from '../src/modules/device/device.service.js';
+import { buildPairingChallengeTranscript } from '../src/modules/device/device-crypto.js';
+import { hashToken } from '../src/core/crypto.js';
 import { ReconciliationService } from '../src/modules/reconciliation/reconciliation.service.js';
 import { IngestionService } from '../src/modules/ingestion/ingestion.service.js';
 import { SubscriptionService } from '../src/modules/subscription/subscription.service.js';
@@ -79,13 +81,39 @@ describe('Milestone 1: Strict Multi-Tenant Isolation Across All Domains & Worker
 
     // Device pairing & revocation across tenants
     const pairA = await deviceService.createPairingToken(orgAId, userAId);
+    const kpA = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+    const pubPemA = kpA.publicKey.export({ type: 'spki', format: 'pem' }).toString().trim();
+    const fpA = createHash('sha256')
+      .update(kpA.publicKey.export({ type: 'spki', format: 'der' }))
+      .digest('hex');
+    const chA = await deviceService.createPairingChallenge({
+      enrollmentToken: pairA.pairingToken,
+      publicKeyPem: pubPemA,
+    });
+    const sigA = cryptoSign(
+      'sha256',
+      buildPairingChallengeTranscript({
+        challengeId: chA.challengeId,
+        enrollmentId: chA.enrollmentId,
+        organizationId: chA.organizationId,
+        pairingTokenHash: hashToken(pairA.pairingToken),
+        publicKeyFingerprint: fpA,
+        keyAlgorithm: chA.keyAlgorithm,
+        signatureAlgorithm: chA.signatureAlgorithm,
+        challengeNonce: chA.challenge,
+        expiresAtIso: chA.expiresAt,
+      }),
+      { key: kpA.privateKey, dsaEncoding: 'der' },
+    ).toString('base64');
     const devA = await deviceService.pairDevice({
       enrollmentToken: pairA.pairingToken,
+      challengeId: chA.challengeId,
+      challengeSignature: sigA,
       deviceModel: 'SM-A54',
       manufacturer: 'Samsung',
       androidVersion: '14',
       appVersion: '1.0.0',
-      publicKeyPem: 'key_a',
+      publicKeyPem: pubPemA,
     });
 
     // User B cannot view or revoke Tenant A's device

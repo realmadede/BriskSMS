@@ -29,6 +29,14 @@ export interface KeyRecord {
 export class SmsGateKeyService {
   private deviceKeys = new Map<string, KeyRecord>();
   private gatewayKeys = new Map<string, KeyRecord>();
+  private readonly memoryOnly: boolean;
+
+  constructor(options: { memoryOnly?: boolean } = {}) {
+    if (options.memoryOnly && process.env.NODE_ENV === 'production') {
+      throw new Error('SECURITY VIOLATION: memoryOnly mode cannot be enabled in production');
+    }
+    this.memoryOnly = Boolean(options.memoryOnly);
+  }
 
   private buildDeviceKeyScope(organizationId: string, deviceId: string): string {
     return `${organizationId.trim()}:${deviceId.trim()}`;
@@ -48,11 +56,11 @@ export class SmsGateKeyService {
     const cleanDeviceId = deviceId?.trim();
     if (!cleanDeviceId) return null;
 
-    try {
+    if (!this.memoryOnly) {
       // 1. Check if device exists in devices table and is revoked
       const devRows = await sql<Record<string, any>>`
         SELECT organization_id, status FROM devices
-        WHERE id::text = ${cleanDeviceId} OR device_model = ${cleanDeviceId}
+        WHERE id::text = ${cleanDeviceId}
       `;
       for (const d of devRows) {
         if (d.status === 'REVOKED') {
@@ -85,12 +93,11 @@ export class SmsGateKeyService {
       if (devRows.length === 1 && devRows[0]!.organization_id) {
         return devRows[0]!.organization_id;
       }
-    } catch (err: unknown) {
-      if (err instanceof HttpException) throw err;
-      // Database unavailable or memory mode fallback
+
+      return null;
     }
 
-    // In-memory fallback
+    // Explicit opt-in pure unit-test mode without PostgreSQL
     const matchedOrgs: string[] = [];
     for (const scopeKey of this.deviceKeys.keys()) {
       const [orgId, devId] = scopeKey.split(':');
@@ -135,9 +142,9 @@ export class SmsGateKeyService {
 
     const encryptedKey = encryptSecret(cleanSecret);
     const now = new Date();
+    if (this.memoryOnly) return;
 
-    try {
-      const rows = await sql<Record<string, any>>`
+    const rows = await sql<Record<string, any>>`
         INSERT INTO smsgate_signing_keys (
           id, organization_id, device_id, encrypted_key, encrypted_prev_key, rotated_at, created_at, updated_at
         ) VALUES (
@@ -152,8 +159,8 @@ export class SmsGateKeyService {
         RETURNING id
       `;
 
-      const keyId = rows[0]?.id || randomUUID();
-      await sql`
+    const keyId = rows[0]?.id || randomUUID();
+    await sql`
         INSERT INTO audit_logs (
           id, organization_id, actor_id, actor_type, action, resource_type, resource_id,
           previous_state, new_state, metadata, created_at
@@ -165,9 +172,6 @@ export class SmsGateKeyService {
           ${now}
         )
       `;
-    } catch {
-      // In-memory state remains valid if running in pure unit-test mode without database
-    }
   }
 
   /**
@@ -199,9 +203,9 @@ export class SmsGateKeyService {
     });
 
     const encryptedNewKey = encryptSecret(cleanNewSecret);
+    if (this.memoryOnly) return;
 
-    try {
-      const rows = await sql<Record<string, any>>`
+    const rows = await sql<Record<string, any>>`
         INSERT INTO smsgate_signing_keys (
           id, organization_id, device_id, encrypted_key, encrypted_prev_key, rotated_at, created_at, updated_at
         ) VALUES (
@@ -216,8 +220,8 @@ export class SmsGateKeyService {
         RETURNING id
       `;
 
-      const keyId = rows[0]?.id || randomUUID();
-      await sql`
+    const keyId = rows[0]?.id || randomUUID();
+    await sql`
         INSERT INTO audit_logs (
           id, organization_id, actor_id, actor_type, action, resource_type, resource_id,
           previous_state, new_state, metadata, created_at
@@ -230,9 +234,6 @@ export class SmsGateKeyService {
           ${now}
         )
       `;
-    } catch {
-      // In-memory state remains valid if running in pure unit-test mode without database
-    }
   }
 
   /**
@@ -241,7 +242,7 @@ export class SmsGateKeyService {
   async getDeviceSigningKeys(organizationId: string, deviceId: string): Promise<string[]> {
     if (!organizationId || !deviceId) return [];
 
-    try {
+    if (!this.memoryOnly) {
       const rows = await sql<Record<string, any>>`
         SELECT * FROM smsgate_signing_keys
         WHERE organization_id = ${organizationId} AND device_id = ${deviceId.trim()}
@@ -249,8 +250,7 @@ export class SmsGateKeyService {
       if (rows.length > 0) {
         return this.extractKeysFromRow(rows[0]!);
       }
-    } catch {
-      // Fallback to memory
+      return [];
     }
 
     const scopeKey = this.buildDeviceKeyScope(organizationId, deviceId);
@@ -284,9 +284,9 @@ export class SmsGateKeyService {
 
     const encryptedKey = encryptSecret(cleanSecret);
     const now = new Date();
+    if (this.memoryOnly) return;
 
-    try {
-      const rows = await sql<Record<string, any>>`
+    const rows = await sql<Record<string, any>>`
         INSERT INTO smsgate_signing_keys (
           id, organization_id, device_id, encrypted_key, encrypted_prev_key, rotated_at, created_at, updated_at
         ) VALUES (
@@ -301,8 +301,8 @@ export class SmsGateKeyService {
         RETURNING id
       `;
 
-      const keyId = rows[0]?.id || randomUUID();
-      await sql`
+    const keyId = rows[0]?.id || randomUUID();
+    await sql`
         INSERT INTO audit_logs (
           id, organization_id, actor_id, actor_type, action, resource_type, resource_id,
           previous_state, new_state, metadata, created_at
@@ -314,9 +314,6 @@ export class SmsGateKeyService {
           ${now}
         )
       `;
-    } catch {
-      // In-memory state remains valid if running in pure unit-test mode without database
-    }
   }
 
   /**
@@ -342,9 +339,9 @@ export class SmsGateKeyService {
     });
 
     const encryptedNewKey = encryptSecret(cleanNewSecret);
+    if (this.memoryOnly) return;
 
-    try {
-      const rows = await sql<Record<string, any>>`
+    const rows = await sql<Record<string, any>>`
         INSERT INTO smsgate_signing_keys (
           id, organization_id, device_id, encrypted_key, encrypted_prev_key, rotated_at, created_at, updated_at
         ) VALUES (
@@ -359,8 +356,8 @@ export class SmsGateKeyService {
         RETURNING id
       `;
 
-      const keyId = rows[0]?.id || randomUUID();
-      await sql`
+    const keyId = rows[0]?.id || randomUUID();
+    await sql`
         INSERT INTO audit_logs (
           id, organization_id, actor_id, actor_type, action, resource_type, resource_id,
           previous_state, new_state, metadata, created_at
@@ -373,9 +370,6 @@ export class SmsGateKeyService {
           ${now}
         )
       `;
-    } catch {
-      // In-memory state remains valid if running in pure unit-test mode without database
-    }
   }
 
   /**
@@ -383,38 +377,34 @@ export class SmsGateKeyService {
    * Priority:
    * 1. Device-specific key for `${organizationId}:${deviceId}`
    * 2. Organization-level gateway key
-   * Reads from encrypted PostgreSQL storage, falling back to memory cache if offline.
    */
   async resolveCandidateKeys(organizationId: string, deviceId?: string): Promise<string[]> {
     if (!organizationId) return [];
 
-    let dbRows: Record<string, any>[] = [];
-    try {
-      if (deviceId && deviceId.trim()) {
-        dbRows = await sql<Record<string, any>>`
-          SELECT * FROM smsgate_signing_keys
-          WHERE organization_id = ${organizationId} AND device_id = ${deviceId.trim()}
-        `;
-      }
-
-      if (dbRows.length === 0) {
-        dbRows = await sql<Record<string, any>>`
-          SELECT * FROM smsgate_signing_keys
-          WHERE organization_id = ${organizationId} AND device_id IS NULL
-        `;
-      }
-    } catch {
-      // In case DB is not reachable or in test without DB, fallback to memory
+    if (this.memoryOnly) {
       return this.resolveCandidateKeysFromMemory(organizationId, deviceId);
     }
 
-    // Decrypt keys from database. If ENCRYPTION_MASTER_KEY is missing/invalid,
-    // this will throw, correctly failing closed.
+    let dbRows: Record<string, any>[] = [];
+    if (deviceId && deviceId.trim()) {
+      dbRows = await sql<Record<string, any>>`
+        SELECT * FROM smsgate_signing_keys
+        WHERE organization_id = ${organizationId} AND device_id = ${deviceId.trim()}
+      `;
+    }
+
+    if (dbRows.length === 0) {
+      dbRows = await sql<Record<string, any>>`
+        SELECT * FROM smsgate_signing_keys
+        WHERE organization_id = ${organizationId} AND device_id IS NULL
+      `;
+    }
+
     if (dbRows.length > 0) {
       return this.extractKeysFromRow(dbRows[0]!);
     }
 
-    return this.resolveCandidateKeysFromMemory(organizationId, deviceId);
+    return [];
   }
 
   /**
@@ -490,15 +480,16 @@ export class SmsGateKeyService {
     this.deviceKeys.delete(scopeKey);
 
     const now = new Date();
-    try {
-      const deleted = await sql<Record<string, any>>`
+    if (this.memoryOnly) return;
+
+    const deleted = await sql<Record<string, any>>`
         DELETE FROM smsgate_signing_keys
         WHERE organization_id = ${organizationId} AND device_id = ${deviceId.trim()}
         RETURNING id
       `;
 
-      if (deleted.length > 0) {
-        await sql`
+    if (deleted.length > 0) {
+      await sql`
           INSERT INTO audit_logs (
             id, organization_id, actor_id, actor_type, action, resource_type, resource_id,
             previous_state, new_state, metadata, created_at
@@ -511,9 +502,6 @@ export class SmsGateKeyService {
             ${now}
           )
         `;
-      }
-    } catch {
-      // In-memory state remains valid if running in pure unit-test mode without database
     }
   }
 

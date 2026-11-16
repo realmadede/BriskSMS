@@ -31,14 +31,28 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import tz.co.brisksms.core.network.BriskApiClient
-import tz.co.brisksms.core.network.PairDeviceRequest
 import tz.co.brisksms.core.storage.KeystoreSecureStorage
 import tz.co.brisksms.messaging.service.SmsGateRelayService
+import tz.co.brisksms.security.DeviceKeyProvider
+import tz.co.brisksms.security.DevicePairingCoordinator
 import tz.co.brisksms.security.KeystoreManager
+import tz.co.brisksms.security.PairingCompletionPayload
+import tz.co.brisksms.security.PairingStateSink
 import tz.co.brisksms.ui.theme.BriskColors
 import tz.co.brisksms.ui.theme.BriskShapes
 import tz.co.brisksms.worker.TelemetryWorker
 import java.util.concurrent.TimeUnit
+
+object PairingUrlValidator {
+    fun normalizeAndValidateHttpsBaseUrl(rawUrl: String): String {
+        val trimmed = rawUrl.trim().trimEnd('/').removeSuffix("/v1")
+        val uri = java.net.URI.create(trimmed)
+        if (!"https".equals(uri.scheme, ignoreCase = true) || uri.host.isNullOrBlank()) {
+            throw IllegalArgumentException("Server endpoint must use a valid HTTPS URL (cleartext HTTP is prohibited).")
+        }
+        return trimmed
+    }
+}
 
 @Composable
 fun PairingScreen(
@@ -59,6 +73,25 @@ fun PairingScreen(
     val isHardwareSecured = remember { keystoreManager.isHardwareBacked() }
     val secureStorage = remember { KeystoreSecureStorage(context) }
     val apiClient = remember { BriskApiClient(secureStorage) }
+    val pairingCoordinator = remember {
+        DevicePairingCoordinator(
+            keyProvider = object : DeviceKeyProvider {
+                override fun getPublicKeyPem(): String = keystoreManager.getPublicKeyPem()
+                override fun getPublicKeyFingerprintHex(): String = keystoreManager.getPublicKeyFingerprintHex()
+                override fun sign(data: ByteArray): String = keystoreManager.sign(data)
+            },
+            transport = apiClient,
+            stateSink = object : PairingStateSink {
+                override fun persistEnrolledDevice(result: PairingCompletionPayload) {
+                    secureStorage.deviceToken = result.deviceToken
+                    secureStorage.deviceId = result.deviceId
+                    secureStorage.organizationId = result.organizationId
+                    secureStorage.isPaired = true
+                    secureStorage.isRevoked = false
+                }
+            }
+        )
+    }
 
     val cameraPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -80,6 +113,7 @@ fun PairingScreen(
         }
 
         var token = cleanInput
+        var expectedOrgId: String? = null
         var endpoint: String? = null
 
         // Attempt to parse QR JSON format
@@ -87,6 +121,7 @@ fun PairingScreen(
             try {
                 val json = JSONObject(cleanInput)
                 token = json.optString("token", cleanInput)
+                expectedOrgId = json.optString("org", "").ifBlank { null }
                 if (json.has("endpoint")) {
                     endpoint = json.getString("endpoint")
                 }
@@ -113,10 +148,14 @@ fun PairingScreen(
             endpoint = customEndpoint.trim()
         }
 
-        // Clean endpoint format: strip /v1 if present to maintain base URL standard
+        // Enforce HTTPS-only API endpoint and strip /v1 if present to maintain base URL standard
         if (endpoint != null && endpoint.isNotBlank()) {
-            val cleaned = endpoint.trimEnd('/').removeSuffix("/v1")
-            secureStorage.apiBaseUrl = cleaned
+            try {
+                secureStorage.apiBaseUrl = PairingUrlValidator.normalizeAndValidateHttpsBaseUrl(endpoint)
+            } catch (e: Exception) {
+                errorMessage = e.message ?: "Invalid server endpoint URL"
+                return
+            }
         }
 
         isEnrolling = true
@@ -124,33 +163,24 @@ fun PairingScreen(
 
         coroutineScope.launch {
             try {
-                val publicKeyBase64 = withContext(Dispatchers.IO) {
-                    keystoreManager.getPublicKeyBase64()
-                }
-
-                val request = PairDeviceRequest(
-                    enrollmentToken = token,
-                    label = deviceLabel.ifBlank { "${Build.MANUFACTURER} ${Build.MODEL}" },
-                    publicKeyPem = publicKeyBase64,
-                    deviceModel = Build.MODEL,
-                    manufacturer = Build.MANUFACTURER,
-                    androidVersion = Build.VERSION.RELEASE,
-                    appVersion = "1.0.0"
-                )
-
                 val result = withContext(Dispatchers.IO) {
-                    apiClient.pairDevice(request)
+                    if (secureStorage.isRevoked && !secureStorage.isPaired) {
+                        // Rotate away any revoked hardware key before explicit operator re-enrollment
+                        runCatching { keystoreManager.deleteKey() }
+                    }
+                    pairingCoordinator.enroll(
+                        enrollmentToken = token,
+                        expectedOrganizationId = expectedOrgId,
+                        label = deviceLabel.ifBlank { "${Build.MANUFACTURER} ${Build.MODEL}" },
+                        deviceModel = Build.MODEL,
+                        manufacturer = Build.MANUFACTURER,
+                        androidVersion = Build.VERSION.RELEASE,
+                        appVersion = "1.0.0"
+                    )
                 }
 
                 if (result.isSuccess) {
-                    val data = result.getOrThrow()
-                    secureStorage.deviceToken = data.deviceToken
-                    secureStorage.deviceId = data.deviceId
-                    secureStorage.organizationId = data.organizationId
-                    secureStorage.isPaired = true
-                    secureStorage.isRevoked = false
-
-                    // Schedule periodic device telemetry
+                    // Schedule periodic device telemetry only after backend confirmed enrollment
                     val telemetryRequest = PeriodicWorkRequestBuilder<TelemetryWorker>(
                         15, TimeUnit.MINUTES
                     ).build()

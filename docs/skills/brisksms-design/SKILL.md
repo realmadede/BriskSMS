@@ -1,6 +1,6 @@
 ---
 name: brisksms-design
-description: Canonical cross-platform design system and visual governance skill for the BriskSMS Web application (Angular 19+) and Android application (Jetpack Compose), featuring the warm editorial Stitch aesthetic and performance-guarded Liquid Glass.
+description: Canonical cross-platform design system and visual governance skill for the BriskSMS Web application (`apps/web` Glisse HTML portal & planned Angular 19+ SPA) and Android application (Jetpack Compose), featuring the warm editorial Stitch aesthetic and performance-guarded Liquid Glass.
 ---
 
 # BriskSMS Cross-Platform Design System & Visual Governance

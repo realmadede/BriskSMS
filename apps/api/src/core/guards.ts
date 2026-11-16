@@ -1,8 +1,9 @@
 import { RouteRequest, HttpException } from './http.js';
 import { hashToken, verifyJwt } from './crypto.js';
-import { DeviceStatus, UserRole } from '@brisksms/shared';
+import { ApiKeyScope, DeviceStatus, UserRole } from '@brisksms/shared';
 import { sql, redisClient } from '@brisksms/db';
-import { DeviceRecord, mapDeviceRow } from './store.js';
+import { dbStore, DeviceRecord, mapDeviceRow } from './store.js';
+import { OAuthService } from '../modules/oauth/oauth.service.js';
 import { timingSafeEqual } from 'node:crypto';
 import {
   SESSION_COOKIE_NAME,
@@ -11,18 +12,26 @@ import {
   isAllowedOrigin,
 } from './cookies.js';
 
+const oauthGuardService = new OAuthService();
+
 // Fast in-process cache synchronized with PostgreSQL `revoked_sessions` table and Redis
 export const tokenBlacklist = new Set<string>();
+const syncedBlacklists = new WeakSet<Set<string>>();
+const activeSyncPromises = new WeakMap<Set<string>, Promise<number>>();
 
 export let isRevocationSyncReady = false;
-let activeRevocationSyncPromise: Promise<number> | null = null;
 
-export function isRevocationReady(): boolean {
-  return isRevocationSyncReady;
+export function isRevocationReady(targetBlacklist: Set<string> = tokenBlacklist): boolean {
+  return syncedBlacklists.has(targetBlacklist);
 }
 
 export function setRevocationSyncReady(ready: boolean): void {
   isRevocationSyncReady = ready;
+  if (ready) {
+    syncedBlacklists.add(tokenBlacklist);
+  } else {
+    syncedBlacklists.delete(tokenBlacklist);
+  }
 }
 
 export async function syncTokenBlacklistFromDb(targetBlacklist: Set<string> = tokenBlacklist): Promise<number> {
@@ -44,18 +53,23 @@ export async function syncTokenBlacklistFromDb(targetBlacklist: Set<string> = to
   } catch {
     // Redis best-effort during database sync
   }
-  isRevocationSyncReady = true;
+  syncedBlacklists.add(targetBlacklist);
+  if (targetBlacklist === tokenBlacklist) {
+    isRevocationSyncReady = true;
+  }
   return rows.length;
 }
 
 export async function ensureRevocationSync(targetBlacklist: Set<string> = tokenBlacklist): Promise<void> {
-  if (isRevocationSyncReady) return;
-  if (!activeRevocationSyncPromise) {
-    activeRevocationSyncPromise = syncTokenBlacklistFromDb(targetBlacklist).finally(() => {
-      activeRevocationSyncPromise = null;
+  if (syncedBlacklists.has(targetBlacklist)) return;
+  let pending = activeSyncPromises.get(targetBlacklist);
+  if (!pending) {
+    pending = syncTokenBlacklistFromDb(targetBlacklist).finally(() => {
+      activeSyncPromises.delete(targetBlacklist);
     });
+    activeSyncPromises.set(targetBlacklist, pending);
   }
-  await activeRevocationSyncPromise;
+  await pending;
 }
 
 export async function isTokenRevoked(
@@ -183,14 +197,14 @@ export async function authenticate(req: RouteRequest): Promise<void> {
   }
 
   let token: string | undefined;
-  let authType: 'bearer' | 'cookie' | undefined;
+  let authType: 'bearer' | 'cookie' | 'oauth' | undefined;
 
   const authHeader = req.headers.authorization;
   if (authHeader && typeof authHeader === 'string') {
     const [scheme, bearerToken] = authHeader.split(' ');
     if (scheme === 'Bearer' && bearerToken) {
       token = bearerToken;
-      authType = 'bearer';
+      authType = bearerToken.startsWith('bsk_at_') ? 'oauth' : 'bearer';
     } else {
       throw new HttpException(401, 'UNAUTHORIZED', 'Invalid authorization format. Expected Bearer <token>');
     }
@@ -207,6 +221,27 @@ export async function authenticate(req: RouteRequest): Promise<void> {
     );
   }
 
+  if (authType === 'oauth') {
+    const verifiedOAuth = await oauthGuardService.verifyAccessToken(token);
+    if (!verifiedOAuth) {
+      throw new HttpException(401, 'UNAUTHORIZED', 'Invalid or expired OAuth access token');
+    }
+    const user = await dbStore.findUserById(verifiedOAuth.userId);
+    if (!user || !user.isActive) {
+      throw new HttpException(401, 'ACCOUNT_DEACTIVATED', 'Account is deactivated or not found');
+    }
+    const membership = await dbStore.getMembership(verifiedOAuth.organizationId, verifiedOAuth.userId);
+    if (!membership) {
+      throw new HttpException(403, 'FORBIDDEN', 'Organization membership is no longer active');
+    }
+    req.context.userId = verifiedOAuth.userId;
+    req.context.organizationId = verifiedOAuth.organizationId;
+    req.context.role = membership.role;
+    req.context.authType = 'oauth';
+    req.context.oauthScopes = verifiedOAuth.scopes;
+    return;
+  }
+
   const payload = verifyJwt(token);
   if (!payload) {
     throw new HttpException(401, 'UNAUTHORIZED', 'Invalid or expired access token');
@@ -216,9 +251,23 @@ export async function authenticate(req: RouteRequest): Promise<void> {
     throw new HttpException(401, 'TOKEN_REVOKED', 'This session has been revoked');
   }
 
+  const user = await dbStore.findUserById(payload.sub);
+  if (!user || !user.isActive) {
+    throw new HttpException(401, 'ACCOUNT_DEACTIVATED', 'Account is deactivated or not found');
+  }
+
+  let effectiveRole = payload.role;
+  if (payload.organizationId) {
+    const membership = await dbStore.getMembership(payload.organizationId, payload.sub);
+    if (!membership) {
+      throw new HttpException(403, 'FORBIDDEN', 'Organization membership is no longer active');
+    }
+    effectiveRole = membership.role;
+  }
+
   req.context.userId = payload.sub;
   req.context.organizationId = payload.organizationId;
-  req.context.role = payload.role;
+  req.context.role = effectiveRole;
   req.context.authType = authType;
   req.context.jti = payload.jti;
 
@@ -246,6 +295,64 @@ export async function authorizeRole(req: RouteRequest, allowedRoles: UserRole[])
       `Action requires one of the following roles: ${allowedRoles.join(', ')}`,
     );
   }
+}
+
+/**
+ * Blocks OAuth third-party access tokens from human/interactive-only administration,
+ * organization switching, key management, and credential provisioning endpoints.
+ */
+export function assertHumanSessionAuth(req: RouteRequest, actionDescription = 'this operation'): void {
+  if (req.context.authType === 'oauth') {
+    throw new HttpException(
+      403,
+      'OAUTH_FORBIDDEN',
+      `OAuth access tokens cannot perform ${actionDescription}; interactive session authentication is required`,
+    );
+  }
+}
+
+/**
+ * Enforces explicit OAuth token scopes when `req.context.authType === 'oauth'`.
+ */
+export function assertOAuthScope(req: RouteRequest, requiredScopes: ApiKeyScope[]): void {
+  if (req.context.authType !== 'oauth') {
+    return;
+  }
+  const granted = req.context.oauthScopes ?? [];
+  const hasScope = requiredScopes.some((scope) => granted.includes(scope));
+  if (!hasScope) {
+    throw new HttpException(
+      403,
+      'INSUFFICIENT_SCOPE',
+      `Forbidden: OAuth token requires at least one of the following scopes: ${requiredScopes.join(', ')}`,
+    );
+  }
+}
+
+/**
+ * Resolves the target organizationId while enforcing strict binding to `req.context.organizationId`
+ * whenever the authenticated token/session is scoped to an organization.
+ */
+export function resolveAuthorizedTenantOrgId(
+  req: RouteRequest,
+  suppliedOrgId?: unknown,
+): string {
+  const requestedOrgId = typeof suppliedOrgId === 'string' ? suppliedOrgId.trim() : '';
+  const contextOrgId = req.context.organizationId;
+
+  if (contextOrgId && requestedOrgId && requestedOrgId !== contextOrgId) {
+    throw new HttpException(
+      403,
+      'CROSS_ORGANIZATION_FORBIDDEN',
+      'Cannot specify an organizationId outside the authenticated organization context',
+    );
+  }
+
+  const resolvedOrgId = requestedOrgId || contextOrgId || '';
+  if (!resolvedOrgId) {
+    throw new HttpException(400, 'VALIDATION_ERROR', 'organizationId is required');
+  }
+  return resolvedOrgId;
 }
 
 export interface AuthenticatedDeviceContext {

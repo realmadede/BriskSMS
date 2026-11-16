@@ -6,15 +6,21 @@ export class MixxAdapter extends BaseProviderAdapter {
   readonly provider = PaymentProvider.MIXX;
 
   canParse(senderAddress: string, body: string): boolean {
+    if (this.isPersonalPhoneSender(senderAddress)) {
+      return false;
+    }
     const address = senderAddress.toUpperCase();
     if (address.includes('MIXX') || address.includes('TIGOPESA') || address.includes('TIGO') || address.includes('YAS')) {
       return true;
     }
-    return /(?:Mixx|Tigo\s*Pesa).*Umepokea/i.test(body);
+    return /(?:Mixx|Tigo\s*Pesa).*(?:Umepokea|You have received)/i.test(body);
   }
 
   parse(body: string, defaultDate: Date = new Date()): ParsedPaymentResult | null {
     const text = this.cleanText(body);
+    if (!this.isIncomingCreditMessage(text)) {
+      return null;
+    }
 
     // Extract Reference / Kumbukumbu namba
     // E.g.: Kumbukumbu namba: 12345678901 or Kumbukumbu: 12345678901 or Ref: ...
@@ -24,8 +30,8 @@ export class MixxAdapter extends BaseProviderAdapter {
     }
     const reference = refMatch[1].toUpperCase();
 
-    // Extract Amount (e.g. Tsh 30,000 or TZS 30,000)
-    const amountMatch = text.match(/(?:Tsh|TZS)\s*([\d,]+(?:\.\d{2})?)/i);
+    // Extract Amount (e.g. Tsh 30,000 or TZS 30,000.50)
+    const amountMatch = text.match(/(?:Tsh|TZS)\s*(\d[\d,]*(?:\.\d{1,2})?)/i);
     if (!amountMatch || !amountMatch[1]) {
       return null;
     }
@@ -62,7 +68,7 @@ export class MixxAdapter extends BaseProviderAdapter {
       senderName,
       recipientAccount: null,
       customerMemo: null,
-      providerTimestamp: defaultDate,
+      providerTimestamp: this.extractTimestamp(text, defaultDate),
       rawText: body,
     };
   }

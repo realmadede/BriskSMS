@@ -43,28 +43,37 @@ class SmsDispatcher(
         dispatch: SmsDispatchEntity,
         dispatchDao: SmsDispatchDao
     ): DispatchOutcome {
-        // 1. Idempotency check: prevent duplicate carrier transmission
-        val existing = dispatchDao.findByIdempotencyKey(dispatch.idempotencyKey)
-        if (existing != null && (existing.status == DispatchState.SUBMITTED.name || existing.status == DispatchState.DELIVERED.name)) {
-            Log.w(TAG, "Idempotency trigger: Message [${dispatch.id}] already submitted. Skipping.")
+        // 1. Idempotency check: prevent duplicate carrier transmission across DISPATCHING/SUBMITTED/DELIVERED/UNKNOWN
+        val terminalOrInFlightStates = setOf(
+            DispatchState.DISPATCHING.name,
+            DispatchState.SUBMITTED.name,
+            DispatchState.DELIVERED.name,
+            DispatchState.UNKNOWN.name
+        )
+        val existingByKey = dispatchDao.findByIdempotencyKey(dispatch.idempotencyKey)
+        val existingByJob = dispatch.jobId?.let { dispatchDao.findByJobId(it) }
+        val existing = existingByJob ?: existingByKey
+        if (existing != null && terminalOrInFlightStates.contains(existing.status)) {
+            Log.w(TAG, "Idempotency trigger: Message [${dispatch.id}] already ${existing.status}. Skipping.")
             return DispatchOutcome.DuplicateIgnored(dispatch.id)
         }
 
         // 2. Carrier Daily Quota & Smart SIM Failover
-        val startOfDay = java.util.Calendar.getInstance().apply {
-            set(java.util.Calendar.HOUR_OF_DAY, 0)
-            set(java.util.Calendar.MINUTE, 0)
-            set(java.util.Calendar.SECOND, 0)
-            set(java.util.Calendar.MILLISECOND, 0)
-        }.timeInMillis
+        val startOfDay = startOfTodayMillis()
 
         var effectiveSlot = dispatch.simSlot
         val sentToday = dispatchDao.countSlotSentSince(effectiveSlot, startOfDay)
 
         if (sentToday >= DEFAULT_SIM_DAILY_CAP) {
+            if (dispatch.jobId != null) {
+                val quotaError = "SIM $effectiveSlot reached daily cap ($sentToday/$DEFAULT_SIM_DAILY_CAP) for leased job [${dispatch.jobId}]."
+                Log.w(TAG, quotaError)
+                dispatchDao.markFailed(dispatch.id, quotaError)
+                return DispatchOutcome.Failed(dispatch.id, quotaError)
+            }
             val altSlot = if (effectiveSlot == 1) 2 else 1
             val altSentToday = dispatchDao.countSlotSentSince(altSlot, startOfDay)
-            val altSubId = simManager.resolveSubscriptionId(altSlot)
+            val altSubId = simManager.resolveExactSubscriptionId(altSlot)
 
             if (altSubId != null && altSentToday < DEFAULT_SIM_DAILY_CAP) {
                 Log.i(TAG, "Carrier limit safeguard: SIM $effectiveSlot reached daily cap ($sentToday/$DEFAULT_SIM_DAILY_CAP). Dynamic failover to SIM $altSlot ($altSentToday sent today).")
@@ -78,8 +87,12 @@ class SmsDispatcher(
             }
         }
 
-        // 3. Resolve target SIM subscription
-        val subId = simManager.resolveSubscriptionId(effectiveSlot)
+        // 3. Resolve target SIM subscription (exact slot for server-leased jobs to avoid SIM mismatch)
+        val subId = if (dispatch.jobId != null) {
+            simManager.resolveExactSubscriptionId(effectiveSlot)
+        } else {
+            simManager.resolveSubscriptionId(effectiveSlot)
+        }
         if (subId == null) {
             val err = "Designated SIM slot $effectiveSlot is absent or inactive"
             Log.e(TAG, err)
@@ -88,8 +101,18 @@ class SmsDispatcher(
         }
 
         return try {
+            if (dispatch.messageText.isBlank()) {
+                val err = "Message text must not be blank"
+                dispatchDao.markFailed(dispatch.id, err)
+                return DispatchOutcome.Failed(dispatch.id, err)
+            }
             val smsManager = getSmsManagerForSubId(subId)
             val parts = smsManager.divideMessage(dispatch.messageText)
+            if (parts.isEmpty()) {
+                val err = "Message divided into zero SMS segments"
+                dispatchDao.markFailed(dispatch.id, err)
+                return DispatchOutcome.Failed(dispatch.id, err)
+            }
 
             val sentIntents = ArrayList<PendingIntent>()
             val deliveryIntents = ArrayList<PendingIntent>()
@@ -142,8 +165,8 @@ class SmsDispatcher(
                 )
             }
 
-            dispatchDao.updateStatus(dispatch.id, DispatchState.SUBMITTED.name, "cell_${System.currentTimeMillis()}")
-            Log.i(TAG, "Successfully submitted SMS [${dispatch.id}] to SIM slot $effectiveSlot (${parts.size} parts)")
+            // Do NOT fabricate a provider ID or mark SUBMITTED before ACTION_SMS_SENT confirms radio acceptance.
+            Log.i(TAG, "Handed SMS [${dispatch.id}] to SmsManager on SIM slot $effectiveSlot (${parts.size} parts); awaiting ACTION_SMS_SENT.")
             DispatchOutcome.Submitted(dispatch.id, parts.size, effectiveSlot)
         } catch (e: SecurityException) {
             val err = "Missing SEND_SMS permission: ${e.message}"
@@ -156,6 +179,15 @@ class SmsDispatcher(
             dispatchDao.markFailed(dispatch.id, err)
             DispatchOutcome.Failed(dispatch.id, err)
         }
+    }
+
+    fun startOfTodayMillis(): Long {
+        return java.util.Calendar.getInstance().apply {
+            set(java.util.Calendar.HOUR_OF_DAY, 0)
+            set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }.timeInMillis
     }
 
     private fun getSmsManagerForSubId(subId: Int): SmsManager {

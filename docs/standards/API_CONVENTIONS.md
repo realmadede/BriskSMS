@@ -1,8 +1,9 @@
 # API Conventions & Design Guidelines
 
-**Protocol:** RESTful over HTTPS (JSON)  
-**Base URL:** `https://api.brisksms.co.tz/v1`  
-**Authentication:** Bearer Token (JWT) / API Key (`bsk_live_...` or `bsk_test_...`)  
+**Last Synced:** 2026-11-16  
+**Protocol:** RESTful over HTTPS (JSON, 1 MB Router Payload Cap)  
+**Base URL:** `https://api.brisksms.com/v1` (or tenant staging base URL)  
+**Authentication:** HttpOnly Session Cookie + Double-Submit CSRF (`bsk_session`/`bsk_csrf`), User Bearer JWT, Scoped Developer API Key (`bsk_live_...`), OAuth 2.0 Bearer Token (`bsk_at_...`), or Hardware-Bound Device Token (`bsk_dev_...`)  
 
 ---
 
@@ -87,14 +88,16 @@ All API responses follow a consistent envelope structure:
 
 | HTTP Status | Error Code | Description |
 |---|---|---|
-| `400 Bad Request` | `VALIDATION_FAILED` | Request payload failed schema validation (Zod / Class-Validator). |
-| `401 Unauthorized` | `UNAUTHENTICATED` | Missing, expired, or invalid JWT / API key. |
-| `403 Forbidden` | `PERMISSION_DENIED` | Authenticated caller lacks required role or organization scope. |
-| `404 Not Found` | `RESOURCE_NOT_FOUND` | Target resource does not exist in the caller's organization. |
-| `409 Conflict` | `DUPLICATE_RESOURCE` | Resource with identical unique key/reference already exists. |
-| `422 Unprocessable` | `FINANCIAL_RULE_VIOLATION` | Transaction fails domain rule (e.g., trying to settle already paid invoice). |
-| `429 Too Many Requests` | `RATE_LIMIT_EXCEEDED` | Request quota exceeded for IP or API key. Includes `Retry-After` header. |
-| `500 Server Error` | `INTERNAL_ERROR` | Unexpected server failure. Tracked in Sentry with `requestId`. |
+| `400 Bad Request` | `VALIDATION_ERROR` / `INVALID_PAYLOAD` | Request payload failed validation or schema boundaries. |
+| `401 Unauthorized` | `UNAUTHORIZED` / `TOKEN_REVOKED` / `INVALID_TOKEN` | Missing, expired, revoked, or invalid JWT, session cookie, OAuth token, or API key. |
+| `403 Forbidden` | `FORBIDDEN` / `CROSS_ORGANIZATION_FORBIDDEN` / `CSRF_*` | Missing RBAC role, cross-tenant attempt, revoked device (`DEVICE_REVOKED`), CSRF mismatch, or insufficient scope (`INSUFFICIENT_SCOPE`). |
+| `402 Payment Required` | `PAYMENT_VERIFICATION_REQUIRED` | Paid subscription checkout submitted without verified payment evidence. |
+| `404 Not Found` | `NOT_FOUND` | Target route or resource does not exist in caller's organization. |
+| `409 Conflict` | `DUPLICATE_PAYMENT` / `IDEMPOTENCY_*` | Duplicate transaction reference/hash, claim collision, key replacement, or idempotency parameter mismatch. |
+| `422 Unprocessable` | `UNSUPPORTED_STK_PROVIDER` / `AMOUNT_MISMATCH` | Transaction violates domain, currency, or carrier availability rules. |
+| `429 Too Many Requests` | `RATE_LIMIT_EXCEEDED` | Request quota exceeded on rate-limited endpoints. |
+| `500 Server Error` | `INTERNAL_ERROR` | Unexpected server failure (internal stack details suppressed in `NODE_ENV=production`). |
+| `503 Service Unavailable` | `DATABASE_UNAVAILABLE` / `REDIS_UNAVAILABLE` / `PROVIDER_DISPATCH_DISABLED` | Required dependency unavailable or carrier transport fail-closed. |
 
 ---
 

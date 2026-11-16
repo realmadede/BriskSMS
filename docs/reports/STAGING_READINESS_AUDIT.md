@@ -157,24 +157,27 @@ Ambiguous Statuses (UNCERTAIN):
 
 ## 5. Reverse Proxy, Client IP Extraction, CSP & Redis Transport
 
-### Client IP Extraction & Rate Limiting Vulnerability
-- **Code Implementation:** In `apps/api/src/modules/auth/auth.controller.ts:21-27`:
+### Client IP Extraction & Rate Limiting Trust Boundary (`TRUST_PROXY`)
+- **Code Implementation (`apps/api/src/modules/auth/auth.controller.ts:21-34`):**
   ```typescript
   function extractClientIp(req: RouteRequest): string {
-    const forwarded = req.headers['x-forwarded-for'];
-    if (typeof forwarded === 'string') {
-      return forwarded.split(',')[0]?.trim() || '';
+    const remoteIp = req.rawReq?.socket?.remoteAddress || '';
+    const trustProxy = process.env.TRUST_PROXY === 'true';
+    const isProdOrStaging = process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'staging';
+
+    if (trustProxy || (!isProdOrStaging && !remoteIp)) {
+      const forwarded = req.headers['x-forwarded-for'];
+      if (typeof forwarded === 'string') {
+        const first = forwarded.split(',')[0]?.trim();
+        if (first) return first;
+      }
     }
-    return req.rawReq?.socket?.remoteAddress || '';
+    return remoteIp || 'unknown';
   }
   ```
-- **Vulnerability Analysis:**
-  1. `X-Forwarded-For` is **trusted unconditionally** without checking if the incoming socket connection (`remoteAddress`) is an authorized reverse proxy.
-  2. The code selects the **first address** (`split(',')[0]`), which is the client-provided header value.
-  3. No trusted proxy CIDR configuration exists in the application.
-  4. **Spoofing Impact:** If an external client connects directly to the API (or through a reverse proxy configured with `proxy_add_x_forwarded_for`), the client can prepend arbitrary IP addresses (`X-Forwarded-For: 1.2.3.4, real_ip`). The backend will extract `1.2.3.4`, **completely bypassing IP rate limits** on `/v1/auth/resend-verification` and Google login.
+- **Hardening Status (`VERIFIED IN CODE`):** In production/staging, untrusted `X-Forwarded-For` headers are **ignored** unless `TRUST_PROXY=true` is explicitly configured.
 - **Mandatory Staging Requirement (`REQUIRES EXTERNAL CONFIGURATION`):**  
-  The reverse proxy (Cloudflare/Nginx) **must sanitize and overwrite** `X-Forwarded-For` with `$remote_addr` (`proxy_set_header X-Forwarded-For $remote_addr;`). The API port (3000) must never be directly exposed to the public internet.
+  When enabling `TRUST_PROXY=true`, the edge reverse proxy (Cloudflare/Nginx) **must sanitize and overwrite** `X-Forwarded-For` with `$remote_addr`, and direct ingress to API port `3000` must be firewalled.
 
 ### Content Security Policy (CSP) Audit
 - **Application Status:** `NOT IMPLEMENTED` in code. Neither `apps/api` nor `apps/web/server.ts` emits a `Content-Security-Policy` header.
@@ -201,7 +204,7 @@ Ambiguous Statuses (UNCERTAIN):
 
 ## 6. Authoritative Database Migrations
 
-Inspection of `packages/db/prisma/migrations/` and PostgreSQL schema history confirms **8 sequential migrations**:
+Inspection of `packages/db/prisma/migrations/` and PostgreSQL schema history confirms **15 sequential migrations**:
 
 ```text
 1. 20261107000000_init_foundation
@@ -222,9 +225,23 @@ Inspection of `packages/db/prisma/migrations/` and PostgreSQL schema history con
    - payment_reference_claims table with CONSTRAINT payment_reference_claims_unique UNIQUE (provider, provider_reference).
    - Partial unique index stk_push_transactions_provider_ref_success_unique on stk_push_transactions(provider, provider_reference) WHERE status = 'SUCCESS' AND provider_reference IS NOT NULL.
    - Backfills existing claims from normalized_payments and successful stk_push_transactions.
+9. 20261112000000_unified_payment_reference_claims
+   - Unified global claim acquisition (`payment_reference_claims`, collision quarantine table `payment_reference_claim_collisions`).
+10. 20261114000000_harden_payment_reference_claims
+   - Normalized provider-reference uniqueness and claim hardening constraints.
+11. 20261114010000_stk_dispatch_integrity_and_idempotency
+   - Added `INITIATING`, `DISPATCH_UNCERTAIN`, `UNSUPPORTED` statuses, org-scoped `idempotency_key`, and `request_fingerprint`.
+12. 20261114020000_device_pairing_proof_of_possession
+   - Added `device_pairing_challenges` and `devices.public_key_fingerprint` uniqueness constraints.
+13. 20261115000000_durable_device_commands
+   - Added `device_commands` PostgreSQL-backed fleet command queue with lease expiry and idempotency keys.
+14. 20261116000000_android_outbound_sms_jobs
+   - Added `outbound_sms_jobs` table and `OutboundSmsJobStatus` enum for Model B Android SMSGate relay job acquisition and dispatch tracking.
+15. 20261116010000_encrypt_webhook_endpoint_secrets
+   - Widened `webhook_endpoints.secret` to `TEXT` so AES-256-GCM encrypted webhook HMAC secrets fit without truncation.
 ```
 
-- **Applied Status in Database:** Verified via `bun run db:status` — all 8 migrations are applied and active in the local PostgreSQL database.
+- **Applied Status in Database:** Verified via `bun run db:status` — all **15 migrations** are applied and active in the local PostgreSQL database *(pre-existing dev DB `_prisma_migrations` row `20261112000000` has checksum `81d7b59c...` vs file `8c01b9ce...`; fresh DBs match on all 15)*.
 - **Migration Execution Duration:** < 1.8 seconds on fresh PostgreSQL 16 cluster.
 
 ---
@@ -258,13 +275,16 @@ To eliminate financial settlement forgery and unauthenticated state mutation, Br
 
 | Provider | Dispatch Adapter | Callback Parser | Verifier Status | External Approval | Staging Requirement |
 |---|---|---|---|---|---|
-| **Vodacom M-Pesa** | Mock Dispatch | Real Daraja Parser | `DisabledProviderCallbackVerifier` (403) | None | Configure Daraja OAuth & Webhook Key |
-| **Mixx by Yas (Tigo)** | Mock Dispatch | Real Tigo Parser | `DisabledProviderCallbackVerifier` (403) | None | Configure Tigo B2B Webhook Key |
-| **Airtel Money** | Mock Dispatch | Real Airtel Parser | `DisabledProviderCallbackVerifier` (403) | None | Configure Airtel OpenAPI Secret |
-| **HaloPesa** | Mock Dispatch | Real HaloPesa Parser | `DisabledProviderCallbackVerifier` (403) | None | Configure HaloPesa B2B Credentials |
+| **Vodacom M-Pesa** | Fail-Closed (`UNCONFIGURED` / `503`) | Real Daraja + Normalized Parser | `DisabledProviderCallbackVerifier` (403) | None | Configure official Vodacom OpenAPI credentials, transport client & webhook verifier |
+| **Mixx by Yas (Tigo)** | Fail-Closed (`UNCONFIGURED` / `503`) | Generic Normalized Parser | `DisabledProviderCallbackVerifier` (403) | None | Configure official Mixx B2B STK transport client & webhook verifier |
+| **Airtel Money** | Fail-Closed (`UNCONFIGURED` / `503`) | Generic Normalized Parser | `DisabledProviderCallbackVerifier` (403) | None | Configure official Airtel OpenAPI transport client & webhook verifier |
+| **HaloPesa** | Fail-Closed (`UNCONFIGURED` / `503`) | Generic Normalized Parser | `DisabledProviderCallbackVerifier` (403) | None | Configure official HaloPesa B2B transport client & webhook verifier |
+| **TTCL Pesa / Bank Rails** | Fail-Closed (`UNSUPPORTED` / `422`) | Unsupported | `DisabledProviderCallbackVerifier` (403) | None | Bank rails reconcile via Companion / Direct Bank / Manual; TTCL STK spec unverified |
+
+See also [`docs/architecture/CARRIER_STK_INTEGRATION_READINESS.md`](file:///home/madede/BAGOMWA/PROJECTS/BriskSMS/docs/architecture/CARRIER_STK_INTEGRATION_READINESS.md) for the complete carrier contract boundary and missing external prerequisites.
 
 ### Conditions Required Before Enabling Live Staging Settlement
-1. Real carrier OpenAPI client implementations replacing simulated mock adapters.
+1. Real carrier OpenAPI client implementations configured behind the fail-closed `StkAdapterRegistry` (mock STK adapters and simulated carrier responses have already been removed).
 2. Official provider webhook signing secrets or mTLS certificates loaded into validated environment schemas.
 3. Provider-specific verifiers registered with `stkPushService.verifierRegistry`.
 4. Staging public IP address with TLS 1.3 certificate configured for telco webhook delivery.
@@ -273,13 +293,12 @@ To eliminate financial settlement forgery and unauthenticated state mutation, Br
 
 ## 7. Automated Test Evidence Summary
 
-### Fresh Execution on Current HEAD
-- **Execution Date:** 2026-11-11
-- **Command:** `npm test` (`bun test packages/shared/test/ packages/parser-engine/test/ packages/ui/test/ apps/api/test/ packages/zapier-app/test/`)
-- **Services:** Local PostgreSQL 16 (port 54322) and Redis 7 (port 6379)
-- **Results:** **396 passed, 0 failed, 0 skipped across 29 test files** (231.95s execution time).
-- **Typecheck:** `tsc -b` passed with 0 compiler errors.
-- **Build:** `bun run build` cleanly bundled all 6 workspace packages into `dist/`.
+### Fresh Execution on Current Working Tree (Post-Hard Audit)
+- **Execution Date:** 2026-11-15
+- **Command:** `bun run test` (`bun test packages/shared/test/ packages/parser-engine/test/ packages/ui/test/ packages/db/test/ apps/api/test/ apps/worker/test/ apps/web/test/ packages/zapier-app/test/`)
+- **Services:** Local PostgreSQL 16 (port 54322) and ephemeral Redis 7 (port 6379)
+- **Results:** **532 passed, 0 failed across 39 test files**, plus **11 Android JUnit test classes (`52` `@Test` methods, 0 failed)** via `./gradlew testDebugUnitTest compileDebugKotlin assembleDebug --offline --no-daemon` (Gradle `8.14.3` + Temurin JDK `17`).
+- **Typecheck & Build:** `tsc -b` (`bun run typecheck`) and `bun run build` exit `0` across all workspace packages and workers; `./gradlew assembleDebug` assembled `app-debug.apk`.
 
 ### Historical Comparison Matrix
 
@@ -321,7 +340,7 @@ flowchart TD
         end
 
         subgraph Data Layer
-            PG[("PostgreSQL 16+<br/>8 Migrations Applied (:5432)")]
+            PG[("PostgreSQL 16+<br/>15 Migrations Applied (:5432)")]
             Redis[("Redis 7+<br/>Atomic Lua Broker (:6379)<br/>[No TLS: VPC Isolated]")]
         end
     end
@@ -348,12 +367,12 @@ flowchart TD
 Before BriskSMS staging deployment can be executed, the following gates must be satisfied:
 
 1. [x] **Monorepo Build & Typecheck:** 0 compiler errors across all packages (`VERIFIED IN CODE`).
-2. [x] **Fresh Automated Test Suite:** 363/363 tests passing on HEAD (`VERIFIED BY AUTOMATED TEST`).
-3. [ ] **Remote CI Push Synchronization:** Push local commits to `origin/main` and verify GitHub Actions green (`REQUIRES EXTERNAL CONFIGURATION`).
-4. [ ] **Reverse Proxy Header Sanitization:** Ensure proxy overwrites `X-Forwarded-For` with `$remote_addr` (`REQUIRES EXTERNAL CONFIGURATION`).
+2. [x] **Fresh Automated Test Suite:** 532/532 workspace tests (39 files) + 52/52 Android unit `@Test`s (11 suites) passing (`VERIFIED BY AUTOMATED TEST`).
+3. [ ] **Remote CI Push Synchronization:** Commit & push working tree to `origin/main` and verify GitHub Actions green (`PENDING AUTHORIZATION`).
+4. [ ] **Reverse Proxy Header Sanitization:** Ensure proxy overwrites `X-Forwarded-For` with `$remote_addr` and set `TRUST_PROXY=true` (`REQUIRES EXTERNAL CONFIGURATION`).
 5. [ ] **Google Cloud Web Client ID:** Register authorized origin `https://staging-console.brisksms.com` (`REQUIRES EXTERNAL CONFIGURATION`).
 6. [ ] **Resend DNS Setup:** Configure DKIM, SPF, and DMARC for `staging.brisksms.com` (`REQUIRES EXTERNAL CONFIGURATION`).
 7. [ ] **Private VPC Redis:** Ensure Redis runs within private network without public exposure (`REQUIRES EXTERNAL CONFIGURATION`).
-8. [ ] **PostgreSQL 16 Deployment:** Apply all 7 migrations to staging database (`REQUIRES EXTERNAL CONFIGURATION`).
+8. [ ] **PostgreSQL 16 Deployment:** Apply all 15 migrations to staging database (`REQUIRES EXTERNAL CONFIGURATION`).
 9. [ ] **Android Companion Test:** Install debug APK and pair via QR Keystore handshake (`REQUIRES LIVE STAGING TEST`).
 10. [ ] **Carrier STK Push & SMSGate Live Test:** Validate telco push and verify SMSGate 429 rate-limiting behavior (`REQUIRES LIVE STAGING TEST`).

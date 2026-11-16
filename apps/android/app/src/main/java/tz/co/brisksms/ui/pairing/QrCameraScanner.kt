@@ -59,6 +59,23 @@ fun QrCameraScanner(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val isScanned = remember { AtomicBoolean(false) }
+    val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
+    val barcodeScanner = remember {
+        BarcodeScanning.getClient(
+            BarcodeScannerOptions.Builder()
+                .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+                .build()
+        )
+    }
+    var boundCameraProvider by remember { mutableStateOf<ProcessCameraProvider?>(null) }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            runCatching { boundCameraProvider?.unbindAll() }
+            runCatching { barcodeScanner.close() }
+            runCatching { cameraExecutor.shutdown() }
+        }
+    }
 
     Box(
         modifier = modifier
@@ -76,15 +93,10 @@ fun QrCameraScanner(
                 }
 
                 val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
-                val cameraExecutor = Executors.newSingleThreadExecutor()
-
-                val scannerOptions = BarcodeScannerOptions.Builder()
-                    .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
-                    .build()
-                val barcodeScanner = BarcodeScanning.getClient(scannerOptions)
 
                 cameraProviderFuture.addListener({
                     val cameraProvider = cameraProviderFuture.get()
+                    boundCameraProvider = cameraProvider
 
                     val preview = Preview.Builder().build().also {
                         it.setSurfaceProvider(previewView.surfaceProvider)

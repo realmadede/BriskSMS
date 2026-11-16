@@ -127,6 +127,8 @@ export class BullQueue<T extends BullJobData = BullJobData> {
     const jobKey = this.key(`job:${jobId}`);
     const waitKey = this.key('wait');
     const delayedKey = this.key('delayed');
+    const dlqKey = this.key('dlq');
+    const failedKey = this.key('failed');
     const initialStatus: BullJobStatus = delay > 0 ? 'delayed' : 'waiting';
 
     // Atomic Lua script for idempotent job insertion
@@ -134,10 +136,14 @@ export class BullQueue<T extends BullJobData = BullJobData> {
       local jobKey = KEYS[1]
       local waitKey = KEYS[2]
       local delayedKey = KEYS[3]
+      local dlqKey = KEYS[4]
+      local failedKey = KEYS[5]
       local existingStatus = redis.call('HGET', jobKey, 'status')
       if existingStatus and existingStatus ~= 'dead-letter' and existingStatus ~= 'failed' then
         return 0
       end
+      redis.call('SREM', dlqKey, ARGV[1])
+      redis.call('SREM', failedKey, ARGV[1])
       redis.call('HSET', jobKey,
         'id', ARGV[1],
         'name', ARGV[2],
@@ -159,7 +165,7 @@ export class BullQueue<T extends BullJobData = BullJobData> {
 
     const inserted = await this.redis.eval<number>(
       luaAdd,
-      [jobKey, waitKey, delayedKey],
+      [jobKey, waitKey, delayedKey, dlqKey, failedKey],
       [
         jobId,
         jobName,

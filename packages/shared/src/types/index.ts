@@ -7,4 +7,5 @@ export * from './messaging.types.js';
 export * from './ingestion.types.js';
 export * from './developer.types.js';
 export * from './stk.types.js';
+export * from './claim.types.js';
 

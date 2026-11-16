@@ -4,15 +4,117 @@
  */
 
 import { createHash } from 'node:crypto';
+import { ApiKeyScope, OutboundSmsJobStatus, UserRole } from '@brisksms/shared';
 import { Router, RouteRequest, ApiResponse, HttpException } from '../../core/http.js';
 import { sql } from '@brisksms/db';
 import { SmsGateProvider } from './providers/smsgate.provider.js';
 import { smsGateKeyService } from './services/smsgate-key.service.js';
 import { messagingService } from './messaging.service.js';
-import { authenticate } from '../../core/guards.js';
+import { outboundSmsJobService } from './outbound-sms-job.service.js';
+import {
+  authenticate,
+  authenticateDevice,
+  assertOAuthScope,
+  resolveAuthorizedTenantOrgId,
+} from '../../core/guards.js';
+import { ApiKeyService } from '../developer/api-key.service.js';
 import { dbStore } from '../../core/store.js';
 
 const smsgateProvider = new SmsGateProvider();
+const apiKeyService = new ApiKeyService();
+
+async function resolveMessagingAuthContext(
+  req: RouteRequest,
+  options: {
+    suppliedOrgId?: unknown;
+    requiredApiKeyScopes: ApiKeyScope[];
+    allowedUserRoles?: UserRole[];
+  },
+): Promise<{ organizationId: string }> {
+  const authHeader = (req.headers.authorization || (req.headers as any).Authorization || '') as string;
+  const apiKeyHeader = (req.headers['x-api-key'] || (req.headers as any)['X-API-Key'] || '') as string;
+  const requestedOrgId =
+    typeof options.suppliedOrgId === 'string' && options.suppliedOrgId.trim()
+      ? options.suppliedOrgId.trim()
+      : undefined;
+
+  let rawKey: string | undefined;
+  if (authHeader.startsWith('Bearer bsk_live_')) {
+    rawKey = authHeader.replace('Bearer ', '').trim();
+  } else if (apiKeyHeader.startsWith('bsk_live_')) {
+    rawKey = apiKeyHeader.trim();
+  }
+
+  if (rawKey) {
+    const keyRecord = await apiKeyService.validateApiKey(rawKey);
+    if (!keyRecord) {
+      throw new HttpException(401, 'INVALID_API_KEY', 'Unauthorized: Invalid or revoked API key');
+    }
+    if (!options.requiredApiKeyScopes.some((s) => keyRecord.scopes.includes(s))) {
+      throw new HttpException(403, 'INSUFFICIENT_SCOPE', 'Forbidden: API key lacks required messaging scope');
+    }
+    if (requestedOrgId && requestedOrgId !== keyRecord.organizationId) {
+      throw new HttpException(
+        403,
+        'CROSS_ORGANIZATION_FORBIDDEN',
+        'Requested organizationId does not match authenticated API key organization',
+      );
+    }
+    return { organizationId: keyRecord.organizationId };
+  }
+
+  await authenticate(req);
+  assertOAuthScope(req, options.requiredApiKeyScopes);
+  const userId = req.context.userId!;
+  const contextOrgId = req.context.organizationId;
+  if (contextOrgId && requestedOrgId && requestedOrgId !== contextOrgId) {
+    throw new HttpException(
+      403,
+      'CROSS_ORGANIZATION_FORBIDDEN',
+      'Requested organizationId does not match authenticated organization context',
+    );
+  }
+
+  const orgId = contextOrgId || requestedOrgId;
+  if (!orgId) {
+    throw new HttpException(400, 'VALIDATION_ERROR', 'organizationId is required');
+  }
+
+  const membership = await dbStore.getMembership(orgId, userId);
+  if (!membership) {
+    throw new HttpException(403, 'FORBIDDEN', 'You are not a member of this organization');
+  }
+  if (options.allowedUserRoles && !options.allowedUserRoles.includes(membership.role)) {
+    throw new HttpException(
+      403,
+      'INSUFFICIENT_PERMISSIONS',
+      `Action requires one of the following roles: ${options.allowedUserRoles.join(', ')}`,
+    );
+  }
+
+  return { organizationId: orgId };
+}
+
+function extractMessagingIdempotencyKey(req: RouteRequest, body: Record<string, unknown>): string | undefined {
+  const rawHeader = req.headers['idempotency-key'] ?? req.headers['Idempotency-Key'];
+  const headerIdem = typeof rawHeader === 'string' ? rawHeader.trim() : undefined;
+  const bodyIdem = typeof body.idempotencyKey === 'string' ? body.idempotencyKey.trim() : undefined;
+
+  if (rawHeader !== undefined && !headerIdem) {
+    throw new HttpException(400, 'VALIDATION_ERROR', 'Idempotency-Key header cannot be blank');
+  }
+  if (body.idempotencyKey !== undefined && (typeof body.idempotencyKey !== 'string' || !bodyIdem)) {
+    throw new HttpException(400, 'VALIDATION_ERROR', 'idempotencyKey must be a non-empty string when provided');
+  }
+  if (headerIdem && bodyIdem && headerIdem !== bodyIdem) {
+    throw new HttpException(
+      400,
+      'VALIDATION_ERROR',
+      'Conflicting Idempotency-Key header and body.idempotencyKey values',
+    );
+  }
+  return headerIdem || bodyIdem;
+}
 
 export function registerMessagingRoutes(router: Router): void {
   /**
@@ -203,11 +305,9 @@ export function registerMessagingRoutes(router: Router): void {
   // 1. Get Prepaid SMS Credit Balance
   router.get('/v1/messaging/balance', async (req: RouteRequest): Promise<ApiResponse> => {
     await authenticate(req);
+    assertOAuthScope(req, [ApiKeyScope.SMS_READ, ApiKeyScope.SMS_SEND]);
     const userId = req.context.userId!;
-    const orgId = req.query.organizationId || req.context.organizationId;
-    if (!orgId) {
-      throw new HttpException(400, 'VALIDATION_ERROR', 'organizationId is required');
-    }
+    const orgId = resolveAuthorizedTenantOrgId(req, req.query.organizationId);
     const membership = await dbStore.getMembership(orgId, userId);
     if (!membership) {
       throw new HttpException(403, 'FORBIDDEN', 'You are not a member of this organization');
@@ -222,26 +322,47 @@ export function registerMessagingRoutes(router: Router): void {
 
   // 2. Dispatch Single SMS Message
   router.post('/v1/messaging/send', async (req: RouteRequest): Promise<ApiResponse> => {
-    await authenticate(req);
-    const userId = req.context.userId!;
-    const body = req.body as Record<string, any>;
-    const orgId = (body.organizationId as string) || req.context.organizationId;
-    if (!orgId) {
-      throw new HttpException(400, 'VALIDATION_ERROR', 'organizationId is required');
-    }
-    const membership = await dbStore.getMembership(orgId, userId);
-    if (!membership) {
-      throw new HttpException(403, 'FORBIDDEN', 'You are not a member of this organization');
-    }
+    const body = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, any>;
+    const { organizationId: orgId } = await resolveMessagingAuthContext(req, {
+      suppliedOrgId: body.organizationId,
+      requiredApiKeyScopes: [ApiKeyScope.SMS_SEND],
+    });
 
     if (!body.to || !body.content) {
       throw new HttpException(400, 'VALIDATION_ERROR', 'to (recipient phone) and content (message text) are required');
+    }
+
+    const idempotencyKey = extractMessagingIdempotencyKey(req, body);
+
+    if (body.deviceId || body.deliveryChannel === 'ANDROID_COMPANION') {
+      const enqueued = await outboundSmsJobService.enqueueJob(orgId, {
+        to: String(body.to),
+        content: String(body.content),
+        simSlot: body.simSlot !== undefined ? Number(body.simSlot) : undefined,
+        deviceId: body.deviceId ? String(body.deviceId) : undefined,
+        isPromotional: Boolean(body.isPromotional),
+        idempotencyKey,
+        ttlSeconds: body.ttlSeconds !== undefined ? Number(body.ttlSeconds) : undefined,
+        maxAttempts: body.maxAttempts !== undefined ? Number(body.maxAttempts) : undefined,
+      });
+
+      return {
+        success: true,
+        statusCode: 201,
+        data: {
+          ...enqueued.message,
+          outboundJobId: enqueued.job.id,
+          outboundJobStatus: enqueued.job.status,
+          idempotentReplay: enqueued.idempotentReplay,
+        },
+      };
     }
 
     const messageRecord = await messagingService.sendSingleMessage(orgId, {
       to: String(body.to),
       content: String(body.content),
       simSlot: body.simSlot ? Number(body.simSlot) : 1,
+      idempotencyKey,
     });
 
     return {
@@ -251,15 +372,174 @@ export function registerMessagingRoutes(router: Router): void {
     };
   });
 
+  // 2a. Enqueue Durable Android Outbound SMSGate Job
+  router.post('/v1/messaging/device-jobs', async (req: RouteRequest): Promise<ApiResponse> => {
+    const body = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, any>;
+    const { organizationId } = await resolveMessagingAuthContext(req, {
+      suppliedOrgId: body.organizationId,
+      requiredApiKeyScopes: [ApiKeyScope.SMS_SEND],
+      allowedUserRoles: [UserRole.OWNER, UserRole.ADMIN, UserRole.DEVELOPER],
+    });
+    const idempotencyKey = extractMessagingIdempotencyKey(req, body);
+
+    if (!body.to || !body.content) {
+      throw new HttpException(400, 'VALIDATION_ERROR', 'to and content are required');
+    }
+
+    const result = await outboundSmsJobService.enqueueJob(organizationId, {
+      to: String(body.to),
+      content: String(body.content),
+      simSlot: body.simSlot !== undefined ? Number(body.simSlot) : undefined,
+      deviceId: body.deviceId ? String(body.deviceId) : undefined,
+      isPromotional: Boolean(body.isPromotional),
+      campaignId: body.campaignId ? String(body.campaignId) : undefined,
+      idempotencyKey,
+      ttlSeconds: body.ttlSeconds !== undefined ? Number(body.ttlSeconds) : undefined,
+      maxAttempts: body.maxAttempts !== undefined ? Number(body.maxAttempts) : undefined,
+    });
+
+    return {
+      success: true,
+      statusCode: result.idempotentReplay ? 200 : 201,
+      data: result,
+    };
+  });
+
+  // 2b. Android Device: Acquire Leased Outbound SMS Jobs (must be registered before :jobId param routes)
+  router.post('/v1/messaging/device-jobs/acquire', async (req: RouteRequest): Promise<ApiResponse> => {
+    const deviceAuth = await authenticateDevice(req);
+    const body = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, any>;
+
+    const result = await outboundSmsJobService.acquireJobsForDevice(
+      deviceAuth.deviceId,
+      deviceAuth.organizationId,
+      {
+        limit: body.limit !== undefined ? Number(body.limit) : undefined,
+        leaseSeconds: body.leaseSeconds !== undefined ? Number(body.leaseSeconds) : undefined,
+        availableSimSlots: Array.isArray(body.availableSimSlots)
+          ? body.availableSimSlots.map((v: any) => Number(v))
+          : undefined,
+      },
+    );
+
+    return {
+      success: true,
+      data: result,
+    };
+  });
+
+  // 2c. Android Device: Record Dispatch Intent Before Invoking SmsManager
+  router.post('/v1/messaging/device-jobs/:jobId/dispatching', async (req: RouteRequest): Promise<ApiResponse> => {
+    const deviceAuth = await authenticateDevice(req);
+    const body = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, any>;
+    const jobId = req.params.jobId || '';
+
+    const result = await outboundSmsJobService.markDispatching(
+      deviceAuth.deviceId,
+      deviceAuth.organizationId,
+      jobId,
+      {
+        leaseToken: typeof body.leaseToken === 'string' ? body.leaseToken : '',
+        simSlot: body.simSlot !== undefined ? Number(body.simSlot) : undefined,
+      },
+    );
+
+    return {
+      success: true,
+      data: result,
+    };
+  });
+
+  // 2d. Android Device: Report Cellular Dispatch Outcome
+  router.post('/v1/messaging/device-jobs/:jobId/result', async (req: RouteRequest): Promise<ApiResponse> => {
+    const deviceAuth = await authenticateDevice(req);
+    const body = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, any>;
+    const jobId = req.params.jobId || '';
+
+    const result = await outboundSmsJobService.reportJobResult(
+      deviceAuth.deviceId,
+      deviceAuth.organizationId,
+      jobId,
+      {
+        leaseToken: typeof body.leaseToken === 'string' ? body.leaseToken : '',
+        outcome: body.outcome,
+        simSlot: body.simSlot !== undefined ? Number(body.simSlot) : undefined,
+        partsCount: body.partsCount !== undefined ? Number(body.partsCount) : undefined,
+        radioResultCode: body.radioResultCode !== undefined ? Number(body.radioResultCode) : undefined,
+        gatewayReference: typeof body.gatewayReference === 'string' ? body.gatewayReference : undefined,
+        errorMessage: typeof body.errorMessage === 'string' ? body.errorMessage : undefined,
+        failureCode: typeof body.failureCode === 'string' ? body.failureCode : undefined,
+        preRadioFailure: Boolean(body.preRadioFailure),
+        carrierTimestamp: typeof body.carrierTimestamp === 'string' ? body.carrierTimestamp : undefined,
+      },
+    );
+
+    return {
+      success: true,
+      data: result,
+    };
+  });
+
+  // 2e. Organization: List & Inspect Outbound SMS Jobs
+  router.get('/v1/messaging/device-jobs', async (req: RouteRequest): Promise<ApiResponse> => {
+    const { organizationId } = await resolveMessagingAuthContext(req, {
+      suppliedOrgId: req.query.organizationId,
+      requiredApiKeyScopes: [ApiKeyScope.SMS_SEND, ApiKeyScope.SMS_READ],
+    });
+    const statusParam = typeof req.query.status === 'string' ? (req.query.status as OutboundSmsJobStatus) : undefined;
+    const deviceIdParam = typeof req.query.deviceId === 'string' ? req.query.deviceId : undefined;
+    const limitParam = req.query.limit ? Number(req.query.limit) : undefined;
+
+    const jobs = await outboundSmsJobService.listJobs(organizationId, {
+      status: statusParam,
+      deviceId: deviceIdParam,
+      limit: limitParam,
+    });
+
+    return {
+      success: true,
+      data: { jobs },
+    };
+  });
+
+  router.get('/v1/messaging/device-jobs/:jobId', async (req: RouteRequest): Promise<ApiResponse> => {
+    const { organizationId } = await resolveMessagingAuthContext(req, {
+      suppliedOrgId: req.query.organizationId,
+      requiredApiKeyScopes: [ApiKeyScope.SMS_SEND, ApiKeyScope.SMS_READ],
+    });
+    const job = await outboundSmsJobService.getJobById(organizationId, req.params.jobId || '');
+    return {
+      success: true,
+      data: { job },
+    };
+  });
+
+  // 2f. Organization: Cancel Un-dispatched Outbound SMS Job
+  router.post('/v1/messaging/device-jobs/:jobId/cancel', async (req: RouteRequest): Promise<ApiResponse> => {
+    const body = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, any>;
+    const { organizationId } = await resolveMessagingAuthContext(req, {
+      suppliedOrgId: body.organizationId || req.query.organizationId,
+      requiredApiKeyScopes: [ApiKeyScope.SMS_SEND],
+      allowedUserRoles: [UserRole.OWNER, UserRole.ADMIN, UserRole.DEVELOPER],
+    });
+    const job = await outboundSmsJobService.cancelJob(
+      organizationId,
+      req.params.jobId || '',
+      typeof body.reason === 'string' ? body.reason : undefined,
+    );
+    return {
+      success: true,
+      data: { job },
+    };
+  });
+
   // 3. Create & Dispatch Bulk SMS Campaign
   router.post('/v1/messaging/campaigns', async (req: RouteRequest): Promise<ApiResponse> => {
     await authenticate(req);
+    assertOAuthScope(req, [ApiKeyScope.SMS_SEND]);
     const userId = req.context.userId!;
     const body = req.body as Record<string, any>;
-    const orgId = (body.organizationId as string) || req.context.organizationId;
-    if (!orgId) {
-      throw new HttpException(400, 'VALIDATION_ERROR', 'organizationId is required');
-    }
+    const orgId = resolveAuthorizedTenantOrgId(req, body.organizationId);
     const membership = await dbStore.getMembership(orgId, userId);
     if (!membership) {
       throw new HttpException(403, 'FORBIDDEN', 'You are not a member of this organization');
@@ -289,11 +569,9 @@ export function registerMessagingRoutes(router: Router): void {
   // 4. Query Credit Ledger History
   router.get('/v1/messaging/ledger', async (req: RouteRequest): Promise<ApiResponse> => {
     await authenticate(req);
+    assertOAuthScope(req, [ApiKeyScope.SMS_READ]);
     const userId = req.context.userId!;
-    const orgId = req.query.organizationId || req.context.organizationId;
-    if (!orgId) {
-      throw new HttpException(400, 'VALIDATION_ERROR', 'organizationId is required');
-    }
+    const orgId = resolveAuthorizedTenantOrgId(req, req.query.organizationId);
     const membership = await dbStore.getMembership(orgId, userId);
     if (!membership) {
       throw new HttpException(403, 'FORBIDDEN', 'You are not a member of this organization');

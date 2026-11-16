@@ -1,5 +1,6 @@
 import { IncomingMessage, ServerResponse } from 'node:http';
 import { DatabaseUnavailableError, RedisUnavailableError } from '@brisksms/db';
+import { ApiKeyScope, BriskError } from '@brisksms/shared';
 import {
   CookieToSet,
   parseCookies,
@@ -41,7 +42,8 @@ export interface RequestContext {
   organizationId?: string;
   role?: string;
   deviceId?: string;
-  authType?: 'bearer' | 'cookie';
+  authType?: 'bearer' | 'cookie' | 'oauth';
+  oauthScopes?: ApiKeyScope[];
   jti?: string;
 }
 
@@ -123,12 +125,30 @@ export class Router {
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
     res.setHeader(
       'Access-Control-Allow-Headers',
-      'Content-Type, Authorization, X-Requested-With, Idempotency-Key, X-Signature, X-Timestamp, X-Organization-Id, X-CSRF-Token, X-XSRF-Token, x-api-key, X-API-Key',
+      'Content-Type, Authorization, X-Requested-With, Idempotency-Key, X-Signature, X-Timestamp, X-Organization-Id, X-CSRF-Token, X-XSRF-Token, x-api-key, X-API-Key, X-Platform-Admin-Key',
     );
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
 
     const host = req.headers.host || 'localhost:3000';
-    const parsedUrl = new URL(req.url || '/', `http://${host}`);
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(req.url || '/', `http://${host}`);
+    } catch {
+      res.writeHead(400);
+      res.end(
+        JSON.stringify({
+          success: false,
+          error: {
+            code: 'INVALID_URL',
+            message: 'Malformed request URL or Host header',
+          },
+        }),
+      );
+      return;
+    }
     const pathname = parsedUrl.pathname;
     const method = (req.method || 'GET').toUpperCase();
 
@@ -184,7 +204,20 @@ export class Router {
         if (rawBody.trim()) {
           body = JSON.parse(rawBody);
         }
-      } catch {
+      } catch (parseErr: unknown) {
+        if (parseErr instanceof HttpException) {
+          res.writeHead(parseErr.statusCode);
+          res.end(
+            JSON.stringify({
+              success: false,
+              error: {
+                code: parseErr.code,
+                message: parseErr.message,
+              },
+            }),
+          );
+          return;
+        }
         res.writeHead(400);
         res.end(
           JSON.stringify({
@@ -275,6 +308,21 @@ export class Router {
             (_key, value) => (typeof value === 'bigint' ? value.toString() : value),
           ),
         );
+      } else if (err instanceof BriskError) {
+        res.writeHead(err.statusCode);
+        res.end(
+          JSON.stringify(
+            {
+              success: false,
+              error: {
+                code: err.code,
+                message: err.message,
+                details: err.details,
+              },
+            },
+            (_key, value) => (typeof value === 'bigint' ? value.toString() : value),
+          ),
+        );
       } else if (err instanceof DatabaseUnavailableError || err instanceof RedisUnavailableError) {
         res.writeHead(err.statusCode);
         res.end(
@@ -287,7 +335,14 @@ export class Router {
           }),
         );
       } else {
-        const message = err instanceof Error ? err.message : 'Internal server error';
+        if (isProd) {
+          console.error('[BriskSMS Router Error]', err);
+        }
+        const message = isProd
+          ? 'Internal server error'
+          : err instanceof Error
+            ? err.message
+            : 'Internal server error';
         res.writeHead(500);
         res.end(
           JSON.stringify({
@@ -303,12 +358,41 @@ export class Router {
   }
 }
 
-export function readBodyBuffer(req: IncomingMessage): Promise<Buffer<ArrayBufferLike>> {
+export const MAX_REQUEST_BODY_BYTES = 1024 * 1024; // 1 MiB
+
+export function readBodyBuffer(
+  req: IncomingMessage,
+  maxBytes: number = MAX_REQUEST_BODY_BYTES,
+): Promise<Buffer<ArrayBufferLike>> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    req.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
-    req.on('end', () => resolve(Buffer.concat(chunks)));
-    req.on('error', (err) => reject(err));
+    let totalBytes = 0;
+    let settled = false;
+
+    req.on('data', (chunk) => {
+      if (settled) return;
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      totalBytes += buf.length;
+      if (totalBytes > maxBytes) {
+        settled = true;
+        req.destroy();
+        reject(new HttpException(413, 'PAYLOAD_TOO_LARGE', `Request body exceeds maximum size of ${maxBytes} bytes`));
+        return;
+      }
+      chunks.push(buf);
+    });
+    req.on('end', () => {
+      if (!settled) {
+        settled = true;
+        resolve(Buffer.concat(chunks));
+      }
+    });
+    req.on('error', (err) => {
+      if (!settled) {
+        settled = true;
+        reject(err);
+      }
+    });
   });
 }
 

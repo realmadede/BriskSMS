@@ -1,23 +1,22 @@
 import {
   PaymentProvider,
   StkPushCallbackPayload,
-  formatTzs,
   toMinorUnits,
 } from '@brisksms/shared';
-import { StkInitiateParams, StkInitiateResult, StkPushAdapter } from './stk-adapter.interface.js';
+import {
+  buildFailClosedDispatchResult,
+  StkInitiateParams,
+  StkInitiateResult,
+  StkPushAdapter,
+} from './stk-adapter.interface.js';
 
 export class AirtelStkAdapter implements StkPushAdapter {
   public readonly provider = PaymentProvider.AIRTEL_MONEY;
+  public readonly isConfigured = false;
 
-  async initiatePush(params: StkInitiateParams): Promise<StkInitiateResult> {
-    const formattedAmount = formatTzs(params.amountCents);
-    const customerPrompt = `Tafadhali weka PIN yako ya Airtel Money kwenye simu yako kuthibitisha malipo ya ${formattedAmount}.`;
-
-    return {
-      success: true,
-      providerCheckoutId: `airtel_${params.checkoutId}`,
-      customerPrompt,
-    };
+  async initiatePush(_params: StkInitiateParams): Promise<StkInitiateResult> {
+    // No official Airtel Money Tanzania USSD/STK transport is configured.
+    return buildFailClosedDispatchResult(this.provider, 'UNCONFIGURED');
   }
 
   parseCallback(payload: any): StkPushCallbackPayload {

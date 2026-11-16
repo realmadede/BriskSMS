@@ -2,7 +2,7 @@
 
 **Repository:** `https://github.com/realmadede/BriskSMS`  
 **Branch:** `main`  
-**Baseline Checkpoint:** `c7b4a50ab8ad636996f328645be2d18517230bd2`  
+**Last Synced Against:** `e6c593d0f5bedd41939fd45c9f23082a1bada04b` + P0–P2 & Hard Audit Remediations  
 **Scope:** Production-First Security Audit, Cryptographic Boundary Isolation, Authentication Vector Defenses, SSRF Hardening, and Multi-Tenant Isolation Verification.
 
 ---
@@ -33,7 +33,7 @@ graph TD
     end
 
     subgraph Boundary_3["3. Developer API Keys"]
-        B3["API Keys (bsk_live_... / bsk_test_...)<br/>Hashed with SHA-256 in PostgreSQL<br/>Scoped Permissions (e.g. messages:send)"]
+        B3["API Keys (bsk_live_...)<br/>Hashed with SHA-256 in PostgreSQL<br/>Scoped Permissions (e.g. sms:send)"]
     end
 
     subgraph Boundary_4["4. Cellular Gateway (SMSGate)"]
@@ -46,10 +46,10 @@ graph TD
 ```
 
 - [x] **No Human JWT for Developer APIs:** Human session tokens cannot call `/v1/messages/send` without an active session, and developer API keys cannot access merchant console settings.
-- [x] **No Device Token for Gateway Operations:** Android companion devices can only push payment evidence (`POST /v1/ingestion/evidence`); they cannot send SMS messages or modify ledger balances.
+- [x] **Strict Device Token Boundary for Relay & Ingestion Operations:** Active paired Android devices authenticate with `bsk_dev_...` tokens strictly scoped to their own organization (`CROSS_ORGANIZATION_FORBIDDEN`) and only for device-authorized operations (`POST /v1/ingestion/evidence`, `POST /v1/devices/:id/telemetry`, `POST /v1/devices/:id/commands/:commandId/ack`, and Model B `POST /v1/messaging/device-jobs/{acquire,:jobId/dispatching,:jobId/result}` when bulk relay is active). Device tokens cannot query merchant finances, modify prepaid credit balances/ledgers, or authorize payments, and `REVOKED` devices fail closed `403 DEVICE_REVOKED`.
 - [x] **SMSGate Webhook Authentication:** Requires valid HMAC-SHA256 signature (`X-Signature`) computed over `rawBody + timestamp` matching `currentKey` or `previousKey`.
 - [x] **Developer Key Plaintext Never Persisted:** API keys are hashed with `SHA-256` before persistence. The plaintext is returned only once at creation time.
-- [x] **Cryptographic Device Pairing:** 5-minute single-use token (`bsk_pair_...` via `POST /v1/devices/pairing-token`) exchanged with Android Keystore hardware public key (`POST /v1/devices/pair`) enforces atomic consumption via row-level locks.
+- [x] **Cryptographic Device Pairing (Proof-of-Possession):** 5-minute single-use pairing token (`bsk_pair_...` via `POST /v1/devices/pairing-token`), single-use EC P-256 challenge issuance (`POST /v1/devices/pairing-challenge`, `device_pairing_challenges`), canonical binary transcript signing (`BRISKSMS-DEVICE-PAIRING-POP-V1` via `SHA256withECDSA`), atomic challenge/token consumption via strict row-level lock ordering (`POST /v1/devices/pair`), unique `public_key_fingerprint`, silent key-replacement prohibition, and revoked-key re-pairing recovery. (Backend integration + cross-language vectors and Android Gradle `8.14.3` + JDK `17.0.21` `testDebugUnitTest`, `compileDebugKotlin`, and `assembleDebug` verified.)
 - [x] **Google Identity OpenID Connect Verification & Nonce Replay Protection:** Validates RS256 token signatures against Google JWKS (`createPublicKey` with format `'jwk'`), with automatic cache invalidation and live re-fetch on unknown `kid` (resilient to Google key rotation). Validates issuer (`accounts.google.com`), multi-audience arrays (`aud`) requiring valid authorized party (`azp`) matching `GOOGLE_CLIENT_ID`, single-string audience `azp` matching, expiry, future `iat`/`nbf` with 300s clock skew tolerance, and `email_verified: true`. Implements server-issued OpenID Connect nonce verification: `POST /v1/auth/google/nonce` issues a high-entropy 256-bit nonce (`bsk_gn_...`) with a default 300-second TTL (configurable via `GOOGLE_NONCE_TTL_SECONDS` within 30–900s) bound to the browser attempt via an HttpOnly, SameSite=Lax cookie (`bsk_g_nonce` storing `sha256(nonce)`). Google Identity Services client initializes with `nonce`. `POST /v1/auth/google` validates `hash(token.nonce) === bsk_g_nonce` using constant-time comparison, atomically consumes the nonce via Redis `DEL`, and clears the cookie. Missing, mismatched, expired, or replayed nonces are strictly rejected with 401 `INVALID_GOOGLE_NONCE`. Safe account linking matches verified emails without destroying scrypt password hashes, rejecting conflicting Google subjects with `409 GOOGLE_ACCOUNT_CONFLICT`.
 - [x] **Single-Use Email Verification Tokens & URL Fragment Privacy:** `email_verification_tokens` table stores `token_hash` (SHA-256). Consumption executes within ACID transaction with row-level locks (`SELECT ... FOR UPDATE`), strictly rejects replay or expired tokens, and invalidates older tokens. Links use URL fragments (`/verify-email#token=...`) per RFC 3986 to prevent verification token leakage in HTTP access logs or Referer headers, backed by `no-referrer` meta tags and immediate client-side history scrubbing. Outbound email dispatch is decoupled from DB transactions to prevent connection starvation.
 - [x] **Atomic Redis Distributed Rate Limiting & Recipient Abuse Protection:** Authentication endpoints (`/register`, `/login`, `/google`, `/resend-verification`, `/verify-email`) enforce distributed rate limits backed by an atomic Redis Lua script (`incrWithExpire`), eliminating race conditions and unexpiring keys. In production and staging, failures fail closed with 503 `REDIS_UNAVAILABLE`, while development/testing falls back safely to in-memory buckets. `POST /v1/auth/resend-verification` enforces dual limits: 5 req/15 min per IP and 3 req/15 min per recipient (using privacy-preserving SHA-256 recipient hashes without storing raw emails in Redis). Responses remain identical across existing, nonexistent, already-verified, and invalid accounts to prevent enumeration.
@@ -95,13 +95,15 @@ graph TD
 
 | Checkpoint | Verified By | Date | Result |
 | :--- | :--- | :--- | :--- |
-| **CI Build & Automated Tests** | GitHub Actions Run #19 (`42728702647`) | 2026-11-10 | **SUCCESS (259/259 Tests Passed)** |
-| **Local Full Workspace Tests** | `bun test` with local PostgreSQL 18 & Redis 7 | 2026-11-10 | **SUCCESS (588/588 Tests Passed in 60.08s across 44 files)** |
-| **Typecheck & Monorepo Bundling** | `tsc -b && bun run build` | 2026-11-10 | **SUCCESS (0 Errors)** |
+| **Latest Local Full Workspace Tests** | `bun run test` with local PostgreSQL 16 & Redis 7 | 2026-11-15 | **SUCCESS (532/532 Tests Passed across 39 files)** |
+| **Latest Local Android Verification** | Gradle `8.14.3` + Temurin JDK `17` (`testDebugUnitTest compileDebugKotlin assembleDebug`) | 2026-11-15 | **SUCCESS (52/52 `@Test`s across 11 suites + APK)** |
+| **Latest Typecheck & Monorepo Bundling** | `bun run typecheck && bun run build` | 2026-11-15 | **SUCCESS (0 Errors)** |
+| **Platform Admin & Webhook Secret Encryption** | `PLATFORM_ADMIN_SECRET` gate + `20261116010000` AES-256-GCM secrets | 2026-11-15 | **VERIFIED** |
+| **Earlier CI Build & Automated Tests** | GitHub Actions Run #19 (`42728702647` on `c7b4a50`) | 2026-11-10 | **SUCCESS (259/259 Tests Passed)** *(pre-P0/P1/P2 baseline)* |
 | **Cryptographic Boundary Independence** | Pre-Flight Security Audit | 2026-11-10 | **VERIFIED** |
-| **Staging Deployment Configuration** | `STAGING_ENVIRONMENT_CONFIGURATION.md` | 2026-11-10 | **VERIFIED** |
-| **Staging Deployment Runbook** | `STAGING_DEPLOYMENT_RUNBOOK.md` | 2026-11-10 | **VERIFIED** |
-| **Staging Validation Plan** | `STAGING_VALIDATION_PLAN.md` | 2026-11-10 | **VERIFIED** |
+| **Staging Deployment Configuration** | `STAGING_ENVIRONMENT_CONFIGURATION.md` | 2026-11-16 | **SYNCED** |
+| **Staging Deployment Runbook** | `STAGING_DEPLOYMENT_RUNBOOK.md` | 2026-11-16 | **SYNCED** |
+| **Staging Validation Plan** | `STAGING_VALIDATION_PLAN.md` | 2026-11-16 | **SYNCED** |
 
 ---
 

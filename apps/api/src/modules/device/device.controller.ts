@@ -1,44 +1,153 @@
 import { Router, RouteRequest, ApiResponse, HttpException } from '../../core/http.js';
 import { deviceService, PairDeviceDto, TelemetryDto, DeviceCommandType } from './device.service.js';
-import { authenticate } from '../../core/guards.js';
+import {
+  ApiKeyScope,
+  BriskError,
+  CreatePairingChallengeRequest,
+  DeviceCommandAckInput,
+  DeviceCommandStatus,
+} from '@brisksms/shared';
+import {
+  authenticate,
+  assertHumanSessionAuth,
+  assertOAuthScope,
+  resolveAuthorizedTenantOrgId,
+} from '../../core/guards.js';
+
+function mapDeviceDomainError(err: unknown): never {
+  if (err instanceof BriskError) {
+    throw new HttpException(err.statusCode, err.code, err.message, err.details);
+  }
+  throw err;
+}
+
+function extractDeviceBearerToken(req: RouteRequest): string {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || typeof authHeader !== 'string') {
+    throw new HttpException(401, 'UNAUTHORIZED', 'Missing Authorization header with device token');
+  }
+
+  const [scheme, deviceToken] = authHeader.split(' ');
+  if (scheme !== 'Bearer' || !deviceToken) {
+    throw new HttpException(401, 'UNAUTHORIZED', 'Invalid device token format');
+  }
+
+  return deviceToken;
+}
+
+async function resolveAdminOrgContext(
+  req: RouteRequest,
+  suppliedOrgId?: unknown,
+  options?: { allowOAuthScopes?: ApiKeyScope[]; actionDescription?: string },
+): Promise<{ userId: string; orgId: string }> {
+  await authenticate(req);
+  if (options?.allowOAuthScopes && options.allowOAuthScopes.length > 0) {
+    assertOAuthScope(req, options.allowOAuthScopes);
+  } else {
+    assertHumanSessionAuth(req, options?.actionDescription ?? 'device administration');
+  }
+  const userId = req.context.userId!;
+  const orgId = resolveAuthorizedTenantOrgId(req, suppliedOrgId);
+  return { userId, orgId };
+}
+
+function extractIdempotencyKey(req: RouteRequest, body: Record<string, unknown>): string | undefined {
+  const rawHeader = req.headers['idempotency-key'] ?? req.headers['Idempotency-Key'];
+  const headerIdem = typeof rawHeader === 'string' ? rawHeader.trim() : undefined;
+  const bodyIdem = typeof body.idempotencyKey === 'string' ? body.idempotencyKey.trim() : undefined;
+
+  if (rawHeader !== undefined && !headerIdem) {
+    throw new HttpException(400, 'VALIDATION_ERROR', 'Idempotency-Key header cannot be blank');
+  }
+  if (body.idempotencyKey !== undefined && (typeof body.idempotencyKey !== 'string' || !bodyIdem)) {
+    throw new HttpException(400, 'VALIDATION_ERROR', 'idempotencyKey must be a non-empty string when provided');
+  }
+  if (headerIdem && bodyIdem && headerIdem !== bodyIdem) {
+    throw new HttpException(
+      400,
+      'VALIDATION_ERROR',
+      'Conflicting Idempotency-Key header and body.idempotencyKey values',
+    );
+  }
+
+  const idempotencyKey = headerIdem || bodyIdem;
+  if (idempotencyKey && idempotencyKey.length > 120) {
+    throw new HttpException(400, 'VALIDATION_ERROR', 'idempotencyKey must be 120 characters or fewer');
+  }
+  return idempotencyKey;
+}
 
 export function registerDeviceRoutes(router: Router): void {
   // Generate QR pairing token
   router.post('/v1/devices/pairing-token', async (req: RouteRequest): Promise<ApiResponse> => {
-    await authenticate(req);
-    const userId = req.context.userId!;
-    const orgId = req.context.organizationId || (req.body.organizationId as string);
+    const body = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, unknown>;
+    const { userId, orgId } = await resolveAdminOrgContext(req, body.organizationId, {
+      actionDescription: 'generating device pairing tokens',
+    });
 
-    if (!orgId) {
-      throw new HttpException(400, 'MISSING_ORG', 'Organization context or organizationId is required');
+    try {
+      const tokenData = await deviceService.createPairingToken(orgId, userId);
+      return {
+        success: true,
+        data: tokenData,
+      };
+    } catch (err) {
+      mapDeviceDomainError(err);
     }
-
-    const tokenData = await deviceService.createPairingToken(orgId, userId);
-    return {
-      success: true,
-      data: tokenData,
-    };
   });
 
-  // Pair device (called from Android app with enrollment token)
+  // Step 1: Request single-use PoP challenge bound to token, org, enrollment, and public key
+  router.post('/v1/devices/pairing-challenge', async (req: RouteRequest): Promise<ApiResponse> => {
+    const authHeader = req.headers.authorization;
+    if (typeof authHeader === 'string' && authHeader.includes('bsk_dev_')) {
+      throw new HttpException(
+        409,
+        'DEVICE_KEY_REPLACEMENT_FORBIDDEN',
+        'Authenticated devices cannot silently re-pair or replace device keys via pairing',
+      );
+    }
+
+    const dto = (req.body || {}) as unknown as CreatePairingChallengeRequest;
+    try {
+      const challenge = await deviceService.createPairingChallenge(dto);
+      return {
+        success: true,
+        data: challenge,
+      };
+    } catch (err) {
+      mapDeviceDomainError(err);
+    }
+  });
+
+  // Step 2: Pair device after verifying ECDSA P-256 challenge signature
   router.post('/v1/devices/pair', async (req: RouteRequest): Promise<ApiResponse> => {
-    const dto = req.body as unknown as PairDeviceDto;
-    const result = await deviceService.pairDevice(dto);
-    return {
-      success: true,
-      data: result,
-    };
+    const authHeader = req.headers.authorization;
+    if (typeof authHeader === 'string' && authHeader.includes('bsk_dev_')) {
+      throw new HttpException(
+        409,
+        'DEVICE_KEY_REPLACEMENT_FORBIDDEN',
+        'Authenticated devices cannot silently re-pair or replace device keys via pairing',
+      );
+    }
+
+    const dto = (req.body || {}) as unknown as PairDeviceDto;
+    try {
+      const result = await deviceService.pairDevice(dto);
+      return {
+        success: true,
+        data: result,
+      };
+    } catch (err) {
+      mapDeviceDomainError(err);
+    }
   });
 
   // List organization devices
   router.get('/v1/devices', async (req: RouteRequest): Promise<ApiResponse> => {
-    await authenticate(req);
-    const userId = req.context.userId!;
-    const orgId = req.context.organizationId || (req.query.organizationId as string);
-
-    if (!orgId) {
-      throw new HttpException(400, 'MISSING_ORG', 'Organization context or query param organizationId is required');
-    }
+    const { userId, orgId } = await resolveAdminOrgContext(req, req.query.organizationId, {
+      allowOAuthScopes: [ApiKeyScope.DEVICES_READ],
+      actionDescription: 'listing organization devices',
+    });
 
     const devices = await deviceService.listDevices(orgId, userId);
     return {
@@ -49,14 +158,11 @@ export function registerDeviceRoutes(router: Router): void {
 
   // Get specific device and telemetry
   router.get('/v1/devices/:id', async (req: RouteRequest): Promise<ApiResponse> => {
-    await authenticate(req);
-    const userId = req.context.userId!;
-    const orgId = req.context.organizationId || (req.query.organizationId as string);
+    const { userId, orgId } = await resolveAdminOrgContext(req, req.query.organizationId, {
+      allowOAuthScopes: [ApiKeyScope.DEVICES_READ],
+      actionDescription: 'inspecting device details',
+    });
     const deviceId = req.params.id || '';
-
-    if (!orgId) {
-      throw new HttpException(400, 'MISSING_ORG', 'Organization context or query param organizationId is required');
-    }
 
     const details = await deviceService.getDevice(deviceId, orgId, userId);
     return {
@@ -65,21 +171,12 @@ export function registerDeviceRoutes(router: Router): void {
     };
   });
 
-  // Record device telemetry heartbeat
+  // Record device telemetry heartbeat and claim pending/lease-expired commands
   router.post('/v1/devices/:id/telemetry', async (req: RouteRequest): Promise<ApiResponse> => {
     const deviceId = req.params.id || '';
-    const authHeader = req.headers.authorization;
+    const deviceToken = extractDeviceBearerToken(req);
 
-    if (!authHeader || typeof authHeader !== 'string') {
-      throw new HttpException(401, 'UNAUTHORIZED', 'Missing Authorization header with device token');
-    }
-
-    const [scheme, deviceToken] = authHeader.split(' ');
-    if (scheme !== 'Bearer' || !deviceToken) {
-      throw new HttpException(401, 'UNAUTHORIZED', 'Invalid device token format');
-    }
-
-    const dto = req.body as unknown as TelemetryDto;
+    const dto = (req.body || {}) as unknown as TelemetryDto;
     const telemetry = await deviceService.recordTelemetry(deviceId, deviceToken, dto);
     return {
       success: true,
@@ -87,16 +184,29 @@ export function registerDeviceRoutes(router: Router): void {
     };
   });
 
+  // Acknowledge execution of a delivered remote device command
+  router.post('/v1/devices/:id/commands/:commandId/ack', async (req: RouteRequest): Promise<ApiResponse> => {
+    const deviceId = req.params.id || '';
+    const commandId = req.params.commandId || '';
+    const deviceToken = extractDeviceBearerToken(req);
+
+    const body = (req.body && typeof req.body === 'object' ? req.body : {}) as unknown as Omit<
+      DeviceCommandAckInput,
+      'commandId'
+    >;
+
+    const result = await deviceService.acknowledgeCommand(deviceId, deviceToken, commandId, body);
+    return {
+      success: true,
+      data: result,
+    };
+  });
+
   // Revoke device
   router.post('/v1/devices/:id/revoke', async (req: RouteRequest): Promise<ApiResponse> => {
-    await authenticate(req);
-    const userId = req.context.userId!;
-    const orgId = req.context.organizationId || (req.body.organizationId as string);
+    const body = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, unknown>;
+    const { userId, orgId } = await resolveAdminOrgContext(req, body.organizationId);
     const deviceId = req.params.id || '';
-
-    if (!orgId) {
-      throw new HttpException(400, 'MISSING_ORG', 'Organization context or body organizationId is required');
-    }
 
     const revoked = await deviceService.revokeDevice(deviceId, orgId, userId);
     return {
@@ -107,20 +217,13 @@ export function registerDeviceRoutes(router: Router): void {
 
   // Queue remote device command (Fleet Management)
   router.post('/v1/devices/:id/command', async (req: RouteRequest): Promise<ApiResponse> => {
-    await authenticate(req);
-    const userId = req.context.userId!;
-    const orgId = req.context.organizationId || (req.body.organizationId as string);
+    const body = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, unknown>;
+    const { userId, orgId } = await resolveAdminOrgContext(req, body.organizationId);
     const deviceId = req.params.id || '';
+    const idempotencyKey = extractIdempotencyKey(req, body);
 
-    if (!orgId) {
-      throw new HttpException(400, 'MISSING_ORG', 'Organization context or body organizationId is required');
-    }
-
-    const body = (req.body || {}) as Record<string, unknown>;
     const commandType = body.type as DeviceCommandType;
-    if (!commandType || !['PAUSE_RELAY', 'RESUME_RELAY', 'SWITCH_SIM', 'WIPE_AND_REVOKE'].includes(commandType)) {
-      throw new HttpException(400, 'INVALID_COMMAND', 'type must be PAUSE_RELAY, RESUME_RELAY, SWITCH_SIM, or WIPE_AND_REVOKE');
-    }
+    const ttlSeconds = body.ttlSeconds as number | undefined;
 
     const cmd = await deviceService.queueCommand(
       deviceId,
@@ -128,11 +231,56 @@ export function registerDeviceRoutes(router: Router): void {
       userId,
       commandType,
       body.payload as Record<string, unknown> | undefined,
+      { idempotencyKey, ttlSeconds },
     );
 
     return {
       success: true,
       data: cmd,
+    };
+  });
+
+  // List durable remote command history for a device
+  router.get('/v1/devices/:id/commands', async (req: RouteRequest): Promise<ApiResponse> => {
+    const { userId, orgId } = await resolveAdminOrgContext(req, req.query.organizationId, {
+      allowOAuthScopes: [ApiKeyScope.DEVICES_READ],
+      actionDescription: 'listing device commands',
+    });
+    const deviceId = req.params.id || '';
+    const rawLimit = req.query.limit !== undefined ? Number(req.query.limit) : undefined;
+    const limit = rawLimit !== undefined && !Number.isNaN(rawLimit) ? rawLimit : undefined;
+    const rawStatus = typeof req.query.status === 'string' ? req.query.status.trim() : undefined;
+
+    if (
+      rawStatus &&
+      !Object.values(DeviceCommandStatus).includes(rawStatus as DeviceCommandStatus)
+    ) {
+      throw new HttpException(400, 'VALIDATION_ERROR', `Invalid status filter '${rawStatus}'`);
+    }
+
+    const commands = await deviceService.listDeviceCommands(deviceId, orgId, userId, {
+      limit,
+      status: rawStatus as DeviceCommandStatus | undefined,
+    });
+
+    return {
+      success: true,
+      data: commands,
+    };
+  });
+
+  // Cancel a pending or leased remote device command
+  router.post('/v1/devices/:id/commands/:commandId/cancel', async (req: RouteRequest): Promise<ApiResponse> => {
+    const body = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, unknown>;
+    const { userId, orgId } = await resolveAdminOrgContext(req, body.organizationId);
+    const deviceId = req.params.id || '';
+    const commandId = req.params.commandId || '';
+    const reason = typeof body.reason === 'string' ? body.reason : undefined;
+
+    const cancelled = await deviceService.cancelDeviceCommand(deviceId, commandId, orgId, userId, reason);
+    return {
+      success: true,
+      data: cancelled,
     };
   });
 }

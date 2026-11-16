@@ -62,4 +62,19 @@ export enum MessageIdempotencyStatus {
   UNCERTAIN = 'UNCERTAIN',
 }
 
+/**
+ * Durable Android Outbound SMSGate Job Lifecycle State
+ */
+export enum OutboundSmsJobStatus {
+  QUEUED = 'QUEUED',
+  CLAIMED = 'CLAIMED',
+  DISPATCHING = 'DISPATCHING',
+  SUBMITTED = 'SUBMITTED',
+  DELIVERED = 'DELIVERED',
+  FAILED = 'FAILED',
+  EXPIRED = 'EXPIRED',
+  UNCERTAIN = 'UNCERTAIN',
+  CANCELLED = 'CANCELLED',
+}
+
 

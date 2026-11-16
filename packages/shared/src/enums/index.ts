@@ -7,4 +7,6 @@ export * from './messaging.enum.js';
 export * from './credit-ledger.enum.js';
 export * from './subscription.enum.js';
 export * from './ingestion-source.enum.js';
+export * from './claim-status.enum.js';
+export * from './payment-verification-state.enum.js';
 

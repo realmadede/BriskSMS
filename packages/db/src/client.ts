@@ -215,7 +215,7 @@ function isConnectionError(err: unknown): boolean {
  * Executes a parameterized query against PostgreSQL.
  * Wraps connection errors in DatabaseUnavailableError (no silent fallback to memory).
  */
-export const db: SqlPool = {
+export const db: SqlPool = new Proxy((async () => {}) as unknown as SqlPool, {
   async apply(_target: unknown, _thisArg: unknown, argArray: [TemplateStringsArray, ...unknown[]]) {
     const pool = getDbPool();
     try {
@@ -227,7 +227,12 @@ export const db: SqlPool = {
       throw err;
     }
   },
-} as unknown as SqlPool;
+  get(_target: unknown, prop: string | symbol) {
+    const pool = getDbPool() as unknown as Record<string | symbol, unknown>;
+    const val = pool[prop];
+    return typeof val === 'function' ? val.bind(pool) : val;
+  },
+}) as unknown as SqlPool;
 
 /**
  * Tagged template SQL query executor against the authoritative PostgreSQL database.

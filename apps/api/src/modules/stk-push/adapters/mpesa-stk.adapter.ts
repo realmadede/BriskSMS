@@ -1,24 +1,23 @@
 import {
   PaymentProvider,
   StkPushCallbackPayload,
-  formatTzs,
   toMinorUnits,
 } from '@brisksms/shared';
-import { StkInitiateParams, StkInitiateResult, StkPushAdapter } from './stk-adapter.interface.js';
+import {
+  buildFailClosedDispatchResult,
+  StkInitiateParams,
+  StkInitiateResult,
+  StkPushAdapter,
+} from './stk-adapter.interface.js';
 
 export class MpesaStkAdapter implements StkPushAdapter {
   public readonly provider = PaymentProvider.MPESA;
+  public readonly isConfigured = false;
 
-  async initiatePush(params: StkInitiateParams): Promise<StkInitiateResult> {
-    const formattedAmount = formatTzs(params.amountCents);
-    const customerPrompt = `Tafadhali weka PIN yako ya M-Pesa kwenye simu yako kuthibitisha malipo ya ${formattedAmount}.`;
-
-    // Simulated / Sandbox or Live Gateway Dispatch
-    return {
-      success: true,
-      providerCheckoutId: `voda_${params.checkoutId}`,
-      customerPrompt,
-    };
+  async initiatePush(_params: StkInitiateParams): Promise<StkInitiateResult> {
+    // No official Vodacom M-Pesa Tanzania STK OpenAPI transport is configured.
+    // Fail closed rather than fabricating live initiation success or synthetic references.
+    return buildFailClosedDispatchResult(this.provider, 'UNCONFIGURED');
   }
 
   parseCallback(payload: any): StkPushCallbackPayload {

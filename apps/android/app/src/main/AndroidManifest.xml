@@ -22,6 +22,7 @@
 
     <application
         android:allowBackup="false"
+        android:usesCleartextTraffic="false"
         android:icon="@android:drawable/sym_def_app_icon"
         android:label="BriskSMS Relay"
         android:roundIcon="@android:drawable/sym_def_app_icon"
@@ -54,6 +55,16 @@
             android:name=".messaging.service.SmsGateRelayService"
             android:exported="false"
             android:foregroundServiceType="connectedDevice" />
+
+        <!-- Restart telemetry and relay background work after device reboot -->
+        <receiver
+            android:name=".worker.BootCompletedReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
 
     </application>
 

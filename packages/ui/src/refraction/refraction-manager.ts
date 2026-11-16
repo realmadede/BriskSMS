@@ -16,9 +16,11 @@ export class RefractionManager {
   private filterHandle: SvgFilterHandle | null = null;
   private readonly config: LensConfig;
   private readonly enableOptical: boolean;
+  private readonly maxConcurrentFilters: number;
 
   constructor(options: RefractionManagerOptions = {}) {
     this.config = options.config || DEFAULT_GLASS_CONFIG;
+    this.maxConcurrentFilters = options.maxConcurrentFilters ?? MAX_CONCURRENT_FILTERS;
     this.enableOptical = options.enableOpticalRefraction ?? this.detectHardwareCapability();
   }
 
@@ -46,8 +48,9 @@ export class RefractionManager {
       return false;
     }
 
-    // 4. Concurrency Guard: Enforce max 3 simultaneously active optical filters per page
-    if (activeFilterCount >= MAX_CONCURRENT_FILTERS) {
+    // 4. Concurrency Guard: Enforce configured simultaneously active optical filters per page
+    const maxAllowed = this.maxConcurrentFilters ?? MAX_CONCURRENT_FILTERS;
+    if (activeFilterCount >= maxAllowed) {
       return false;
     }
 

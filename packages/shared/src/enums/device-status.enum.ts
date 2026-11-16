@@ -32,3 +32,25 @@ export enum DeviceIngestionMode {
   HYBRID = 'HYBRID',
 }
 
+/**
+ * End-to-end supported Android remote fleet command types
+ */
+export enum DeviceCommandType {
+  PAUSE_RELAY = 'PAUSE_RELAY',
+  RESUME_RELAY = 'RESUME_RELAY',
+  SWITCH_SIM = 'SWITCH_SIM',
+  WIPE_AND_REVOKE = 'WIPE_AND_REVOKE',
+}
+
+/**
+ * Durable lifecycle states for remote fleet commands
+ */
+export enum DeviceCommandStatus {
+  PENDING = 'PENDING',
+  DELIVERED = 'DELIVERED',
+  ACKNOWLEDGED = 'ACKNOWLEDGED',
+  FAILED = 'FAILED',
+  EXPIRED = 'EXPIRED',
+  CANCELLED = 'CANCELLED',
+}
+

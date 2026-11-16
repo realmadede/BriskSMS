@@ -1,5 +1,5 @@
 import { Router } from './core/http.js';
-import { syncTokenBlacklistFromDb, ensureRevocationSync, isRevocationSyncReady } from './core/guards.js';
+import { syncTokenBlacklistFromDb, ensureRevocationSync, isRevocationReady } from './core/guards.js';
 import {
   checkDatabaseHealth,
   checkRedisHealth,
@@ -41,20 +41,21 @@ export function createApp(options?: { tokenBlacklist?: Set<string> }): Router {
 
   // Dedicated Readiness Probe (strictly validates DB, Redis, and revocation synchronization)
   router.get('/v1/health/ready', async () => {
-    await ensureRevocationSync().catch(() => {});
+    await ensureRevocationSync(router.tokenBlacklist).catch(() => {});
     const [dbHealth, redisHealth] = await Promise.all([
       checkDatabaseHealth(),
       checkRedisHealth(),
     ]);
 
-    const isReady = dbHealth.status === 'UP' && redisHealth.status === 'UP' && isRevocationSyncReady;
+    const revReady = isRevocationReady(router.tokenBlacklist);
+    const isReady = dbHealth.status === 'UP' && redisHealth.status === 'UP' && revReady;
     return {
       success: isReady,
       statusCode: isReady ? 200 : 503,
       data: {
         status: isReady ? 'UP' : 'DOWN',
         service: '@brisksms/api',
-        revocationSync: isRevocationSyncReady ? 'UP' : 'DOWN',
+        revocationSync: revReady ? 'UP' : 'DOWN',
         postgresql: dbHealth.status,
         redis: redisHealth.status,
       },
@@ -63,7 +64,7 @@ export function createApp(options?: { tokenBlacklist?: Set<string> }): Router {
 
   // Production Health & Readiness Endpoint
   router.get('/v1/health', async () => {
-    await ensureRevocationSync().catch(() => {});
+    await ensureRevocationSync(router.tokenBlacklist).catch(() => {});
     const [dbHealth, redisHealth, workerHealth, queueHealth] = await Promise.all([
       checkDatabaseHealth(),
       checkRedisHealth(),
@@ -71,7 +72,8 @@ export function createApp(options?: { tokenBlacklist?: Set<string> }): Router {
       checkQueueHealth(),
     ]);
 
-    const criticalHealthy = dbHealth.status === 'UP' && redisHealth.status === 'UP' && isRevocationSyncReady;
+    const revReady = isRevocationReady(router.tokenBlacklist);
+    const criticalHealthy = dbHealth.status === 'UP' && redisHealth.status === 'UP' && revReady;
     const overallStatus = !criticalHealthy
       ? 'DOWN'
       : workerHealth.status === 'UP' && queueHealth.status === 'UP'
@@ -91,7 +93,7 @@ export function createApp(options?: { tokenBlacklist?: Set<string> }): Router {
           process: { status: 'UP' },
           postgresql: dbHealth,
           redis: redisHealth,
-          revocationSync: { status: isRevocationSyncReady ? 'UP' : 'DOWN' },
+          revocationSync: { status: revReady ? 'UP' : 'DOWN' },
           worker: workerHealth,
           queues: queueHealth,
         },

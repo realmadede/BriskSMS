@@ -1335,8 +1335,7 @@
             <div class="endpoint-tabs">
               <button class="ep-btn active" onclick="setEndpoint('stk_push', this)">POST /v1/payments/stk-push</button>
               <button class="ep-btn" onclick="setEndpoint('ingest', this)">POST /v1/ingestion/evidence</button>
-              <button class="ep-btn" onclick="setEndpoint('claim', this)">POST /v1/reconciliation/claim</button>
-              <button class="ep-btn" onclick="setEndpoint('match', this)">POST /v1/reconciliation/verify</button>
+              <button class="ep-btn" onclick="setEndpoint('verify', this)">POST /v1/reconciliation/verify</button>
               <button class="ep-btn" onclick="setEndpoint('send', this)">POST /v1/messages/send</button>
               <button class="ep-btn" onclick="setEndpoint('dispatch', this)">POST /v1/messaging/campaigns</button>
               <button class="ep-btn" onclick="setEndpoint('device', this)">GET /v1/devices</button>
@@ -1561,8 +1560,8 @@
                 </tr>
                 <tr>
                   <td><strong>Checkout Latency UX</strong></td>
-                  <td>Single-Use Claim Box endpoint (<code>POST /v1/reconciliation/claim</code>); atomic reservation preventing double settlement upon phone reconnection.</td>
-                  <td>Implement Progressive Checkout UX (0&ndash;20s fast-path, 20&ndash;45s soft warning, 45s+ customer transaction ID input fallback).</td>
+                  <td>Global Claim &amp; Verify flow (<code>POST /v1/ingestion/evidence</code> + <code>POST /v1/reconciliation/verify</code>); atomic claim reservation preventing double settlement upon phone reconnection.</td>
+                  <td>Implement Progressive Checkout UX (0&ndash;20s fast-path, 20&ndash;45s soft warning, 45s+ manual accountant review / callback verification).</td>
                 </tr>
               </tbody>
             </table>
@@ -1601,12 +1600,12 @@
 
             <div class="zapier-step-card">
               <div>
-                <span class="zapier-step-badge" style="background: #0B0A09; color: #C6B480;">45s+ · Expedited Fallback</span>
-                <h4 class="zapier-step-title">Single-Use Claim Box</h4>
-                <p class="zapier-step-desc">If carrier SMS is delayed or companion phone is temporarily rebooting, prompt the buyer: <em>"Enter your M-Pesa Transaction ID (e.g., QA88HH99II) to expedite verification."</em> Calling the Claim Box API unlocks instant fulfillment.</p>
+                <span class="zapier-step-badge" style="background: #0B0A09; color: #C6B480;">45s+ · Reconciliation Verification</span>
+                <h4 class="zapier-step-title">Accountant / Claim Verification</h4>
+                <p class="zapier-step-desc">If carrier SMS is delayed or routed to manual inspection, finance staff can inspect candidate matches and verify settlement via <code>POST /v1/reconciliation/verify</code>.</p>
               </div>
               <div style="margin-top: 1.25rem; font-family: var(--font-mono); font-size: 0.75rem; background: #0B0A09; color: #C6B480; padding: 8px 12px; border-radius: 8px;">
-                Action: POST /v1/reconciliation/claim
+                Action: POST /v1/reconciliation/verify
               </div>
             </div>
           </div>
@@ -1616,7 +1615,7 @@
         <div style="margin-top: 3.5rem; margin-bottom: 3.5rem;">
           <h3 style="font-size: 1.35rem; font-weight: 700; margin-bottom: 0.5rem; letter-spacing: -0.02em;">3. The Single-Use "Transaction ID Box" Pattern</h3>
           <p style="font-size: 0.875rem; color: var(--text-sub); max-width: 820px; line-height: 1.6; margin-bottom: 1.5rem;">
-            <strong>Why no conflict occurs when the companion phone comes back online:</strong> Every provider transaction ID belongs to an atomic single-use box in the database. When the merchant frontend calls <code>POST /v1/reconciliation/claim</code>, the transaction reference is pre-claimed and immutably bound to that specific <code>invoiceId</code>. If the carrier SMS arrives on the companion phone 10 minutes later, the deduplication engine recognizes the existing claim box, verifies the carrier evidence, and seals the invoice without duplicate settlement or credit conflict.
+            <strong>Why no conflict occurs when the companion phone comes back online:</strong> Every provider transaction ID belongs to an atomic single-use claim record (`payment_reference_claims`) in PostgreSQL. Whether evidence enters through `POST /v1/ingestion/evidence` or staff settle via `POST /v1/reconciliation/verify`, the deduplication engine recognizes existing claim locks and seals the invoice without duplicate settlement or credit conflict.
           </p>
 
           <div class="terminal-container" style="margin-top: 1.5rem;">
@@ -1823,72 +1822,72 @@
       </div>
 
       <div class="container">
-        <span class="eyebrow">DEVELOPER TOOLING</span>
-        <h2 class="section-title">Official client libraries.</h2>
-        <p class="section-desc">Integrate BriskSMS into your stack in minutes with strongly typed client SDKs.</p>
+        <span class="eyebrow">REST HTTP INTEGRATION</span>
+        <h2 class="section-title">Standard HTTPS &amp; monorepo TypeScript types.</h2>
+        <p class="section-desc">BriskSMS exposes a standard versioned JSON REST API over HTTPS (`X-API-Key` / `Bearer` JWT) with shared TypeScript contracts in `@brisksms/shared`—no proprietary wrapper package installation required.</p>
 
         <div class="cap-grid" style="margin-top: 2.5rem;">
           <div class="cap-card">
-            <h3 class="cap-title">Node.js (CommonJS &amp; ESM)</h3>
-            <p class="cap-desc" style="margin-bottom: 1rem;">Fast asynchronous backend SDK with full event streaming and Promise support.</p>
+            <h3 class="cap-title">Node.js &amp; Bun (Native Fetch)</h3>
+            <p class="cap-desc" style="margin-bottom: 1rem;">Use built-in `fetch` with `Bearer` session tokens or scoped `x-api-key` headers directly against `/v1/*`.</p>
             <div style="background: var(--bg-canvas); padding: 8px 12px; border-radius: 9999px; font-family: var(--font-mono); font-size: 11px;">
-              npm i @brisksms/sdk
+              POST /v1/messages/send
             </div>
           </div>
 
           <div class="cap-card">
-            <h3 class="cap-title">TypeScript &amp; Bun</h3>
-            <p class="cap-desc" style="margin-bottom: 1rem;">Full TypeScript definitions with strict runtime Zod validation and auto-complete.</p>
+            <h3 class="cap-title">TypeScript Monorepo Types</h3>
+            <p class="cap-desc" style="margin-bottom: 1rem;">Strongly typed DTOs, provider enums, and transaction state constants in the workspace `@brisksms/shared` package.</p>
             <div style="background: var(--bg-canvas); padding: 8px 12px; border-radius: 9999px; font-family: var(--font-mono); font-size: 11px;">
-              bun add @brisksms/sdk
+              import { PaymentProvider } from '@brisksms/shared'
             </div>
           </div>
 
           <div class="cap-card">
-            <h3 class="cap-title">Python (AsyncIO &amp; Sync)</h3>
-            <p class="cap-desc" style="margin-bottom: 1rem;">Built for FastAPI, Django, Flask, and Celery asynchronous background queues.</p>
+            <h3 class="cap-title">Python (`requests` / `httpx`)</h3>
+            <p class="cap-desc" style="margin-bottom: 1rem;">Direct REST integration for FastAPI, Django, Flask, and Celery background workers using standard HTTP libraries.</p>
             <div style="background: var(--bg-canvas); padding: 8px 12px; border-radius: 9999px; font-family: var(--font-mono); font-size: 11px;">
-              pip install brisksms
+              requests.post(".../v1/messages/send")
             </div>
           </div>
 
           <div class="cap-card">
-            <h3 class="cap-title">Go (Golang)</h3>
-            <p class="cap-desc" style="margin-bottom: 1rem;">Lightweight, zero-allocation client built for concurrent telecom microservices.</p>
+            <h3 class="cap-title">Go (`net/http`)</h3>
+            <p class="cap-desc" style="margin-bottom: 1rem;">Lightweight standard library `net/http` client calls with context timeouts and JSON payloads.</p>
             <div style="background: var(--bg-canvas); padding: 8px 12px; border-radius: 9999px; font-family: var(--font-mono); font-size: 11px;">
-              go get github.com/brisksms/sdk-go
+              http.NewRequestWithContext(ctx, "POST", ...)
             </div>
           </div>
 
           <div class="cap-card">
-            <h3 class="cap-title">PHP &amp; Laravel</h3>
-            <p class="cap-desc" style="margin-bottom: 1rem;">Official billing driver for WHMCS, WooCommerce, and Laravel Cashier integrations.</p>
+            <h3 class="cap-title">PHP &amp; Laravel (`Http`)</h3>
+            <p class="cap-desc" style="margin-bottom: 1rem;">Integrate WHMCS, WooCommerce, and Laravel billing hooks directly via `Illuminate\Support\Facades\Http` or cURL.</p>
             <div style="background: var(--bg-canvas); padding: 8px 12px; border-radius: 9999px; font-family: var(--font-mono); font-size: 11px;">
-              composer require brisksms/sdk
+              Http::withHeaders(['x-api-key' => ...])
             </div>
           </div>
 
           <div class="cap-card">
-            <h3 class="cap-title">Java &amp; Spring Boot</h3>
-            <p class="cap-desc" style="margin-bottom: 1rem;">Production client for enterprise banking engines, Maven, and Gradle pipelines.</p>
+            <h3 class="cap-title">Java (`java.net.http`)</h3>
+            <p class="cap-desc" style="margin-bottom: 1rem;">JDK 17+ `HttpClient` integration for Spring Boot services and enterprise accounting pipelines.</p>
             <div style="background: var(--bg-canvas); padding: 8px 12px; border-radius: 9999px; font-family: var(--font-mono); font-size: 11px;">
-              implementation 'com.brisksms:sdk:1.2.0'
+              HttpRequest.newBuilder().uri(...)
             </div>
           </div>
 
           <div class="cap-card">
-            <h3 class="cap-title">C# &amp; .NET 8</h3>
-            <p class="cap-desc" style="margin-bottom: 1rem;">Strongly typed async library for ASP.NET Core Web APIs and cloud workers.</p>
+            <h3 class="cap-title">C# &amp; .NET 8 (`HttpClient`)</h3>
+            <p class="cap-desc" style="margin-bottom: 1rem;">Standard `System.Net.Http.HttpClient` JSON integration for ASP.NET Core Web APIs and workers.</p>
             <div style="background: var(--bg-canvas); padding: 8px 12px; border-radius: 9999px; font-family: var(--font-mono); font-size: 11px;">
-              dotnet add package BriskSMS.Sdk
+              await httpClient.PostAsJsonAsync(...)
             </div>
           </div>
 
           <div class="cap-card">
-            <h3 class="cap-title">Ruby &amp; Rails</h3>
-            <p class="cap-desc" style="margin-bottom: 1rem;">Native Gem with Sidekiq background jobs and automated webhook HMAC verification.</p>
+            <h3 class="cap-title">Zapier &amp; Webhooks</h3>
+            <p class="cap-desc" style="margin-bottom: 1rem;">OAuth 2.0 Zapier integration (`packages/zapier-app`) and HMAC-SHA256 signed webhook deliveries.</p>
             <div style="background: var(--bg-canvas); padding: 8px 12px; border-radius: 9999px; font-family: var(--font-mono); font-size: 11px;">
-              bundle add brisksms
+              X-BriskSMS-Signature: sha256=...
             </div>
           </div>
         </div>
@@ -1958,7 +1957,7 @@
     const endpointsData = {
       stk_push: {
         curl: `curl -X POST https://api.brisksms.com/v1/payments/stk-push \\
-  -H "Authorization: Bearer bsk_live_99a8b7c6..." \\
+  -H "x-api-key: YOUR_BRISKSMS_API_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{
     "phoneNumber": "0754123456",
@@ -1967,70 +1966,76 @@
     "referenceNumber": "INV-2026-004",
     "memo": "Annual Subscription"
   }'`,
-        node: `const { BriskClient } = require("@brisksms/sdk");
-const client = new BriskClient({ apiKey: process.env.BRISKSMS_API_KEY });
-
-// Initiates USSD prompt directly on customer handset with amount pre-locked
-const push = await client.payments.initiateStkPush({
-  phoneNumber: "0754123456",
-  amount: 50000,
-  invoiceId: "inv_8829104",
-  referenceNumber: "INV-2026-004",
-  memo: "Annual Subscription"
+        node: `const res = await fetch("https://api.brisksms.com/v1/payments/stk-push", {
+  method: "POST",
+  headers: {
+    "x-api-key": process.env.BRISKSMS_API_KEY,
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
+    phoneNumber: "0754123456",
+    amount: 50000,
+    invoiceId: "inv_8829104",
+    referenceNumber: "INV-2026-004",
+    memo: "Annual Subscription"
+  })
 });
-console.log("Push Prompt Dispatched: " + push.checkoutId);`,
-        ts: `import { BriskClient } from "@brisksms/sdk";
-
-const client = new BriskClient({ apiKey: process.env.BRISKSMS_API_KEY! });
-
-const push = await client.payments.initiateStkPush({
-  phoneNumber: "0754123456",
-  amount: 50000,
-  invoiceId: "inv_8829104",
-  referenceNumber: "INV-2026-004",
-  memo: "Annual Subscription"
+const { data } = await res.json();
+console.log("Checkout ID:", data.checkoutId);`,
+        ts: `const res = await fetch("https://api.brisksms.com/v1/payments/stk-push", {
+  method: "POST",
+  headers: {
+    "x-api-key": process.env.BRISKSMS_API_KEY!,
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
+    phoneNumber: "0754123456",
+    amount: 50000,
+    invoiceId: "inv_8829104",
+    referenceNumber: "INV-2026-004",
+    memo: "Annual Subscription"
+  })
 });`,
-        python: `from brisksms import BriskClient
+        python: `import os, requests
 
-client = BriskClient(api_key=os.environ["BRISKSMS_API_KEY"])
-
-push = await client.payments.initiate_stk_push(
-    phone_number="0754123456",
-    amount=50000,
-    invoice_id="inv_8829104",
-    reference_number="INV-2026-004",
-    memo="Annual Subscription"
+response = requests.post(
+    "https://api.brisksms.com/v1/payments/stk-push",
+    headers={"x-api-key": os.environ["BRISKSMS_API_KEY"]},
+    json={
+        "phoneNumber": "0754123456",
+        "amount": 50000,
+        "invoiceId": "inv_8829104",
+        "referenceNumber": "INV-2026-004",
+        "memo": "Annual Subscription"
+    },
+    timeout=15
 )`,
-        go: `push, err := client.Payments.InitiateStkPush(ctx, &brisksms.StkPushParams{
-    PhoneNumber:     "0754123456",
-    Amount:          50000,
-    InvoiceId:       "inv_8829104",
-    ReferenceNumber: "INV-2026-004",
-    Memo:            "Annual Subscription",
-})`,
-        php: `$push = $client->payments->initiateStkPush([
+        go: `req, _ := http.NewRequestWithContext(ctx, "POST", "https://api.brisksms.com/v1/payments/stk-push", body)
+req.Header.Set("x-api-key", os.Getenv("BRISKSMS_API_KEY"))
+req.Header.Set("Content-Type", "application/json")
+resp, err := httpClient.Do(req)`,
+        php: `$response = Http::withHeaders([
+    'x-api-key' => env('BRISKSMS_API_KEY')
+])->post('https://api.brisksms.com/v1/payments/stk-push', [
     'phoneNumber'     => '0754123456',
     'amount'          => 50000,
     'invoiceId'       => 'inv_8829104',
     'referenceNumber' => 'INV-2026-004',
     'memo'            => 'Annual Subscription'
 ]);`,
-        java: `StkPushResponse push = client.payments().initiateStkPush(
-    StkPushRequest.builder()
-        .phoneNumber("0754123456")
-        .amount(50000)
-        .invoiceId("inv_8829104")
-        .referenceNumber("INV-2026-004")
-        .memo("Annual Subscription")
-        .build()
-);`,
-        csharp: `var push = await client.Payments.InitiateStkPushAsync(new StkPushRequest
-{
-    PhoneNumber = "0754123456",
-    Amount = 50000,
-    InvoiceId = "inv_8829104",
-    ReferenceNumber = "INV-2026-004",
-    Memo = "Annual Subscription"
+        java: `HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.brisksms.com/v1/payments/stk-push"))
+    .header("x-api-key", System.getenv("BRISKSMS_API_KEY"))
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
+    .build();`,
+        csharp: `httpClient.DefaultRequestHeaders.Add("x-api-key", Environment.GetEnvironmentVariable("BRISKSMS_API_KEY"));
+var response = await httpClient.PostAsJsonAsync("https://api.brisksms.com/v1/payments/stk-push", new {
+    phoneNumber = "0754123456",
+    amount = 50000,
+    invoiceId = "inv_8829104",
+    referenceNumber = "INV-2026-004",
+    memo = "Annual Subscription"
 });`,
         response: `{
   "success": true,
@@ -2059,116 +2064,72 @@ push = await client.payments.initiate_stk_push(
     "simSlot": 1,
     "deviceTimestamp": "2026-11-05T14:22:18Z"
   }'`,
-        node: `const { BriskClient } = require("@brisksms/sdk");
-
-const client = new BriskClient({
-  deviceToken: process.env.BRISKSMS_DEVICE_TOKEN
-});
-
-async function ingestPayment() {
-  const result = await client.ingestion.ingestEvidence({
+        node: `const res = await fetch("https://api.brisksms.com/v1/ingestion/evidence", {
+  method: "POST",
+  headers: {
+    "Authorization": \`Bearer \${process.env.BRISKSMS_DEVICE_TOKEN}\`,
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
     senderAddress: "M-PESA",
     rawPayload: "09B8291M Confirmed. Tsh 150,000 received from AMANI MTEMI 255754000111 on 05/11/2026 14:22. Ref: INV-8829",
     simSlot: 1,
     deviceTimestamp: new Date().toISOString()
-  });
-
-  console.log("Evidence ID: " + result.evidenceId);
-  console.log("Deduplication Hash: " + result.deduplicationHash);
-}
-
-ingestPayment();`,
-        ts: `import { BriskClient, type IngestionAckResult } from "@brisksms/sdk";
-
-const client = new BriskClient({ deviceToken: process.env.BRISKSMS_DEVICE_TOKEN! });
-
-const result: IngestionAckResult = await client.ingestion.ingestEvidence({
-  senderAddress: "M-PESA",
-  rawPayload: "09B8291M Confirmed. Tsh 150,000 received from AMANI MTEMI...",
-  simSlot: 1,
-  deviceTimestamp: new Date().toISOString()
+  })
 });
+const { data } = await res.json();
+console.log("Evidence ID:", data.evidenceId, "Hash:", data.deduplicationHash);`,
+        ts: `const res = await fetch("https://api.brisksms.com/v1/ingestion/evidence", {
+  method: "POST",
+  headers: {
+    "Authorization": \`Bearer \${process.env.BRISKSMS_DEVICE_TOKEN!}\`,
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
+    senderAddress: "M-PESA",
+    rawPayload: "09B8291M Confirmed. Tsh 150,000 received from AMANI MTEMI...",
+    simSlot: 1,
+    deviceTimestamp: new Date().toISOString()
+  })
+});`,
+        python: `import os, requests
 
-console.log("Ingestion State: " + result.status);`,
-        python: `from brisksms import BriskClient
-
-client = BriskClient(device_token="YOUR_DEVICE_TOKEN")
-
-response = await client.ingestion.ingest_evidence(
-    sender_address="M-PESA",
-    raw_payload="09B8291M Confirmed. Tsh 150,000 received...",
-    sim_slot=1,
-    device_timestamp="2026-11-05T14:22:18Z"
-)
-print("Evidence status: " + response.status)`,
-        go: `package main
-
-import (
-    "context"
-    "fmt"
-    "github.com/brisksms/sdk-go"
-)
-
-func main() {
-    client := brisksms.NewClient("YOUR_DEVICE_TOKEN")
-
-    ack, err := client.Ingestion.IngestEvidence(context.Background(), &brisksms.EvidenceParams{
-        SenderAddress:   "M-PESA",
-        RawPayload:      "09B8291M Confirmed. Tsh 150,000 received from AMANI MTEMI...",
-        SimSlot:         1,
-        DeviceTimestamp: "2026-11-05T14:22:18Z",
-    })
-    if err != nil {
-        panic(err)
-    }
-    fmt.Printf("Evidence ID: %s, Status: %s\\n", ack.EvidenceID, ack.Status)
-}`,
-        php: `<?php
-use BriskSMS\\BriskClient;
-
-$client = new BriskClient(['device_token' => getenv('BRISKSMS_DEVICE_TOKEN')]);
-
-$ack = $client->ingestion->ingestEvidence([
-    'senderAddress'   => 'M-PESA',
-    'rawPayload'      => '09B8291M Confirmed. Tsh 150,000 received from AMANI MTEMI...',
-    'simSlot'         => 1,
-    'deviceTimestamp' => date(DATE_ATOM)
-]);
-
-echo "Evidence: " . $ack->evidenceId . " | Status: " . $ack->status;`,
-        java: `import com.brisksms.BriskClient;
-import com.brisksms.model.EvidenceIngestRequest;
-import com.brisksms.model.IngestionAckResult;
-
-public class EvidenceService {
-    public static void main(String[] args) {
-        BriskClient client = BriskClient.withDeviceToken(System.getenv("BRISKSMS_DEVICE_TOKEN"));
-
-        IngestionAckResult ack = client.ingestion().ingestEvidence(
-            EvidenceIngestRequest.builder()
-                .senderAddress("M-PESA")
-                .rawPayload("09B8291M Confirmed. Tsh 150,000 received...")
-                .simSlot(1)
-                .build()
-        );
-
-        System.out.println("Ingested Evidence: " + ack.getEvidenceId());
-    }
-}`,
-        csharp: `using BriskSMS;
-using BriskSMS.Models;
-
-var client = new BriskClient(Environment.GetEnvironmentVariable("BRISKSMS_DEVICE_TOKEN"));
-
-var ack = await client.Ingestion.IngestEvidenceAsync(new IngestEvidenceRequest
-{
-    SenderAddress = "M-PESA",
-    RawPayload = "09B8291M Confirmed. Tsh 150,000 received from AMANI MTEMI...",
-    SimSlot = 1,
-    DeviceTimestamp = DateTime.UtcNow
-});
-
-Console.WriteLine("Evidence ID: " + ack.EvidenceId + ", Status: " + ack.Status);`,
+response = requests.post(
+    "https://api.brisksms.com/v1/ingestion/evidence",
+    headers={"Authorization": f"Bearer {os.environ['BRISKSMS_DEVICE_TOKEN']}"},
+    json={
+        "senderAddress": "M-PESA",
+        "rawPayload": "09B8291M Confirmed. Tsh 150,000 received...",
+        "simSlot": 1,
+        "deviceTimestamp": "2026-11-05T14:22:18Z"
+    },
+    timeout=15
+)`,
+        go: `req, _ := http.NewRequestWithContext(ctx, "POST", "https://api.brisksms.com/v1/ingestion/evidence", body)
+req.Header.Set("Authorization", "Bearer "+deviceToken)
+req.Header.Set("Content-Type", "application/json")
+resp, err := httpClient.Do(req)`,
+        php: `$response = Http::withToken(getenv('BRISKSMS_DEVICE_TOKEN'))
+    ->post('https://api.brisksms.com/v1/ingestion/evidence', [
+        'senderAddress'   => 'M-PESA',
+        'rawPayload'      => '09B8291M Confirmed. Tsh 150,000 received from AMANI MTEMI...',
+        'simSlot'         => 1,
+        'deviceTimestamp' => date(DATE_ATOM)
+    ]);`,
+        java: `HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.brisksms.com/v1/ingestion/evidence"))
+    .header("Authorization", "Bearer " + System.getenv("BRISKSMS_DEVICE_TOKEN"))
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
+    .build();`,
+        csharp: `httpClient.DefaultRequestHeaders.Authorization =
+    new AuthenticationHeaderValue("Bearer", Environment.GetEnvironmentVariable("BRISKSMS_DEVICE_TOKEN"));
+var ack = await httpClient.PostAsJsonAsync("https://api.brisksms.com/v1/ingestion/evidence", new {
+    senderAddress = "M-PESA",
+    rawPayload = "09B8291M Confirmed. Tsh 150,000 received from AMANI MTEMI...",
+    simSlot = 1,
+    deviceTimestamp = DateTime.UtcNow
+});`,
         response: `{
   "success": true,
   "data": {
@@ -2179,140 +2140,78 @@ Console.WriteLine("Evidence ID: " + ack.EvidenceId + ", Status: " + ack.Status);
   }
 }`
       },
-      claim: {
-        curl: `curl -X POST https://api.brisksms.com/v1/reconciliation/claim \\
-  -H "Authorization: Bearer YOUR_SESSION_TOKEN" \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "invoiceId": "inv_8829104",
-    "provider": "VODACOM_MPESA",
-    "providerReference": "QA88HH99II",
-    "expectedAmount": 150000
-  }'`,
-        node: `const { BriskClient } = require("@brisksms/sdk");
-const client = new BriskClient({ apiKey: process.env.BRISKSMS_API_KEY });
-
-async function claimTransaction() {
-  const claim = await client.reconciliation.claimTransaction({
-    invoiceId: "inv_8829104",
-    provider: "VODACOM_MPESA",
-    providerReference: "QA88HH99II",
-    expectedAmount: 150000
-  });
-
-  console.log("Claim status: " + claim.status);
-}
-
-claimTransaction();`,
-        ts: `const claim = await client.reconciliation.claimTransaction({
-  invoiceId: "inv_8829104",
-  provider: "VODACOM_MPESA",
-  providerReference: "QA88HH99II",
-  expectedAmount: 150000
-});`,
-        python: `claim = await client.reconciliation.claim_transaction(
-    invoice_id="inv_8829104",
-    provider="VODACOM_MPESA",
-    provider_reference="QA88HH99II",
-    expected_amount=150000
-)`,
-        go: `claim, err := client.Reconciliation.ClaimTransaction(ctx, &brisksms.ClaimParams{
-    InvoiceID:         "inv_8829104",
-    Provider:          "VODACOM_MPESA",
-    ProviderReference: "QA88HH99II",
-    ExpectedAmount:    150000,
-})`,
-        php: `$claim = $client->reconciliation->claimTransaction([
-    'invoiceId'         => 'inv_8829104',
-    'provider'          => 'VODACOM_MPESA',
-    'providerReference' => 'QA88HH99II',
-    'expectedAmount'    => 150000
-]);`,
-        java: `ClaimResult claim = client.reconciliation().claimTransaction(
-    ClaimTransactionRequest.builder()
-        .invoiceId("inv_8829104")
-        .provider("VODACOM_MPESA")
-        .providerReference("QA88HH99II")
-        .expectedAmount(150000L)
-        .build()
-);`,
-        csharp: `var claim = await client.Reconciliation.ClaimTransactionAsync(new ClaimTransactionRequest
-{
-    InvoiceId = "inv_8829104",
-    Provider = "VODACOM_MPESA",
-    ProviderReference = "QA88HH99II",
-    ExpectedAmount = 150000
-});`,
-        response: `{
-  "success": true,
-  "data": {
-    "claimId": "clm_7729104",
-    "invoiceId": "inv_8829104",
-    "providerReference": "QA88HH99II",
-    "status": "VERIFIED",
-    "settlementResult": "EXACT_SETTLEMENT",
-    "amountMinor": 15000000,
-    "claimedAt": "2026-11-10T16:20:00Z"
-  }
-}`
-      },
-      match: {
+      verify: {
         curl: `curl -X POST https://api.brisksms.com/v1/reconciliation/verify \\
   -H "Authorization: Bearer YOUR_SESSION_TOKEN" \\
   -H "Content-Type: application/json" \\
   -d '{
+    "organizationId": "org_c9401ab88",
     "paymentId": "pay_984920194829",
     "invoiceId": "inv_8829_whmcs",
     "verificationMethod": "MANUAL_FINANCE_APPROVAL",
     "notes": "Verified against bank settlement record"
   }'`,
-        node: `const { BriskClient } = require("@brisksms/sdk");
-const client = new BriskClient({ apiKey: process.env.BRISKSMS_API_KEY });
-
-async function verifySettlement() {
-  const result = await client.reconciliation.verifyPayment({
+        node: `const res = await fetch("https://api.brisksms.com/v1/reconciliation/verify", {
+  method: "POST",
+  headers: {
+    "Authorization": \`Bearer \${sessionToken}\`,
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
+    organizationId: "org_c9401ab88",
     paymentId: "pay_984920194829",
     invoiceId: "inv_8829_whmcs",
     verificationMethod: "MANUAL_FINANCE_APPROVAL",
     notes: "Verified against bank settlement record"
-  });
-
-  console.log("Settlement status: " + result.status);
-}
-
-verifySettlement();`,
-        ts: `const result = await client.reconciliation.verifyPayment({
-  paymentId: "pay_984920194829",
-  invoiceId: "inv_8829_whmcs",
-  verificationMethod: "MANUAL_FINANCE_APPROVAL"
+  })
 });`,
-        python: `result = await client.reconciliation.verify_payment(
-    payment_id="pay_984920194829",
-    invoice_id="inv_8829_whmcs",
-    verification_method="MANUAL_FINANCE_APPROVAL"
+        ts: `const res = await fetch("https://api.brisksms.com/v1/reconciliation/verify", {
+  method: "POST",
+  headers: {
+    "Authorization": \`Bearer \${sessionToken}\`,
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
+    organizationId: "org_c9401ab88",
+    paymentId: "pay_984920194829",
+    invoiceId: "inv_8829_whmcs",
+    verificationMethod: "MANUAL_FINANCE_APPROVAL"
+  })
+});`,
+        python: `response = requests.post(
+    "https://api.brisksms.com/v1/reconciliation/verify",
+    headers={"Authorization": f"Bearer {session_token}"},
+    json={
+        "organizationId": "org_c9401ab88",
+        "paymentId": "pay_984920194829",
+        "invoiceId": "inv_8829_whmcs",
+        "verificationMethod": "MANUAL_FINANCE_APPROVAL"
+    },
+    timeout=15
 )`,
-        go: `result, err := client.Reconciliation.VerifyPayment(ctx, &brisksms.VerifyPaymentParams{
-    PaymentID:          "pay_984920194829",
-    InvoiceID:          "inv_8829_whmcs",
-    VerificationMethod: "MANUAL_FINANCE_APPROVAL",
-})`,
-        php: `$result = $client->reconciliation->verifyPayment([
-    'paymentId'          => 'pay_984920194829',
-    'invoiceId'          => 'inv_8829_whmcs',
-    'verificationMethod' => 'MANUAL_FINANCE_APPROVAL'
-]);`,
-        java: `SettlementResult result = client.reconciliation().verifyPayment(
-    VerifyPaymentRequest.builder()
-        .paymentId("pay_984920194829")
-        .invoiceId("inv_8829_whmcs")
-        .verificationMethod("MANUAL_FINANCE_APPROVAL")
-        .build()
-);`,
-        csharp: `var result = await client.Reconciliation.VerifyPaymentAsync(new VerifyPaymentRequest
-{
-    PaymentId = "pay_984920194829",
-    InvoiceId = "inv_8829_whmcs",
-    VerificationMethod = "MANUAL_FINANCE_APPROVAL"
+        go: `req, _ := http.NewRequestWithContext(ctx, "POST", "https://api.brisksms.com/v1/reconciliation/verify", body)
+req.Header.Set("Authorization", "Bearer "+sessionToken)
+req.Header.Set("Content-Type", "application/json")
+resp, err := httpClient.Do(req)`,
+        php: `$response = Http::withToken($sessionToken)
+    ->post('https://api.brisksms.com/v1/reconciliation/verify', [
+        'organizationId'     => 'org_c9401ab88',
+        'paymentId'          => 'pay_984920194829',
+        'invoiceId'          => 'inv_8829_whmcs',
+        'verificationMethod' => 'MANUAL_FINANCE_APPROVAL'
+    ]);`,
+        java: `HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.brisksms.com/v1/reconciliation/verify"))
+    .header("Authorization", "Bearer " + sessionToken)
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
+    .build();`,
+        csharp: `httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", sessionToken);
+var result = await httpClient.PostAsJsonAsync("https://api.brisksms.com/v1/reconciliation/verify", new {
+    organizationId = "org_c9401ab88",
+    paymentId = "pay_984920194829",
+    invoiceId = "inv_8829_whmcs",
+    verificationMethod = "MANUAL_FINANCE_APPROVAL"
 });`,
         response: `{
   "success": true,
@@ -2334,27 +2233,31 @@ verifySettlement();`,
     "message": "Habari Juma! Invoice #INV-2026-44 is confirmed. Karibu sana!",
     "simSlot": 1
   }'`,
-        node: `const axios = require("axios");
-
-async function sendCellularSms() {
-  const res = await axios.post("https://api.brisksms.com/v1/messages/send", {
+        node: `const res = await fetch("https://api.brisksms.com/v1/messages/send", {
+  method: "POST",
+  headers: {
+    "x-api-key": process.env.BRISKSMS_API_KEY,
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
     recipientPhone: "+255754000111",
     message: "Habari Juma! Invoice #INV-2026-44 is confirmed. Karibu sana!",
     simSlot: 1
-  }, {
-    headers: { "x-api-key": process.env.BRISKSMS_API_KEY }
-  });
-  console.log("Message queued:", res.data.data.messageId);
-}
-sendCellularSms();`,
-        ts: `import axios from "axios";
-
-const res = await axios.post("https://api.brisksms.com/v1/messages/send", {
-  recipientPhone: "+255754000111",
-  message: "Habari Juma! Invoice #INV-2026-44 is confirmed. Karibu sana!",
-  simSlot: 1
-}, {
-  headers: { "x-api-key": process.env.BRISKSMS_API_KEY }
+  })
+});
+const { data } = await res.json();
+console.log("Message queued:", data.messageId);`,
+        ts: `const res = await fetch("https://api.brisksms.com/v1/messages/send", {
+  method: "POST",
+  headers: {
+    "x-api-key": process.env.BRISKSMS_API_KEY!,
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
+    recipientPhone: "+255754000111",
+    message: "Habari Juma! Invoice #INV-2026-44 is confirmed. Karibu sana!",
+    simSlot: 1
+  })
 });`,
         python: `import requests, os
 
@@ -2372,26 +2275,30 @@ print("Status:", response.json())`,
 req.Header.Set("x-api-key", apiKey)
 req.Header.Set("Content-Type", "application/json")
 resp, _ := httpClient.Do(req)`,
-        php: `$response = $httpClient->post('https://api.brisksms.com/v1/messages/send', [
-    'headers' => ['x-api-key' => getenv('BRISKSMS_API_KEY')],
-    'json'    => [
+        php: `$response = Http::withHeaders(['x-api-key' => getenv('BRISKSMS_API_KEY')])
+    ->post('https://api.brisksms.com/v1/messages/send', [
         'recipientPhone' => '+255754000111',
         'message'        => 'Habari Juma! Invoice #INV-2026-44 is confirmed. Karibu sana!',
         'simSlot'        => 1
-    ]
-]);`,
+    ]);`,
         java: `HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.brisksms.com/v1/messages/send"))
     .header("x-api-key", apiKey)
     .header("Content-Type", "application/json")
     .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
     .build();`,
+        csharp: `httpClient.DefaultRequestHeaders.Add("x-api-key", Environment.GetEnvironmentVariable("BRISKSMS_API_KEY"));
+var result = await httpClient.PostAsJsonAsync("https://api.brisksms.com/v1/messages/send", new {
+    recipientPhone = "+255754000111",
+    message = "Habari Juma! Invoice #INV-2026-44 is confirmed. Karibu sana!",
+    simSlot = 1
+});`,
         response: `{
   "success": true,
   "data": {
     "success": true,
     "messageId": "msg_992019401",
-    "status": "SENT",
+    "status": "QUEUED",
     "recipientPhone": "+255754000111",
     "costCredits": 1
   }
@@ -2402,103 +2309,120 @@ resp, _ := httpClient.Do(req)`,
   -H "Authorization: Bearer YOUR_SESSION_TOKEN" \\
   -H "Content-Type: application/json" \\
   -d '{
+    "organizationId": "org_c9401ab88",
     "name": "Order Dispatch Broadcast",
-    "templateText": "Habari {name}! Order #{orderId} dispatched.",
+    "templateText": "Habari [name]! Order #[orderId] dispatched.",
     "recipients": [
       { "phoneNumber": "+255754000111", "variables": { "name": "Juma", "orderId": "4829" } },
       { "phoneNumber": "+255713999222", "variables": { "name": "Amani", "orderId": "4830" } }
     ]
   }'`,
-        node: `const { BriskClient } = require("@brisksms/sdk");
-const client = new BriskClient({ apiKey: process.env.BRISKSMS_API_KEY });
-
-async function sendCampaign() {
-  const campaign = await client.messaging.createCampaign({
+        node: `const res = await fetch("https://api.brisksms.com/v1/messaging/campaigns", {
+  method: "POST",
+  headers: {
+    "Authorization": \`Bearer \${sessionToken}\`,
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
+    organizationId: "org_c9401ab88",
     name: "Order Dispatch Broadcast",
-    templateText: "Habari {name}! Order #{orderId} dispatched.",
+    templateText: "Habari [name]! Order #[orderId] dispatched.",
     recipients: [
       { phoneNumber: "+255754000111", variables: { name: "Juma", orderId: "4829" } },
       { phoneNumber: "+255713999222", variables: { name: "Amani", orderId: "4830" } }
     ]
-  });
-
-  console.log("Campaign ID: " + campaign.campaignId);
-}
-
-sendCampaign();`,
-        ts: `const campaign = await client.messaging.createCampaign({
-  name: "Order Dispatch Broadcast",
-  templateText: "Habari {name}! Order #{orderId} dispatched.",
-  recipients: [
-    { phoneNumber: "+255754000111", variables: { name: "Juma", orderId: "4829" } },
-    { phoneNumber: "+255713999222", variables: { name: "Amani", orderId: "4830" } }
-  ]
+  })
 });`,
-        python: `campaign = await client.messaging.create_campaign(
-    name="Order Dispatch Broadcast",
-    template_text="Habari {name}! Order #{orderId} dispatched.",
-    recipients=[
-        {"phoneNumber": "+255754000111", "variables": {"name": "Juma", "orderId": "4829"}},
-        {"phoneNumber": "+255713999222", "variables": {"name": "Amani", "orderId": "4830"}}
+        ts: `const res = await fetch("https://api.brisksms.com/v1/messaging/campaigns", {
+  method: "POST",
+  headers: {
+    "Authorization": \`Bearer \${sessionToken}\`,
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
+    organizationId: "org_c9401ab88",
+    name: "Order Dispatch Broadcast",
+    templateText: "Habari [name]! Order #[orderId] dispatched.",
+    recipients: [
+      { phoneNumber: "+255754000111", variables: { name: "Juma", orderId: "4829" } },
+      { phoneNumber: "+255713999222", variables: { name: "Amani", orderId: "4830" } }
     ]
+  })
+});`,
+        python: `response = requests.post(
+    "https://api.brisksms.com/v1/messaging/campaigns",
+    headers={"Authorization": f"Bearer {session_token}"},
+    json={
+        "organizationId": "org_c9401ab88",
+        "name": "Order Dispatch Broadcast",
+        "templateText": "Habari [name]! Order #[orderId] dispatched.",
+        "recipients": [
+            {"phoneNumber": "+255754000111", "variables": {"name": "Juma", "orderId": "4829"}},
+            {"phoneNumber": "+255713999222", "variables": {"name": "Amani", "orderId": "4830"}}
+        ]
+    },
+    timeout=15
 )`,
-        go: `campaign, err := client.Messaging.CreateCampaign(ctx, &brisksms.CampaignParams{
-    Name:         "Order Dispatch Broadcast",
-    TemplateText: "Habari {name}! Order #{orderId} dispatched.",
-    Recipients:   []brisksms.RecipientParam{...},
-})`,
-        php: `$campaign = $client->messaging->createCampaign([
-    'name'         => 'Order Dispatch Broadcast',
-    'templateText' => 'Habari {name}! Order #{orderId} dispatched.',
-    'recipients'   => [
-        ['phoneNumber' => '+255754000111', 'variables' => ['name' => 'Juma', 'orderId' => '4829']]
-    ]
-]);`,
-        java: `CampaignRecord campaign = client.messaging().createCampaign(
-    CreateCampaignRequest.builder()
-        .name("Order Dispatch Broadcast")
-        .templateText("Habari {name}! Order #{orderId} dispatched.")
-        .recipients(List.of(...))
-        .build()
-);`,
-        csharp: `var campaign = await client.Messaging.CreateCampaignAsync(new CreateCampaignRequest
-{
-    Name = "Order Dispatch Broadcast",
-    TemplateText = "Habari {name}! Order #{orderId} dispatched.",
-    Recipients = new[] { ... }
-});`,
+        go: `req, _ := http.NewRequestWithContext(ctx, "POST", "https://api.brisksms.com/v1/messaging/campaigns", body)
+req.Header.Set("Authorization", "Bearer "+sessionToken)
+req.Header.Set("Content-Type", "application/json")
+resp, err := httpClient.Do(req)`,
+        php: `$response = Http::withToken($sessionToken)
+    ->post('https://api.brisksms.com/v1/messaging/campaigns', [
+        'organizationId' => 'org_c9401ab88',
+        'name'           => 'Order Dispatch Broadcast',
+        'templateText'   => 'Habari [name]! Order #[orderId] dispatched.',
+        'recipients'     => [
+            ['phoneNumber' => '+255754000111', 'variables' => ['name' => 'Juma', 'orderId' => '4829']]
+        ]
+    ]);`,
+        java: `HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.brisksms.com/v1/messaging/campaigns"))
+    .header("Authorization", "Bearer " + sessionToken)
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
+    .build();`,
+        csharp: `httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", sessionToken);
+var campaign = await httpClient.PostAsJsonAsync("https://api.brisksms.com/v1/messaging/campaigns", payload);`,
         response: `{
   "success": true,
   "data": {
     "campaignId": "cmp_8829401",
     "name": "Order Dispatch Broadcast",
     "queued": 2,
-    "sent": 2,
+    "sent": 0,
     "failed": 0,
-    "creditsDeducted": 2
+    "creditsReserved": 2
   }
 }`
       },
       device: {
-        curl: `curl -X GET https://api.brisksms.com/v1/devices \\
+        curl: `curl -X GET "https://api.brisksms.com/v1/devices?organizationId=org_c9401ab88" \\
   -H "Authorization: Bearer YOUR_SESSION_TOKEN"`,
-        node: `const { BriskClient } = require("@brisksms/sdk");
-const client = new BriskClient({ apiKey: process.env.BRISKSMS_API_KEY });
-
-async function checkRelays() {
-  const devices = await client.devices.list();
-  devices.forEach(dev => {
-    console.log("Relay: " + dev.deviceModel + " | Status: " + dev.status);
-  });
-}
-
-checkRelays();`,
-        ts: `const devices = await client.devices.list();`,
-        python: `devices = await client.devices.list()`,
-        go: `devices, err := client.Devices.List(ctx)`,
-        php: `$devices = $client->devices->list();`,
-        java: `List<DeviceRecord> devices = client.devices().list();`,
-        csharp: `var devices = await client.Devices.ListAsync();`,
+        node: `const res = await fetch("https://api.brisksms.com/v1/devices?organizationId=org_c9401ab88", {
+  headers: { "Authorization": \`Bearer \${sessionToken}\` }
+});
+const { data } = await res.json();
+console.log("Devices:", data);`,
+        ts: `const res = await fetch("https://api.brisksms.com/v1/devices?organizationId=org_c9401ab88", {
+  headers: { "Authorization": \`Bearer \${sessionToken}\` }
+});`,
+        python: `devices = requests.get(
+    "https://api.brisksms.com/v1/devices?organizationId=org_c9401ab88",
+    headers={"Authorization": f"Bearer {session_token}"},
+    timeout=15
+).json()`,
+        go: `req, _ := http.NewRequestWithContext(ctx, "GET", "https://api.brisksms.com/v1/devices?organizationId=org_c9401ab88", nil)
+req.Header.Set("Authorization", "Bearer "+sessionToken)
+resp, err := httpClient.Do(req)`,
+        php: `$devices = Http::withToken($sessionToken)->get('https://api.brisksms.com/v1/devices?organizationId=org_c9401ab88')->json();`,
+        java: `HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.brisksms.com/v1/devices?organizationId=org_c9401ab88"))
+    .header("Authorization", "Bearer " + sessionToken)
+    .GET()
+    .build();`,
+        csharp: `httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", sessionToken);
+var devices = await httpClient.GetFromJsonAsync<JsonDocument>("https://api.brisksms.com/v1/devices?organizationId=org_c9401ab88");`,
         response: `{
   "success": true,
   "data": [
@@ -2516,125 +2440,125 @@ checkRelays();`,
       }
     };
 
-    // 1.5 Quickstart Interactive Data
+    // 1.5 Quickstart Interactive Data (Direct HTTPS REST)
     const qsData = {
       node: {
         step1: {
-          title: "1. Install Node.js Package",
-          desc: "Install the official BriskSMS SDK via npm, yarn, or pnpm into your Node.js backend.",
-          code: "npm install @brisksms/sdk"
+          title: "1. Generate Scoped API Key",
+          desc: "Create a scoped `bsk_live_*` key in Merchant Console -> Zapier & Webhooks and expose it via `BRISKSMS_API_KEY`.",
+          code: "export BRISKSMS_API_KEY=bsk_live_your_scoped_key"
         },
         step2: {
-          title: "2. Initialize with Secret Key",
-          desc: "Import BriskClient and configure your live secret key from the Developer Settings.",
-          code: `const { BriskClient } = require("@brisksms/sdk");\nconst client = new BriskClient({ apiKey: process.env.BRISKSMS_API_KEY });`
+          title: "2. Configure Standard REST Call",
+          desc: "No third-party SDK package is required. Use built-in `fetch` (Node 18+ / Bun) with `x-api-key` authentication.",
+          code: `const headers = {\n  "x-api-key": process.env.BRISKSMS_API_KEY,\n  "Content-Type": "application/json"\n};`
         },
         step3: {
-          title: "3. Ingest or Dispatch",
-          desc: "Trigger deterministic payment matching or send instant branded SMS campaigns.",
-          code: `const payment = await client.payments.ingest({ ... });\nconsole.log("Settlement ID: " + payment.paymentId);`
+          title: "3. Dispatch SMS or Query Payments",
+          desc: "Send transactional SMS or check live payment verification over HTTPS.",
+          code: `const res = await fetch("https://api.brisksms.com/v1/messages/send", {\n  method: "POST", headers,\n  body: JSON.stringify({ recipientPhone: "+255754000111", message: "Payment received" })\n});`
         }
       },
       ts: {
         step1: {
-          title: "1. Install TypeScript SDK",
-          desc: "Full TypeScript declarations with strict Zod runtime validation and auto-complete.",
-          code: "npm i @brisksms/sdk zod"
+          title: "1. Reference Monorepo Contracts",
+          desc: "Inside the BriskSMS monorepo, import shared DTOs and enums directly from `@brisksms/shared`.",
+          code: `import { PaymentProvider, TransactionState } from "@brisksms/shared";`
         },
         step2: {
-          title: "2. Strongly Typed Client",
-          desc: "Import client and interfaces for compile-time safety across all endpoints.",
-          code: `import { BriskClient } from "@brisksms/sdk";\nconst client = new BriskClient({ apiKey: process.env.BRISKSMS_API_KEY! });`
+          title: "2. Authenticate Requests",
+          desc: "Pass your scoped `bsk_live_*` key in the `x-api-key` header (or `Bearer` JWT for console routes).",
+          code: `const headers = { "x-api-key": process.env.BRISKSMS_API_KEY!, "Content-Type": "application/json" };`
         },
         step3: {
-          title: "3. Execute Typed Call",
-          desc: "Match invoice with automatic schema verification and error recovery.",
-          code: `const match = await client.reconcile.matchInvoice({ invoiceId: "INV-8829", expectedAmountMinor: 15000000 });`
+          title: "3. Call Typed REST Endpoints",
+          desc: "Invoke `/v1/payments/stk-push`, `/v1/messages/send`, or `/v1/reconciliation/verify` via `fetch`.",
+          code: `const res = await fetch("https://api.brisksms.com/v1/payments/stk-push", { method: "POST", headers, body });`
         }
       },
       python: {
         step1: {
-          title: "1. Install via Pip",
-          desc: "Supports Python 3.9+ with full AsyncIO support for FastAPI, Django, and Celery.",
-          code: "pip install brisksms"
+          title: "1. Install Standard HTTP Client",
+          desc: "Use Python's `requests` or `httpx` library directly against BriskSMS `/v1/*` JSON endpoints.",
+          code: "pip install requests"
         },
         step2: {
-          title: "2. Initialize BriskClient",
-          desc: "Load secret credentials and set up the asynchronous connection pool.",
-          code: `import os\nfrom brisksms import BriskClient\n\nclient = BriskClient(api_key=os.environ.get("BRISKSMS_API_KEY", "YOUR_BRISKSMS_API_KEY"))`
+          title: "2. Configure Headers",
+          desc: "Load `BRISKSMS_API_KEY` from your environment secrets.",
+          code: `import os, requests\nHEADERS = {"x-api-key": os.environ["BRISKSMS_API_KEY"]}`
         },
         step3: {
-          title: "3. Dispatch Async Request",
-          desc: "Send bulk SMS or query carrier relay status asynchronously.",
-          code: `res = await client.messages.send_bulk(sender_id="BRISKSMS", recipients=["+255754000111"], message="Code: 8829")`
+          title: "3. Send Transactional SMS",
+          desc: "Post recipients and messages to `/v1/messages/send` with an idempotency key.",
+          code: `res = requests.post("https://api.brisksms.com/v1/messages/send", headers=HEADERS, json={"recipientPhone": "+255754000111", "message": "Code: 8829"}, timeout=15)`
         }
       },
       go: {
         step1: {
-          title: "1. Add Go Module",
-          desc: "Lightweight, zero-allocation Go client for high-throughput telecom microservices.",
-          code: "go get github.com/brisksms/sdk-go"
+          title: "1. Use Go Standard `net/http`",
+          desc: "No external dependency required beyond the Go standard library.",
+          code: `import ("bytes"; "net/http"; "os")`
         },
         step2: {
-          title: "2. Create Go Client",
-          desc: "Initialize client with contextual timeout and HTTP connection reuse.",
-          code: `import "github.com/brisksms/sdk-go"\nclient := brisksms.NewClient(os.Getenv("BRISKSMS_API_KEY"))`
+          title: "2. Set Auth Header",
+          desc: "Attach `x-api-key` and `Content-Type: application/json` to outgoing HTTP requests.",
+          code: `req.Header.Set("x-api-key", os.Getenv("BRISKSMS_API_KEY"))\nreq.Header.Set("Content-Type", "application/json")`
         },
         step3: {
-          title: "3. Execute with Context",
-          desc: "Ingest carrier payment notifications with strict deduplication check.",
-          code: `res, err := client.Payments.Ingest(ctx, &brisksms.IngestParams{ ... })`
+          title: "3. Execute With Context",
+          desc: "Send JSON payloads to `POST /v1/messages/send` or `POST /v1/payments/stk-push`.",
+          code: `req, _ := http.NewRequestWithContext(ctx, "POST", "https://api.brisksms.com/v1/messages/send", bytes.NewReader(payload))`
         }
       },
       php: {
         step1: {
-          title: "1. Install via Composer",
-          desc: "Integrates directly with Laravel, WHMCS, WooCommerce, and pure PHP 8.1+.",
-          code: "composer require brisksms/sdk"
+          title: "1. Use Laravel Http / cURL",
+          desc: "Standard Laravel HTTP client or PHP cURL works directly with BriskSMS REST endpoints.",
+          code: `// Use Illuminate\\Support\\Facades\\Http or ext-curl`
         },
         step2: {
-          title: "2. Configure in PHP",
-          desc: "Initialize the client or register the service provider in Laravel config/app.php.",
-          code: `use BriskSMS\\BriskClient;\n$client = new BriskClient(['api_key' => env('BRISKSMS_API_KEY')]);`
+          title: "2. Configure API Key Header",
+          desc: "Store `BRISKSMS_API_KEY` in `.env` and attach it as `x-api-key`.",
+          code: `$headers = ['x-api-key' => env('BRISKSMS_API_KEY')];`
         },
         step3: {
-          title: "3. Settle Invoices",
-          desc: "Automatically reconcile M-Pesa till receipts against WHMCS invoices.",
-          code: `$match = $client->reconcile->matchInvoice(['invoiceId' => 'INV-8829', 'paymentId' => 'pay_123']);`
+          title: "3. Dispatch Notifications",
+          desc: "Send SMS receipts upon WHMCS or WooCommerce checkout events.",
+          code: `Http::withHeaders($headers)->post('https://api.brisksms.com/v1/messages/send', ['recipientPhone' => '+255754000111', 'message' => 'Confirmed']);`
         }
       },
       java: {
         step1: {
-          title: "1. Add Maven / Gradle",
-          desc: "Enterprise client for Java 17+, Spring Boot 3, and Kotlin microservices.",
-          code: `// build.gradle\nimplementation 'com.brisksms:sdk:1.2.0'`
+          title: "1. Use JDK 17+ `java.net.http.HttpClient`",
+          desc: "Standard library HTTP client for Spring Boot 3 and enterprise Java services.",
+          code: `HttpClient client = HttpClient.newHttpClient();`
         },
         step2: {
-          title: "2. Inject Spring Bean",
-          desc: "Configure BriskClient as a Spring @Bean or standalone thread-safe singleton.",
-          code: `@Bean\npublic BriskClient briskClient() {\n    return BriskClient.withApiKey(System.getenv("BRISKSMS_API_KEY"));\n}`
+          title: "2. Build Request",
+          desc: "Attach `x-api-key` or `Authorization: Bearer ...` and JSON body.",
+          code: `HttpRequest req = HttpRequest.newBuilder().uri(URI.create("https://api.brisksms.com/v1/messages/send")).header("x-api-key", System.getenv("BRISKSMS_API_KEY")).header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(json)).build();`
         },
         step3: {
-          title: "3. Ingest Payment Record",
-          desc: "Process mobile money push alerts and emit internal Spring Domain Events.",
-          code: `PaymentRecord record = briskClient.payments().ingest(request);`
+          title: "3. Read JSON Response",
+          desc: "Inspect HTTP status and `{ success, data }` envelope.",
+          code: `HttpResponse<String> res = client.send(req, HttpResponse.BodyHandlers.ofString());`
         }
       },
       csharp: {
         step1: {
-          title: "1. Install NuGet Package",
-          desc: "Async-first client for .NET 8 / .NET 9 ASP.NET Core web APIs and console workers.",
-          code: "dotnet add package BriskSMS.Sdk"
+          title: "1. Configure `HttpClient`",
+          desc: "Register typed `HttpClient` in .NET 8 DI for BriskSMS REST API calls.",
+          code: `builder.Services.AddHttpClient("BriskSMS", c => c.DefaultRequestHeaders.Add("x-api-key", config["BriskSMS:ApiKey"]));`
         },
         step2: {
-          title: "2. Register DI Services",
-          desc: "Register in Program.cs using builder.Services.AddBriskSms(apiKey).",
-          code: `builder.Services.AddBriskSms(options => {\n    options.ApiKey = builder.Configuration["BriskSMS:ApiKey"];\n});`
+          title: "2. Send Typed JSON Payloads",
+          desc: "Use `System.Net.Http.Json` `PostAsJsonAsync` against `/v1/*` routes.",
+          code: `var res = await client.PostAsJsonAsync("https://api.brisksms.com/v1/messages/send", payload);`
         },
         step3: {
-          title: "3. Await Settlement",
-          desc: "Strongly typed async methods with automatic exponential retry policy.",
-          code: `var match = await _briskClient.Reconcile.MatchInvoiceAsync(request);`
+          title: "3. Handle Idempotency",
+          desc: "Include `Idempotency-Key` headers for retry-safe payment and SMS requests.",
+          code: `res.EnsureSuccessStatusCode();`
         }
       }
     };
@@ -2887,57 +2811,49 @@ Data (JSON Payload):
       }
     }
 
-    // 2.8 Single-Use Claim Box Resilience Snippets
+    // 2.8 Verification & Claim Reconciliation Snippets (Direct HTTPS REST)
     const resilienceSnippets = {
-      ts: `import { BriskClient } from "@brisksms/sdk";
-
-const client = new BriskClient({ apiKey: process.env.BRISKSMS_API_KEY! });
-
-// Stage 3 Expedited Fallback: Customer enters transaction ID from their SMS
-async function expediteCheckout(invoiceId: string, transactionId: string, amount: number) {
-  const claim = await client.reconciliation.claimTransaction({
-    invoiceId: invoiceId,
-    provider: "VODACOM_MPESA",
-    providerReference: transactionId.trim().toUpperCase(),
-    expectedAmount: amount
+      ts: `// Verify and reconcile an observed payment against an open invoice via REST
+async function verifyPaymentSettlement(organizationId: string, paymentId: string, invoiceId: string) {
+  const res = await fetch("https://api.brisksms.com/v1/reconciliation/verify", {
+    method: "POST",
+    headers: {
+      "Authorization": \`Bearer \${process.env.BRISKSMS_SESSION_TOKEN!}\`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      organizationId,
+      paymentId,
+      invoiceId,
+      verificationMethod: "MANUAL_FINANCE_APPROVAL",
+      notes: "Confirmed against payment reference claim record"
+    })
   });
-
-  if (claim.status === "VERIFIED" || claim.status === "CLAIMED") {
-    // Single-use transaction box is locked. Safe to fulfill immediately.
-    await grantCustomerService(invoiceId);
-    return { success: true, message: "Payment verified successfully!" };
-  }
-
-  return { success: false, message: "Verification in progress." };
+  return res.json();
 }`,
-      python: `import os
-from brisksms import BriskClient
+      python: `import os, requests
 
-client = BriskClient(api_key=os.getenv("BRISKSMS_API_KEY"))
-
-# Stage 3 Expedited Fallback: Customer enters transaction ID from their SMS
-async def expedite_checkout(invoice_id: str, transaction_id: str, amount: float):
-    claim = await client.reconciliation.claim_transaction(
-        invoice_id=invoice_id,
-        provider="VODACOM_MPESA",
-        provider_reference=transaction_id.strip().upper(),
-        expected_amount=amount,
+def verify_payment_settlement(organization_id: str, payment_id: str, invoice_id: str):
+    res = requests.post(
+        "https://api.brisksms.com/v1/reconciliation/verify",
+        headers={"Authorization": f"Bearer {os.getenv('BRISKSMS_SESSION_TOKEN')}"},
+        json={
+            "organizationId": organization_id,
+            "paymentId": payment_id,
+            "invoiceId": invoice_id,
+            "verificationMethod": "MANUAL_FINANCE_APPROVAL",
+        },
+        timeout=15,
     )
-    
-    if claim.status in ("VERIFIED", "CLAIMED"):
-        # Single-use transaction box is locked. Safe to fulfill immediately.
-        await grant_customer_service(invoice_id)
-        return {"success": True, "message": "Payment verified successfully!"}
-        
-    return {"success": False, "message": "Verification in progress."}`,
-      curl: `curl -X POST https://api.brisksms.com/v1/reconciliation/claim \\
-  -H "Authorization: Bearer bsk_live_YOUR_SECRET_KEY" \\
+    return res.json()`,
+      curl: `curl -X POST https://api.brisksms.com/v1/reconciliation/verify \\
+  -H "Authorization: Bearer YOUR_SESSION_TOKEN" \\
   -H "Content-Type: application/json" \\
   -d '{
-    "invoiceId": "INV-8829",
-    "provider": "VODACOM_MPESA",
-    "providerReference": "QA88HH99II",
-    "expectedAmount": 150000
+    "organizationId": "org_c9401ab88",
+    "paymentId": "pay_984920194829",
+    "invoiceId": "inv_8829",
+    "verificationMethod": "MANUAL_FINANCE_APPROVAL"
   }'`
     };
 

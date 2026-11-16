@@ -1,12 +1,14 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, generateKeyPairSync, randomUUID, sign as cryptoSign } from 'node:crypto';
 import { IncomingMessage, ServerResponse } from 'node:http';
 import { Socket } from 'node:net';
 import { createApp } from '../src/app.js';
 import { dbStore } from '../src/core/store.js';
 import { DeviceIngestionMode, UserRole } from '@brisksms/shared';
 import { deviceService } from '../src/modules/device/device.service.js';
+import { buildPairingChallengeTranscript } from '../src/modules/device/device-crypto.js';
+import { hashToken } from '../src/core/crypto.js';
 import { ReconciliationService } from '../src/modules/reconciliation/reconciliation.service.js';
 import { sql } from '@brisksms/db';
 
@@ -61,16 +63,45 @@ describe('Milestone 2: Backend Device Authentication & Evidence Ingestion Endpoi
       actorId: userAId,
     });
 
-    // 4. Pair Device A under Organization A
+    // 4. Pair Device A under Organization A using EC P-256 Proof-of-Possession
     const pairingRes = await deviceService.createPairingToken(orgAId, userAId);
+    const { publicKey, privateKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+    const publicKeyPem = publicKey.export({ type: 'spki', format: 'pem' }).toString().trim();
+    const fingerprint = createHash('sha256')
+      .update(publicKey.export({ type: 'spki', format: 'der' }))
+      .digest('hex');
+    const challenge = await deviceService.createPairingChallenge({
+      enrollmentToken: pairingRes.pairingToken,
+      publicKeyPem,
+    });
+    const transcript = buildPairingChallengeTranscript({
+      challengeId: challenge.challengeId,
+      enrollmentId: challenge.enrollmentId,
+      organizationId: challenge.organizationId,
+      pairingTokenHash: hashToken(pairingRes.pairingToken),
+      publicKeyFingerprint: fingerprint,
+      keyAlgorithm: challenge.keyAlgorithm,
+      signatureAlgorithm: challenge.signatureAlgorithm,
+      challengeNonce: challenge.challenge,
+      expiresAtIso: challenge.expiresAt,
+    });
+    const challengeSignature = cryptoSign('sha256', transcript, {
+      key: privateKey,
+      dsaEncoding: 'der',
+    }).toString('base64');
+
     const pairResult = await deviceService.pairDevice({
       enrollmentToken: pairingRes.pairingToken,
+      challengeId: challenge.challengeId,
+      challengeSignature,
+      enrollmentId: challenge.enrollmentId,
+      organizationId: challenge.organizationId,
       label: 'Samsung Galaxy A15 Relay',
       deviceModel: 'SM-A155F',
       manufacturer: 'Samsung',
       androidVersion: '14',
       appVersion: '1.0.0',
-      publicKeyPem: 'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0',
+      publicKeyPem,
       ingestionMode: DeviceIngestionMode.NOTIFICATION_LISTENER,
     });
 

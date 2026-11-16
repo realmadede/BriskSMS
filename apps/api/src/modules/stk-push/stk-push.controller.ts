@@ -1,6 +1,8 @@
 import { Router, RouteRequest, ApiResponse, HttpException } from '../../core/http.js';
 import { authenticate } from '../../core/guards.js';
-import { ApiKeyScope, PaymentProvider } from '@brisksms/shared';
+import { dbStore } from '../../core/store.js';
+import { ApiKeyScope, BriskError, PaymentProvider } from '@brisksms/shared';
+import { DatabaseUnavailableError } from '@brisksms/db';
 import { ApiKeyService } from '../developer/api-key.service.js';
 import { stkPushService } from './stk-push.service.js';
 import { CallbackVerificationRequest } from './verifiers/index.js';
@@ -39,12 +41,47 @@ async function resolveOrganizationContext(
     return keyRecord.organizationId;
   }
 
-  // Fallback to JWT Bearer / Session Cookie
+  // Fallback to JWT Bearer / Session Cookie / OAuth access token
   await authenticate(req);
-  const orgId = req.query.organizationId || req.context.organizationId || (req.body as any)?.organizationId;
+  if (req.context.authType === 'oauth') {
+    const scopes = req.context.oauthScopes ?? [];
+    const hasOAuthScope = requiredScopes.some((s) => scopes.includes(s));
+    if (!hasOAuthScope) {
+      throw new HttpException(
+        403,
+        'INSUFFICIENT_SCOPE',
+        `Forbidden: OAuth token requires at least one of the following scopes: ${requiredScopes.join(', ')}`,
+      );
+    }
+  }
+
+  const userId = req.context.userId!;
+  const contextOrgId = req.context.organizationId;
+  const queryOrgId = typeof req.query.organizationId === 'string' ? req.query.organizationId.trim() : '';
+  const bodyOrgId =
+    req.body && typeof (req.body as any).organizationId === 'string'
+      ? String((req.body as any).organizationId).trim()
+      : '';
+  const requestedOrgId = queryOrgId || bodyOrgId;
+
+  if (contextOrgId && requestedOrgId && requestedOrgId !== contextOrgId) {
+    throw new HttpException(
+      403,
+      'CROSS_ORGANIZATION_FORBIDDEN',
+      'Cannot specify an organizationId outside the authenticated session organization context',
+    );
+  }
+
+  const orgId = requestedOrgId || contextOrgId;
   if (!orgId) {
     throw new HttpException(400, 'VALIDATION_ERROR', 'organizationId is required');
   }
+
+  const membership = await dbStore.getMembership(orgId, userId);
+  if (!membership) {
+    throw new HttpException(403, 'FORBIDDEN', 'You are not a member of this organization');
+  }
+
   return orgId;
 }
 
@@ -85,15 +122,42 @@ export function registerStkPushRoutes(router: Router): void {
       throw new HttpException(400, 'VALIDATION_ERROR', 'amount is required and must be a positive number');
     }
 
+    const rawHeaderIdem = req.headers['idempotency-key'];
+    const headerIdem = typeof rawHeaderIdem === 'string' ? rawHeaderIdem.trim() : undefined;
+    const bodyIdem = typeof body.idempotencyKey === 'string' ? body.idempotencyKey.trim() : undefined;
+
+    if (rawHeaderIdem !== undefined && !headerIdem) {
+      throw new HttpException(400, 'VALIDATION_ERROR', 'Idempotency-Key header cannot be blank');
+    }
+    if (body.idempotencyKey !== undefined && (typeof body.idempotencyKey !== 'string' || !bodyIdem)) {
+      throw new HttpException(400, 'VALIDATION_ERROR', 'idempotencyKey must be a non-empty string when provided');
+    }
+    if (headerIdem && bodyIdem && headerIdem !== bodyIdem) {
+      throw new HttpException(
+        400,
+        'VALIDATION_ERROR',
+        'Conflicting Idempotency-Key header and body.idempotencyKey values',
+      );
+    }
+    const idempotencyKey = headerIdem || bodyIdem;
+    if (idempotencyKey && idempotencyKey.length > 120) {
+      throw new HttpException(400, 'VALIDATION_ERROR', 'idempotencyKey must be 120 characters or fewer');
+    }
+
     try {
       const result = await stkPushService.initiateStkPush(orgId, {
         phoneNumber: String(body.phoneNumber).trim(),
+        provider:
+          body.provider !== undefined
+            ? (String(body.provider).trim().toUpperCase() as any)
+            : undefined,
         amount: Number(body.amount),
-        currency: body.currency ? String(body.currency).toUpperCase() : 'TZS',
+        currency: body.currency ? String(body.currency).trim().toUpperCase() : 'TZS',
         invoiceId: body.invoiceId ? String(body.invoiceId).trim() : undefined,
         referenceNumber: body.referenceNumber ? String(body.referenceNumber).trim() : undefined,
         customerName: body.customerName ? String(body.customerName).trim() : undefined,
         memo: body.memo ? String(body.memo).trim() : undefined,
+        idempotencyKey,
         metadata: body.metadata && typeof body.metadata === 'object' ? body.metadata : undefined,
       });
 
@@ -103,7 +167,10 @@ export function registerStkPushRoutes(router: Router): void {
         data: result,
       };
     } catch (err: any) {
-      throw new HttpException(400, 'STK_PUSH_ERROR', err.message);
+      if (err instanceof HttpException || err instanceof BriskError || err instanceof DatabaseUnavailableError) {
+        throw err;
+      }
+      throw new HttpException(500, 'STK_PUSH_ERROR', 'STK push initiation failed due to an unexpected internal error');
     }
   });
 
@@ -129,7 +196,13 @@ export function registerStkPushRoutes(router: Router): void {
         data: status,
       };
     } catch (err: any) {
-      throw new HttpException(404, 'NOT_FOUND', err.message);
+      if (err instanceof HttpException || err instanceof BriskError || err instanceof DatabaseUnavailableError) {
+        throw err;
+      }
+      if (typeof err?.message === 'string' && err.message.toLowerCase().includes('not found')) {
+        throw new HttpException(404, 'NOT_FOUND', err.message);
+      }
+      throw err;
     }
   });
 

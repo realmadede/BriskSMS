@@ -19,7 +19,10 @@ BriskSMS is a commercial non-custodial financial reconciliation and cellular mes
 
 ---
 
-## 2. The Unique Transaction "Claim Box" Pattern
+> [!NOTE]
+> **P0.2 Supersession Note (2026-11-16):** The "Unique Transaction Claim Box" diagram below illustrates the initial pre-P0.2 conceptual flow (`claim-reference` was not exposed as an HTTP route). The live implementation enforces global reference claims atomically across **all three** ingestion paths (Companion SMS `/v1/ingestion/evidence`, Manual Reconciliation `/v1/reconciliation/verify`, and STK Callbacks `/v1/payments/stk-push/callback/:provider`) via `PaymentReferenceClaimService` (`payment_reference_claims`, `payment_reference_claim_events`, and `payment_reference_claim_collisions`).
+
+## 2. The Unique Transaction "Claim Box" Concept (Superseded by P0.2 Global Claim Boundary)
 
 When an external customer initiates payment, there is often a time delta between when the payer executes the mobile money transaction and when the merchant's companion device receives and uploads the carrier notification.
 
@@ -196,5 +199,5 @@ await withTransaction(async (tx) => {
 
 ## 5. Audit Logging & Regulatory Compliance
 
-* **TCRA & BoT Audit Trail:** Every verification records the actor (`verified_by_id`), previous state, new state, timestamp, and verification method (`MANUAL_FINANCE_APPROVAL`, `INDEPENDENT_API_QUERY`, or `DETERMINISTIC_EXACT_MATCH`).
+* **TCRA & BoT Audit Trail:** Every verification records the actor (`verified_by_id`), previous state, new state, timestamp, and `VerificationMethod` (`MANUAL_FINANCE_APPROVAL`, `BANK_STATEMENT_RECONCILIATION`, `INDEPENDENT_PROVIDER_QUERY`, or `MANUAL_REJECTION`).
 * **Non-Repudiation:** Companion evidence is digitally signed using an asymmetric ECDSA private key held in the Android device's hardware Keystore (TEE / StrongBox). If a merchant disputes an ingested payment, the cryptographic signature proves that the notification originated from their authorized physical handset.

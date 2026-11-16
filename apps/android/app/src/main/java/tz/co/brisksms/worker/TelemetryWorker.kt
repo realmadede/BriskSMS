@@ -10,10 +10,14 @@ import android.os.Build
 import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import org.json.JSONArray
+import org.json.JSONObject
 import tz.co.brisksms.core.network.BriskApiClient
+import tz.co.brisksms.core.network.DeviceCommandAckPayload
 import tz.co.brisksms.core.network.DeviceTelemetryRequest
 import tz.co.brisksms.core.storage.KeystoreSecureStorage
 import tz.co.brisksms.data.local.BriskDatabase
+import tz.co.brisksms.messaging.PendingSmsJobResultStore
 
 /**
  * Shared Device Telemetry Worker
@@ -39,6 +43,9 @@ class TelemetryWorker(
         }
 
         return try {
+            // Flush any persisted outbound SMS job results from prior radio dispatch before reporting telemetry
+            PendingSmsJobResultStore.flushPending(secureStorage, apiClient)
+
             val db = BriskDatabase.getInstance(applicationContext)
             val pendingEvidence = db.evidenceDao().countPending()
             val pendingDispatches = db.smsDispatchDao().countPending()
@@ -46,23 +53,36 @@ class TelemetryWorker(
             val (batteryPct, isCharging) = getBatteryStatus()
             val networkType = getNetworkType()
 
+            val pendingAcks = loadPendingAcks()
             val telemetry = DeviceTelemetryRequest(
                 batteryPercentage = batteryPct,
                 isCharging = isCharging,
                 networkType = networkType,
                 signalStrengthDbm = null,
-                pendingOfflineCount = pendingEvidence + pendingDispatches
+                pendingOfflineCount = pendingEvidence + pendingDispatches,
+                commandAcknowledgements = pendingAcks
             )
 
             val result = apiClient.sendTelemetry(telemetry)
             if (result.isSuccess) {
                 val response = result.getOrNull()
-                if (response != null && response.commands.isNotEmpty()) {
-                    processRemoteCommands(response.commands, db)
+                if (response != null) {
+                    val remainingAcks = DeviceCommandProcessor.reconcilePendingAcks(pendingAcks, response.ackResults)
+                    savePendingAcks(remainingAcks)
+                    if (response.commands.isNotEmpty()) {
+                        processRemoteCommands(response.commands, remainingAcks, db)
+                    }
                 }
                 Log.i(TAG, "Reported device telemetry successfully. Battery: $batteryPct%, Net: $networkType")
                 Result.success()
             } else {
+                if (secureStorage.isRevoked) {
+                    Log.w(TAG, "Device revoked by backend during telemetry; wiping local identity and halting retries.")
+                    db.clearAllTables()
+                    runCatching { tz.co.brisksms.security.KeystoreManager().deleteKey() }
+                    androidx.work.WorkManager.getInstance(applicationContext).cancelAllWork()
+                    return Result.failure()
+                }
                 Log.w(TAG, "Telemetry upload reported error: ${result.exceptionOrNull()?.message}")
                 Result.retry()
             }
@@ -74,10 +94,33 @@ class TelemetryWorker(
 
     private suspend fun processRemoteCommands(
         commands: List<tz.co.brisksms.core.network.DeviceCommandPayload>,
+        pendingAcks: List<DeviceCommandAckPayload>,
         db: BriskDatabase
     ) {
+        var currentPending = pendingAcks
         for (cmd in commands) {
+            if (cmd.id.isBlank()) continue
+            if (DeviceCommandProcessor.shouldSkipAlreadyPendingAck(cmd, currentPending)) {
+                Log.i(TAG, "Skipping duplicate delivery for locally completed command [${cmd.id}] pending ACK.")
+                continue
+            }
+
             Log.i(TAG, "Processing remote fleet command: ${cmd.type} [${cmd.id}]")
+            val ack = executeCommand(cmd, db) ?: continue
+
+            val ackResult = apiClient.acknowledgeCommand(ack)
+            if (!ackResult.accepted && ackResult.retryable && !secureStorage.isRevoked) {
+                currentPending = DeviceCommandProcessor.mergePendingAck(currentPending, ack)
+                savePendingAcks(currentPending)
+            }
+        }
+    }
+
+    private fun executeCommand(
+        cmd: tz.co.brisksms.core.network.DeviceCommandPayload,
+        db: BriskDatabase
+    ): DeviceCommandAckPayload? {
+        return try {
             when (cmd.type) {
                 "PAUSE_RELAY" -> {
                     secureStorage.isBulkMessagingEnabled = false
@@ -86,6 +129,7 @@ class TelemetryWorker(
                     }
                     applicationContext.stopService(stopIntent)
                     Log.i(TAG, "Cellular SMS relay paused by remote command.")
+                    DeviceCommandAckPayload(commandId = cmd.id, status = "ACKNOWLEDGED", leaseToken = cmd.leaseToken)
                 }
                 "RESUME_RELAY" -> {
                     secureStorage.isBulkMessagingEnabled = true
@@ -98,17 +142,33 @@ class TelemetryWorker(
                         applicationContext.startService(startIntent)
                     }
                     Log.i(TAG, "Cellular SMS relay resumed by remote command.")
+                    DeviceCommandAckPayload(commandId = cmd.id, status = "ACKNOWLEDGED", leaseToken = cmd.leaseToken)
                 }
                 "SWITCH_SIM" -> {
-                    val targetSlot = cmd.payload?.optInt("simSlot", 1) ?: 1
-                    secureStorage.preferredSimSlot = targetSlot
-                    Log.i(TAG, "Primary SIM preference switched to slot $targetSlot by remote command.")
+                    val rawSlot = if (cmd.payload != null && cmd.payload.has("simSlot")) cmd.payload.opt("simSlot") else null
+                    val targetSlot = DeviceCommandProcessor.parseValidatedSimSlot(rawSlot)
+                    if (targetSlot == null) {
+                        val reason = "Invalid SWITCH_SIM payload: simSlot must be 1 or 2"
+                        Log.w(TAG, reason)
+                        DeviceCommandAckPayload(
+                            commandId = cmd.id,
+                            status = "FAILED",
+                            leaseToken = cmd.leaseToken,
+                            failureReason = reason
+                        )
+                    } else {
+                        secureStorage.preferredSimSlot = targetSlot
+                        Log.i(TAG, "Primary SIM preference switched to slot $targetSlot by remote command.")
+                        DeviceCommandAckPayload(commandId = cmd.id, status = "ACKNOWLEDGED", leaseToken = cmd.leaseToken)
+                    }
                 }
                 "WIPE_AND_REVOKE" -> {
                     Log.w(TAG, "Executing emergency WIPE_AND_REVOKE remote command.")
                     secureStorage.isRevoked = true
                     secureStorage.isPaired = false
                     secureStorage.deviceToken = null
+                    secureStorage.pendingCommandAcksJson = null
+                    secureStorage.pendingSmsJobResultsJson = null
                     db.clearAllTables()
                     try {
                         val km = tz.co.brisksms.security.KeystoreManager()
@@ -116,9 +176,72 @@ class TelemetryWorker(
                     } catch (e: Exception) {
                         Log.w(TAG, "Failed deleting Keystore key: ${e.message}")
                     }
+                    null
+                }
+                else -> {
+                    val reason = "Unsupported fleet command type: ${cmd.type}"
+                    Log.w(TAG, reason)
+                    DeviceCommandAckPayload(
+                        commandId = cmd.id,
+                        status = "FAILED",
+                        leaseToken = cmd.leaseToken,
+                        failureReason = reason
+                    )
                 }
             }
+        } catch (e: Exception) {
+            val reason = (e.message ?: "Command execution exception").take(255)
+            Log.e(TAG, "Command [${cmd.id}] execution failed: $reason")
+            DeviceCommandAckPayload(
+                commandId = cmd.id,
+                status = "FAILED",
+                leaseToken = cmd.leaseToken,
+                failureReason = reason
+            )
         }
+    }
+
+    private fun loadPendingAcks(): List<DeviceCommandAckPayload> {
+        val raw = secureStorage.pendingCommandAcksJson ?: return emptyList()
+        return try {
+            val arr = JSONArray(raw)
+            val list = mutableListOf<DeviceCommandAckPayload>()
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                val cmdId = obj.optString("commandId", "")
+                val status = obj.optString("status", "")
+                if (cmdId.isNotBlank() && status.isNotBlank()) {
+                    list.add(
+                        DeviceCommandAckPayload(
+                            commandId = cmdId,
+                            status = status,
+                            leaseToken = if (obj.isNull("leaseToken")) null else obj.optString("leaseToken", "").ifEmpty { null },
+                            failureReason = if (obj.isNull("failureReason")) null else obj.optString("failureReason", "").ifEmpty { null }
+                        )
+                    )
+                }
+            }
+            list
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun savePendingAcks(acks: List<DeviceCommandAckPayload>) {
+        if (acks.isEmpty()) {
+            secureStorage.pendingCommandAcksJson = null
+            return
+        }
+        val arr = JSONArray()
+        for (ack in acks) {
+            arr.put(JSONObject().apply {
+                put("commandId", ack.commandId)
+                put("status", ack.status)
+                if (ack.leaseToken != null) put("leaseToken", ack.leaseToken)
+                if (ack.failureReason != null) put("failureReason", ack.failureReason)
+            })
+        }
+        secureStorage.pendingCommandAcksJson = arr.toString()
     }
 
     private fun getBatteryStatus(): Pair<Int, Boolean> {

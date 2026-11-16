@@ -1,11 +1,15 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash, generateKeyPairSync, randomUUID, sign as cryptoSign } from 'node:crypto';
+import { sql } from '@brisksms/db';
 import { dbStore } from '../src/core/store.js';
 import { catalogService } from '../src/modules/subscription/catalog.service.js';
 import { subscriptionService } from '../src/modules/subscription/subscription.service.js';
 import { entitlementService } from '../src/modules/subscription/entitlement.service.js';
 import { authService } from '../src/modules/auth/auth.service.js';
 import { deviceService } from '../src/modules/device/device.service.js';
+import { buildPairingChallengeTranscript } from '../src/modules/device/device-crypto.js';
+import { hashToken } from '../src/core/crypto.js';
 import {
   BillingInterval,
   SubscriptionStatus,
@@ -63,6 +67,18 @@ describe('Phase 2: Dynamic Subscription Catalog & Entitlements Engine', () => {
       organizationName: 'Kinondoni Retail Mart',
     });
     const orgId = ownerRes.organizationId!;
+
+    // Seed verified STK settlement backing the checkout paymentMethodRef
+    await sql`
+      INSERT INTO "stk_push_transactions" (
+        "id", "organization_id", "provider", "phone_number",
+        "amount_cents", "currency", "status", "provider_reference"
+      )
+      VALUES (
+        ${randomUUID()}, ${orgId}, 'MPESA'::"PaymentProvider", '255754000001',
+        6500000, 'TZS', 'SUCCESS'::"StkPushStatus", 'MPESA-PAY-98124'
+      )
+    `;
 
     // Checkout Growth Plan (TZS, Monthly)
     const subscription = await subscriptionService.checkoutSubscription(orgId, ownerRes.user.id, {
@@ -147,15 +163,41 @@ describe('Phase 2: Dynamic Subscription Catalog & Entitlements Engine', () => {
       billingInterval: BillingInterval.MONTHLY,
     });
 
-    // Device 1: Pairing should succeed
+    // Device 1: Pairing should succeed via challenge-response PoP
     const pair1 = await deviceService.createPairingToken(orgId, ownerRes.user.id);
+    const { publicKey, privateKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+    const publicKeyPem = publicKey.export({ type: 'spki', format: 'pem' }).toString().trim();
+    const fingerprint = createHash('sha256')
+      .update(publicKey.export({ type: 'spki', format: 'der' }))
+      .digest('hex');
+    const ch1 = await deviceService.createPairingChallenge({
+      enrollmentToken: pair1.pairingToken,
+      publicKeyPem,
+    });
+    const sig1 = cryptoSign(
+      'sha256',
+      buildPairingChallengeTranscript({
+        challengeId: ch1.challengeId,
+        enrollmentId: ch1.enrollmentId,
+        organizationId: ch1.organizationId,
+        pairingTokenHash: hashToken(pair1.pairingToken),
+        publicKeyFingerprint: fingerprint,
+        keyAlgorithm: ch1.keyAlgorithm,
+        signatureAlgorithm: ch1.signatureAlgorithm,
+        challengeNonce: ch1.challenge,
+        expiresAtIso: ch1.expiresAt,
+      }),
+      { key: privateKey, dsaEncoding: 'der' },
+    ).toString('base64');
     await deviceService.pairDevice({
       enrollmentToken: pair1.pairingToken,
+      challengeId: ch1.challengeId,
+      challengeSignature: sig1,
       deviceModel: 'Samsung Galaxy A15',
       manufacturer: 'Samsung',
       androidVersion: '14',
       appVersion: '1.0.0',
-      publicKeyPem: '-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A...\n-----END PUBLIC KEY-----',
+      publicKeyPem,
     });
 
     // Device 2: Attempting to pair a second device must be rejected with QuotaExceededError

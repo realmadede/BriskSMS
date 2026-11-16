@@ -1,9 +1,70 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { deviceService } from '../src/modules/device/device.service.js';
+import { createHash, generateKeyPairSync, sign as cryptoSign } from 'node:crypto';
+import { DeviceService, deviceService } from '../src/modules/device/device.service.js';
+import { buildPairingChallengeTranscript } from '../src/modules/device/device-crypto.js';
+import { hashToken } from '../src/core/crypto.js';
 import { authService } from '../src/modules/auth/auth.service.js';
 import { dbStore } from '../src/core/store.js';
 import { DeviceStatus, DeviceIngestionMode } from '@brisksms/shared';
+
+function generateEcP256KeyPair() {
+  const { publicKey, privateKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+  const spkiDer = publicKey.export({ type: 'spki', format: 'der' });
+  return {
+    publicKeyPem: publicKey.export({ type: 'spki', format: 'pem' }).toString().trim(),
+    fingerprint: createHash('sha256').update(spkiDer).digest('hex'),
+    privateKey,
+  };
+}
+
+async function enrollWithPop(
+  svc: DeviceService,
+  enrollmentToken: string,
+  meta: {
+    label?: string;
+    deviceModel: string;
+    manufacturer: string;
+    androidVersion: string;
+    appVersion: string;
+    ingestionMode?: DeviceIngestionMode;
+  },
+) {
+  const keys = generateEcP256KeyPair();
+  const challenge = await svc.createPairingChallenge({
+    enrollmentToken,
+    publicKeyPem: keys.publicKeyPem,
+  });
+  const transcript = buildPairingChallengeTranscript({
+    challengeId: challenge.challengeId,
+    enrollmentId: challenge.enrollmentId,
+    organizationId: challenge.organizationId,
+    pairingTokenHash: hashToken(enrollmentToken),
+    publicKeyFingerprint: keys.fingerprint,
+    keyAlgorithm: challenge.keyAlgorithm,
+    signatureAlgorithm: challenge.signatureAlgorithm,
+    challengeNonce: challenge.challenge,
+    expiresAtIso: challenge.expiresAt,
+  });
+  const challengeSignature = cryptoSign('sha256', transcript, {
+    key: keys.privateKey,
+    dsaEncoding: 'der',
+  }).toString('base64');
+
+  return {
+    keys,
+    challenge,
+    pairResult: await svc.pairDevice({
+      enrollmentToken,
+      challengeId: challenge.challengeId,
+      challengeSignature,
+      enrollmentId: challenge.enrollmentId,
+      organizationId: challenge.organizationId,
+      publicKeyPem: keys.publicKeyPem,
+      ...meta,
+    }),
+  };
+}
 
 describe('Phase 1: DeviceModule & Cryptographic Pairing Flow', () => {
   let orgId: string;
@@ -33,39 +94,36 @@ describe('Phase 1: DeviceModule & Cryptographic Pairing Flow', () => {
     assert.ok(expDate > Date.now());
   });
 
-  it('should complete Android device pairing and return device token and active status', async () => {
+  it('should complete Android device pairing via challenge-response PoP and return device token and active status', async () => {
     const pairingData = await deviceService.createPairingToken(orgId, ownerUserId);
 
-    const pairResult = await deviceService.pairDevice({
-      enrollmentToken: pairingData.pairingToken,
+    const { pairResult, keys } = await enrollWithPop(deviceService, pairingData.pairingToken, {
       label: 'Main Office Till Samsung S23',
       deviceModel: 'SM-S911B',
       manufacturer: 'Samsung',
       androidVersion: '14.0',
       appVersion: '1.2.0',
-      publicKeyPem: '-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA...\n-----END PUBLIC KEY-----',
       ingestionMode: DeviceIngestionMode.NOTIFICATION_LISTENER,
     });
 
     assert.ok(pairResult.deviceId);
     assert.equal(pairResult.organizationId, orgId);
     assert.ok(pairResult.deviceToken.startsWith('bsk_dev_'));
+    assert.equal(pairResult.publicKeyFingerprint, keys.fingerprint);
 
     // Verify device in store
     const device = await dbStore.getDeviceById(pairResult.deviceId);
     assert.ok(device);
     assert.equal(device?.status, DeviceStatus.ACTIVE);
     assert.equal(device?.deviceModel, 'SM-S911B');
+    assert.equal(device?.publicKeyFingerprint, keys.fingerprint);
 
-    // Pairing token is single-use: subsequent pairing with same token must fail
+    // Pairing token is single-use: subsequent challenge or pairing with same token must fail
+    const attackerKeys = generateEcP256KeyPair();
     await assert.rejects(
-      deviceService.pairDevice({
+      deviceService.createPairingChallenge({
         enrollmentToken: pairingData.pairingToken,
-        deviceModel: 'Hacker Phone',
-        manufacturer: 'Unknown',
-        androidVersion: '13',
-        appVersion: '1.0',
-        publicKeyPem: 'fake_key',
+        publicKeyPem: attackerKeys.publicKeyPem,
       }),
       /Pairing token is invalid, already used, or expired/,
     );
@@ -73,13 +131,11 @@ describe('Phase 1: DeviceModule & Cryptographic Pairing Flow', () => {
 
   it('should accept telemetry heartbeats from authenticated active devices', async () => {
     const pairingData = await deviceService.createPairingToken(orgId, ownerUserId);
-    const pairResult = await deviceService.pairDevice({
-      enrollmentToken: pairingData.pairingToken,
+    const { pairResult } = await enrollWithPop(deviceService, pairingData.pairingToken, {
       deviceModel: 'Redmi Note 12',
       manufacturer: 'Xiaomi',
       androidVersion: '13',
       appVersion: '1.0.0',
-      publicKeyPem: 'sample_public_key',
     });
 
     const telemetry = await deviceService.recordTelemetry(pairResult.deviceId, pairResult.deviceToken, {
@@ -101,13 +157,11 @@ describe('Phase 1: DeviceModule & Cryptographic Pairing Flow', () => {
 
   it('should immediately revoke device and reject subsequent telemetry and sync calls', async () => {
     const pairingData = await deviceService.createPairingToken(orgId, ownerUserId);
-    const pairResult = await deviceService.pairDevice({
-      enrollmentToken: pairingData.pairingToken,
+    const { pairResult } = await enrollWithPop(deviceService, pairingData.pairingToken, {
       deviceModel: 'Tecno Spark 10',
       manufacturer: 'Transsion',
       androidVersion: '13',
       appVersion: '1.0.0',
-      publicKeyPem: 'tecno_key',
     });
 
     // Revoke device
@@ -128,13 +182,11 @@ describe('Phase 1: DeviceModule & Cryptographic Pairing Flow', () => {
 
   it('should queue remote fleet commands and deliver them in subsequent telemetry response', async () => {
     const pairingData = await deviceService.createPairingToken(orgId, ownerUserId);
-    const pairResult = await deviceService.pairDevice({
-      enrollmentToken: pairingData.pairingToken,
+    const { pairResult } = await enrollWithPop(deviceService, pairingData.pairingToken, {
       deviceModel: 'Infinix Note 30',
       manufacturer: 'Transsion',
       androidVersion: '13',
       appVersion: '1.0.0',
-      publicKeyPem: 'infinix_key',
     });
 
     // Queue commands

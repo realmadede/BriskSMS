@@ -1,5 +1,13 @@
 import { PaymentProvider } from '../enums/payment-provider.enum.js';
 
+export const TANZANIAN_MOBILE_PREFIXES: readonly string[] = [
+  '74', '75', '76', // Vodacom (historical TCRA assignment; MNP allows porting)
+  '65', '67', '71', '77', // Mixx by Yas / Tigo / Zantel (historical assignment)
+  '68', '69', '78', // Airtel (historical assignment)
+  '61', '62', // Halotel (historical assignment)
+  '73', // TTCL (historical assignment)
+];
+
 /**
  * Normalizes any Tanzanian phone number format into canonical E.164 or MSISDN representation.
  * Examples:
@@ -34,15 +42,7 @@ export function normalizeTanzanianPhone(input: string, includePlus = false): str
   }
 
   const prefix2 = cleaned.substring(3, 5);
-  const validPrefixes = [
-    '74', '75', '76', // Vodacom
-    '65', '67', '71', '77', // Tigo
-    '68', '69', '78', // Airtel
-    '61', '62', // Halotel
-    '73', // TTCL
-  ];
-
-  if (!validPrefixes.includes(prefix2)) {
+  if (!TANZANIAN_MOBILE_PREFIXES.includes(prefix2)) {
     throw new Error(`Invalid Tanzanian mobile phone number: '${input}'`);
   }
 
@@ -50,7 +50,8 @@ export function normalizeTanzanianPhone(input: string, includePlus = false): str
 }
 
 /**
- * Validates whether a phone number corresponds to an active Tanzanian carrier prefix
+ * Validates whether a phone number corresponds to an assigned Tanzanian mobile prefix.
+ * Note: validates number syntax only; does NOT assert current carrier under MNP.
  */
 export function isValidTanzanianMobileNumber(phone: string): boolean {
   try {
@@ -62,9 +63,11 @@ export function isValidTanzanianMobileNumber(phone: string): boolean {
 }
 
 /**
- * Detects the cellular mobile money provider from a customer's phone number
+ * Infers a legacy TCRA numbering-plan carrier hint from an MSISDN prefix.
+ * NON-AUTHORITATIVE under Mobile Number Portability (MNP): callers initiating payments
+ * should pass an explicit PaymentProvider when known rather than relying on prefix alone.
  */
-export function detectTanzanianCarrier(phone: string): PaymentProvider {
+export function inferCarrierHintFromPrefix(phone: string): PaymentProvider {
   const normalized = normalizeTanzanianPhone(phone);
   const prefix2 = normalized.substring(3, 5);
 
@@ -73,7 +76,7 @@ export function detectTanzanianCarrier(phone: string): PaymentProvider {
     return PaymentProvider.MPESA;
   }
 
-  // Mixx by Yas (Tigo Pesa): 065x, 067x, 071x, 077x
+  // Mixx by Yas (Tigo Pesa / Zantel): 065x, 067x, 071x, 077x
   if (prefix2 === '65' || prefix2 === '67' || prefix2 === '71' || prefix2 === '77') {
     return PaymentProvider.MIXX;
   }
@@ -94,4 +97,12 @@ export function detectTanzanianCarrier(phone: string): PaymentProvider {
   }
 
   throw new Error(`Unsupported or invalid Tanzanian mobile provider for number: '${phone}'`);
+}
+
+/**
+ * @deprecated Prefix-only detection is non-authoritative under Tanzania MNP.
+ * Use explicit PaymentProvider selection or inferCarrierHintFromPrefix() as fallback.
+ */
+export function detectTanzanianCarrier(phone: string): PaymentProvider {
+  return inferCarrierHintFromPrefix(phone);
 }

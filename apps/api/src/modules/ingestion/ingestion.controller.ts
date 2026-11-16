@@ -1,5 +1,11 @@
 import { Router, RouteRequest, ApiResponse, HttpException } from '../../core/http.js';
-import { authenticate, authenticateDevice } from '../../core/guards.js';
+import {
+  authenticate,
+  authenticateDevice,
+  assertHumanSessionAuth,
+  resolveAuthorizedTenantOrgId,
+} from '../../core/guards.js';
+import { dbStore } from '../../core/store.js';
 import { ingestionService } from './ingestion.service.js';
 import { EvidenceSourceType } from '@brisksms/shared';
 
@@ -93,10 +99,13 @@ export function registerIngestionRoutes(router: Router): void {
    */
   router.get('/v1/ingestion/evidence', async (req: RouteRequest): Promise<ApiResponse> => {
     await authenticate(req);
-    const orgId = req.context.organizationId || (req.query.organizationId as string);
+    assertHumanSessionAuth(req, 'reading raw payment evidence');
+    const userId = req.context.userId!;
+    const orgId = resolveAuthorizedTenantOrgId(req, req.query.organizationId);
 
-    if (!orgId) {
-      throw new HttpException(400, 'MISSING_ORG', 'Organization context or query param organizationId is required');
+    const membership = await dbStore.getMembership(orgId, userId);
+    if (!membership) {
+      throw new HttpException(403, 'FORBIDDEN', 'You are not a member of this organization');
     }
 
     const evidenceList = await ingestionService.listRawEvidence(orgId);

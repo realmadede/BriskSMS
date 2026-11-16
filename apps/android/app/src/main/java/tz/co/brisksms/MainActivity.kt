@@ -1,8 +1,18 @@
 package tz.co.brisksms
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
+import java.util.concurrent.TimeUnit
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -34,8 +44,15 @@ enum class NavigationTab(val label: String, val badge: String) {
 
 class MainActivity : ComponentActivity() {
 
+    private val runtimePermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { /* Permissions are checked dynamically prior to camera/SMS/notification use */ }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        ensureRuntimePermissions()
+        ensureBackgroundWorkersStarted()
 
         setContent {
             val secureStorage = remember { KeystoreSecureStorage(applicationContext) }
@@ -114,6 +131,54 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                     }
+                }
+            }
+        }
+    }
+
+    private fun ensureRuntimePermissions() {
+        val required = mutableListOf(
+            Manifest.permission.SEND_SMS,
+            Manifest.permission.READ_PHONE_STATE
+        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            required.add(Manifest.permission.READ_PHONE_NUMBERS)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            required.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        val missing = required.filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (missing.isNotEmpty()) {
+            runtimePermissionLauncher.launch(missing.toTypedArray())
+        }
+    }
+
+    private fun ensureBackgroundWorkersStarted() {
+        val secureStorage = KeystoreSecureStorage(applicationContext)
+        if (!secureStorage.isPaired || secureStorage.isRevoked) {
+            return
+        }
+
+        val telemetryRequest = PeriodicWorkRequestBuilder<tz.co.brisksms.worker.TelemetryWorker>(
+            15, TimeUnit.MINUTES
+        ).build()
+        WorkManager.getInstance(applicationContext).enqueueUniquePeriodicWork(
+            "BrisksmsTelemetry",
+            ExistingPeriodicWorkPolicy.KEEP,
+            telemetryRequest
+        )
+
+        if (secureStorage.isBulkMessagingEnabled) {
+            val serviceIntent = Intent(applicationContext, tz.co.brisksms.messaging.service.SmsGateRelayService::class.java).apply {
+                action = tz.co.brisksms.messaging.service.SmsGateRelayService.ACTION_START
+            }
+            runCatching {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    startForegroundService(serviceIntent)
+                } else {
+                    startService(serviceIntent)
                 }
             }
         }

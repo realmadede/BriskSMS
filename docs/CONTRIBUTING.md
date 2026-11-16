@@ -34,9 +34,9 @@ All contributors must adhere to:
 ## 3. Pull Request (PR) Requirements
 
 Before submitting a Pull Request, ensure:
-1. `npm run lint` passes with 0 errors and 0 warnings.
-2. `npm run build` succeeds cleanly across all workspace packages and apps.
-3. `npm run test` passes with 100% success rate.
+1. `bun run typecheck` (`tsc -b`) passes with 0 compiler errors across all workspace packages and apps.
+2. `bun run build` succeeds cleanly across all workspace packages and worker bundles.
+3. `bun run test` passes with 100% success rate against PostgreSQL 16 and Redis 7 (and `./gradlew testDebugUnitTest compileDebugKotlin assembleDebug` passes in `apps/android/`).
 4. If modifying financial or ledger code, corresponding invariant tests are included.
 5. No credentials, tokens, or private environment variables are included in the diff.
 

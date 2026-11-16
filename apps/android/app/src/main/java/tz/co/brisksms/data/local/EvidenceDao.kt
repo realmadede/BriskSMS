@@ -11,16 +11,19 @@ interface EvidenceDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertEvidence(evidence: OfflineEvidenceEntity)
 
-    @Query("SELECT * FROM offline_payment_evidence WHERE isUploaded = 0 ORDER BY deviceTimestamp ASC LIMIT :limit")
+    @Query("SELECT * FROM offline_payment_evidence WHERE isUploaded = 0 AND isPermanentFailure = 0 ORDER BY deviceTimestamp ASC LIMIT :limit")
     suspend fun getPendingEvidence(limit: Int = 50): List<OfflineEvidenceEntity>
 
-    @Query("UPDATE offline_payment_evidence SET isUploaded = 1, uploadedAt = :uploadedAt WHERE id = :id")
+    @Query("UPDATE offline_payment_evidence SET isUploaded = 1, uploadedAt = :uploadedAt, lastError = NULL WHERE id = :id")
     suspend fun markUploaded(id: String, uploadedAt: Long = System.currentTimeMillis())
 
-    @Query("UPDATE offline_payment_evidence SET retryCount = retryCount + 1 WHERE id = :id")
-    suspend fun incrementRetryCount(id: String)
+    @Query("UPDATE offline_payment_evidence SET isPermanentFailure = 1, lastError = :reason WHERE id = :id")
+    suspend fun markPermanentFailure(id: String, reason: String)
 
-    @Query("SELECT COUNT(*) FROM offline_payment_evidence WHERE isUploaded = 0")
+    @Query("UPDATE offline_payment_evidence SET retryCount = retryCount + 1, lastError = :reason WHERE id = :id")
+    suspend fun incrementRetryCount(id: String, reason: String? = null)
+
+    @Query("SELECT COUNT(*) FROM offline_payment_evidence WHERE isUploaded = 0 AND isPermanentFailure = 0")
     suspend fun countPending(): Int
 
     @Query("SELECT COUNT(*) FROM offline_payment_evidence WHERE createdAt >= :sinceTimestamp")

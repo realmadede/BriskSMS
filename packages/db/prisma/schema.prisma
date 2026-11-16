@@ -64,6 +64,29 @@ enum DeviceIngestionMode {
   HYBRID
 }
 
+enum PairingChallengeStatus {
+  PENDING
+  CONSUMED
+  EXPIRED
+  REJECTED
+}
+
+enum DeviceCommandType {
+  PAUSE_RELAY
+  RESUME_RELAY
+  SWITCH_SIM
+  WIPE_AND_REVOKE
+}
+
+enum DeviceCommandStatus {
+  PENDING
+  DELIVERED
+  ACKNOWLEDGED
+  FAILED
+  EXPIRED
+  CANCELLED
+}
+
 enum EvidenceSourceType {
   ANDROID_NOTIFICATION_RELAY
   DIRECT_PROVIDER_API
@@ -120,11 +143,14 @@ enum SenderIdStatus {
 }
 
 enum StkPushStatus {
+  INITIATING
   PENDING
   SUCCESS
   FAILED
   CANCELLED
   EXPIRED
+  DISPATCH_UNCERTAIN
+  UNSUPPORTED
 }
 
 enum OutboxStatus {
@@ -133,6 +159,18 @@ enum OutboxStatus {
   DELIVERED
   FAILED
   DEAD_LETTER
+}
+
+enum OutboundSmsJobStatus {
+  QUEUED
+  CLAIMED
+  DISPATCHING
+  SUBMITTED
+  DELIVERED
+  FAILED
+  EXPIRED
+  UNCERTAIN
+  CANCELLED
 }
 
 enum VerificationMethod {
@@ -170,6 +208,49 @@ enum EntitlementType {
   TIERED_TIER
 }
 
+enum ClaimStatus {
+  PROVISIONAL
+  EXPIRED
+  CONFIRMED_PROVIDER
+  UNRESOLVED_COLLISION
+  DISPUTED
+  RELEASED
+
+  @@map("claim_status")
+}
+
+enum ClaimEvidenceTier {
+  AUTHORITATIVE_PROVIDER
+  CLIENT_REPORTED
+  UNRESOLVED
+
+  @@map("claim_evidence_tier")
+}
+
+enum ClaimEventAction {
+  PROVISIONALLY_CLAIMED
+  SUPPLEMENTARY_ATTACHED
+  EXPIRED
+  CONFIRMED_PROVIDER
+  SUPERSEDED_EVICTION
+  COLLISION_QUARANTINED
+  DISPUTE_RAISED
+  ADJUDICATED_RESOLUTION
+  RELEASED
+
+  @@map("claim_event_action")
+}
+
+enum PaymentVerificationState {
+  UNVERIFIED
+  HUMAN_ATTESTED
+  PROVIDER_AUTHENTICATED
+  REJECTED
+  REVIEW_REQUIRED
+
+  @@map("payment_verification_state")
+}
+
 // ------------------------------------------------------------------------------
 // A. Identity & Organizations
 // ------------------------------------------------------------------------------
@@ -188,7 +269,9 @@ model Organization {
   memberships           UserOrganization[]
   invitations           OrganizationInvitation[]
   devices               Device[]
+  deviceCommands        DeviceCommand[]
   pairingTokens         PairingToken[]
+  devicePairingChallenges DevicePairingChallenge[]
   rawEvidences          RawPaymentEvidence[]
   normalizedPayments    NormalizedPayment[]
   paymentVerifications  PaymentVerification[]
@@ -203,6 +286,7 @@ model Organization {
   smsCampaigns          SmsCampaign[]
   smsCampaignRecipients SmsCampaignRecipient[]
   smsMessages           SmsMessage[]
+  outboundSmsJobs       OutboundSmsJob[]
   smsDeliveryAttempts   SmsDeliveryAttempt[]
   apiKeys               ApiKey[]
   oauthClients          OAuthClient[]
@@ -220,6 +304,8 @@ model Organization {
   messageIdempotencyRecords MessageIdempotencyRecord[]
   stkPushTransactions   StkPushTransaction[]
   paymentReferenceClaims PaymentReferenceClaim[]
+  paymentReferenceClaimEvents PaymentReferenceClaimEvent[]
+  paymentReferenceClaimCollisions PaymentReferenceClaimCollision[]
 
   @@map("organizations")
 }
@@ -337,6 +423,8 @@ model Device {
   androidVersion   String              @map("android_version") @db.VarChar(20)
   appVersion       String              @map("app_version") @db.VarChar(20)
   publicKeyPem     String              @map("public_key_pem") @db.Text
+  publicKeyFingerprint String?         @unique @map("public_key_fingerprint") @db.VarChar(64)
+  keyAlgorithm     String              @default("EC_P256") @map("key_algorithm") @db.VarChar(32)
   deviceTokenHash  String              @unique @map("device_token_hash") @db.VarChar(64)
   status           DeviceStatus        @default(PENDING_PAIRING)
   ingestionMode    DeviceIngestionMode @default(NOTIFICATION_LISTENER) @map("ingestion_mode")
@@ -349,8 +437,12 @@ model Device {
 
   organization Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   telemetries  DeviceTelemetry[]
+  commands     DeviceCommand[]
+  assignedOutboundSmsJobs OutboundSmsJob[] @relation("AssignedOutboundSmsDevice")
+  claimedOutboundSmsJobs  OutboundSmsJob[] @relation("ClaimedOutboundSmsDevice")
   evidences    RawPaymentEvidence[]
   payments     NormalizedPayment[]
+  pairingChallenges DevicePairingChallenge[]
 
   @@index([organizationId, status])
   @@map("devices")
@@ -367,9 +459,41 @@ model PairingToken {
   createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  challenges   DevicePairingChallenge[]
 
   @@index([organizationId, expiresAt])
   @@map("pairing_tokens")
+}
+
+model DevicePairingChallenge {
+  id                   String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  pairingTokenId       String                 @map("pairing_token_id") @db.Uuid
+  organizationId       String                 @map("organization_id") @db.Uuid
+  enrollmentId         String                 @unique @map("enrollment_id") @db.Uuid
+  challengeNonce       String                 @map("challenge_nonce") @db.VarChar(128)
+  publicKeyPem         String                 @map("public_key_pem") @db.Text
+  publicKeyFingerprint String                 @map("public_key_fingerprint") @db.VarChar(64)
+  keyAlgorithm         String                 @default("EC_P256") @map("key_algorithm") @db.VarChar(32)
+  signatureAlgorithm   String                 @default("SHA256_ECDSA") @map("signature_algorithm") @db.VarChar(32)
+  protocolVersion      String                 @default("BRISKSMS-DEVICE-PAIRING-POP-V1") @map("protocol_version") @db.VarChar(64)
+  status               PairingChallengeStatus @default(PENDING)
+  issuedAt             DateTime               @default(now()) @map("issued_at") @db.Timestamptz(3)
+  expiresAt            DateTime               @map("expires_at") @db.Timestamptz(3)
+  consumedAt           DateTime?              @map("consumed_at") @db.Timestamptz(6)
+  rejectedAt           DateTime?              @map("rejected_at") @db.Timestamptz(6)
+  failureReason        String?                @map("failure_reason") @db.VarChar(255)
+  resultingDeviceId    String?                @map("resulting_device_id") @db.Uuid
+  createdAt            DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime               @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  pairingToken    PairingToken @relation(fields: [pairingTokenId], references: [id], onDelete: Cascade)
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  resultingDevice Device?      @relation(fields: [resultingDeviceId], references: [id], onDelete: Restrict)
+
+  @@index([pairingTokenId, status])
+  @@index([organizationId, expiresAt])
+  @@index([publicKeyFingerprint])
+  @@map("device_pairing_challenges")
 }
 
 model DeviceTelemetry {
@@ -386,6 +510,42 @@ model DeviceTelemetry {
 
   @@index([deviceId, recordedAt(sort: Desc)])
   @@map("device_telemetry")
+}
+
+model DeviceCommand {
+  id                  String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId      String              @map("organization_id") @db.Uuid
+  deviceId            String              @map("device_id") @db.Uuid
+  createdById         String?             @map("created_by_id") @db.Uuid
+  source              String              @default("ADMIN_API") @db.VarChar(32)
+  commandType         DeviceCommandType   @map("command_type")
+  payload             Json                @default("{}")
+  status              DeviceCommandStatus @default(PENDING)
+  idempotencyKey      String?             @map("idempotency_key") @db.VarChar(120)
+  requestFingerprint  String?             @map("request_fingerprint") @db.VarChar(64)
+  expiresAt           DateTime            @map("expires_at") @db.Timestamptz(6)
+  deliveryAttempts    Int                 @default(0) @map("delivery_attempts")
+  maxDeliveryAttempts Int                 @default(5) @map("max_delivery_attempts")
+  leaseToken          String?             @map("lease_token") @db.Uuid
+  claimedByInstance   String?             @map("claimed_by_instance") @db.VarChar(64)
+  deliveredAt         DateTime?           @map("delivered_at") @db.Timestamptz(6)
+  lastDeliveryAttemptAt DateTime?         @map("last_delivery_attempt_at") @db.Timestamptz(6)
+  leaseExpiresAt      DateTime?           @map("lease_expires_at") @db.Timestamptz(6)
+  acknowledgedAt      DateTime?           @map("acknowledged_at") @db.Timestamptz(6)
+  ackResult           Json?               @map("ack_result")
+  failureReason       String?             @map("failure_reason") @db.VarChar(255)
+  cancelledAt         DateTime?           @map("cancelled_at") @db.Timestamptz(6)
+  cancelledById       String?             @map("cancelled_by_id") @db.Uuid
+  cancellationReason  String?             @map("cancellation_reason") @db.VarChar(255)
+  createdAt           DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  device       Device       @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, idempotencyKey])
+  @@index([organizationId, deviceId, createdAt(sort: Desc)])
+  @@map("device_commands")
 }
 
 // ------------------------------------------------------------------------------
@@ -452,6 +612,7 @@ model NormalizedPayment {
   invoicePayments InvoicePayment[]
   automationLogs  AutomationLog[]
   stkPushTransactions StkPushTransaction[]
+  paymentReferenceClaims PaymentReferenceClaim[]
 
   @@unique([organizationId, deduplicationHash])
   @@index([organizationId, state, createdAt(sort: Desc)])
@@ -730,6 +891,7 @@ model SmsMessage {
   campaign     SmsCampaign?         @relation(fields: [campaignId], references: [id], onDelete: SetNull)
   attempts     SmsDeliveryAttempt[]
   idempotencyRecords MessageIdempotencyRecord[]
+  outboundJob        OutboundSmsJob?
 
   @@index([organizationId, status])
   @@index([providerMessageId])
@@ -775,6 +937,45 @@ model MessageIdempotencyRecord {
   @@unique([organizationId, idempotencyKey])
   @@index([organizationId, status])
   @@map("message_idempotency_records")
+}
+
+model OutboundSmsJob {
+  id                String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId    String               @map("organization_id") @db.Uuid
+  messageId         String               @unique @map("message_id") @db.Uuid
+  assignedDeviceId  String?              @map("assigned_device_id") @db.Uuid
+  claimedByDeviceId String?              @map("claimed_by_device_id") @db.Uuid
+  idempotencyKey    String?              @map("idempotency_key") @db.VarChar(120)
+  requestFingerprint String              @map("request_fingerprint") @db.VarChar(64)
+  recipientPhone    String               @map("recipient_phone") @db.VarChar(50)
+  messageText       String               @map("message_text") @db.Text
+  simSlot           Int                  @default(1) @map("sim_slot") @db.SmallInt
+  status            OutboundSmsJobStatus @default(QUEUED)
+  leaseToken        String?              @map("lease_token") @db.VarChar(128)
+  leaseExpiresAt    DateTime?            @map("lease_expires_at") @db.Timestamptz(6)
+  expiresAt         DateTime             @map("expires_at") @db.Timestamptz(6)
+  attemptCount      Int                  @default(0) @map("attempt_count")
+  maxAttempts       Int                  @default(3) @map("max_attempts")
+  claimedAt         DateTime?            @map("claimed_at") @db.Timestamptz(6)
+  dispatchStartedAt DateTime?            @map("dispatch_started_at") @db.Timestamptz(6)
+  submittedAt       DateTime?            @map("submitted_at") @db.Timestamptz(6)
+  deliveredAt       DateTime?            @map("delivered_at") @db.Timestamptz(6)
+  completedAt       DateTime?            @map("completed_at") @db.Timestamptz(6)
+  gatewayReference  String?              @map("gateway_reference") @db.VarChar(120)
+  radioResultCode   Int?                 @map("radio_result_code")
+  failureCode       String?              @map("failure_code") @db.VarChar(64)
+  errorMessage      String?              @map("error_message") @db.Text
+  lastResultPayload Json?                @map("last_result_payload") @db.JsonB
+  createdAt         DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime             @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  message         SmsMessage   @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  assignedDevice  Device?      @relation("AssignedOutboundSmsDevice", fields: [assignedDeviceId], references: [id], onDelete: SetNull)
+  claimedByDevice Device?      @relation("ClaimedOutboundSmsDevice", fields: [claimedByDeviceId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, createdAt(sort: Desc)])
+  @@map("outbound_sms_jobs")
 }
 
 // ------------------------------------------------------------------------------
@@ -861,7 +1062,7 @@ model WebhookEndpoint {
   id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   organizationId   String   @map("organization_id") @db.Uuid
   url              String   @db.VarChar(500)
-  secret           String   @db.VarChar(64)
+  secret           String   @db.Text
   subscribedEvents Json     @map("subscribed_events") @db.JsonB
   isActive         Boolean  @default(true) @map("is_active")
   createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -1154,6 +1355,10 @@ model StkPushTransaction {
   invoiceId          String?         @map("invoice_id") @db.Uuid
   referenceNumber    String?         @map("reference_number") @db.VarChar(100)
   memo               String?         @db.VarChar(255)
+  idempotencyKey     String?         @map("idempotency_key") @db.VarChar(120)
+  requestFingerprint String?         @map("request_fingerprint") @db.VarChar(64)
+  providerCheckoutId String?         @map("provider_checkout_id") @db.VarChar(120)
+  dispatchOutcome    String?         @map("dispatch_outcome") @db.VarChar(40)
   providerReference  String?         @map("provider_reference") @db.VarChar(100)
   resultCode         Int?            @map("result_code")
   resultDescription  String?         @map("result_description") @db.Text
@@ -1168,27 +1373,88 @@ model StkPushTransaction {
   invoice        Invoice?           @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
   settledPayment NormalizedPayment? @relation(fields: [settledPaymentId], references: [id], onDelete: SetNull)
 
+  @@unique([organizationId, idempotencyKey])
   @@index([organizationId])
   @@index([status])
   @@index([providerReference])
+  @@index([provider, providerCheckoutId])
   @@index([phoneNumber])
   @@map("stk_push_transactions")
 }
 
 model PaymentReferenceClaim {
-  id                String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id                String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   provider          PaymentProvider
-  providerReference String          @map("provider_reference") @db.VarChar(100)
-  organizationId    String          @map("organization_id") @db.Uuid
-  checkoutId        String?         @map("checkout_id") @db.VarChar(64)
-  paymentId         String?         @map("payment_id") @db.Uuid
-  claimedAt         DateTime        @default(now()) @map("claimed_at") @db.Timestamptz(6)
+  providerReference String            @map("provider_reference") @db.VarChar(100)
+  organizationId    String?           @map("organization_id") @db.Uuid
+  checkoutId        String?           @map("checkout_id") @db.VarChar(64)
+  paymentId         String?           @map("payment_id") @db.Uuid
+  status            ClaimStatus       @default(PROVISIONAL)
+  evidenceTier      ClaimEvidenceTier @default(CLIENT_REPORTED) @map("evidence_tier")
+  claimedAt         DateTime          @default(now()) @map("claimed_at") @db.Timestamptz(6)
+  expiresAt         DateTime?         @map("expires_at") @db.Timestamptz(6)
+  confirmedAt       DateTime?         @map("confirmed_at") @db.Timestamptz(6)
+  confirmedById     String?           @map("confirmed_by_id") @db.Uuid
+  releaseReason     String?           @map("release_reason") @db.VarChar(255)
+  version           Int               @default(1)
+  updatedAt         DateTime          @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  organization      Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization      Organization?     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  payment           NormalizedPayment? @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  events            PaymentReferenceClaimEvent[]
+  collisions        PaymentReferenceClaimCollision[]
 
   @@unique([provider, providerReference])
   @@index([organizationId])
   @@index([provider, providerReference])
+  @@index([status], map: "claim_status_idx")
+  @@index([expiresAt], map: "claim_expires_at_idx")
   @@map("payment_reference_claims")
 }
+
+model PaymentReferenceClaimEvent {
+  id                String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  claimId           String            @map("claim_id") @db.Uuid
+  provider          PaymentProvider
+  providerReference String            @map("provider_reference") @db.VarChar(100)
+  organizationId    String?           @map("organization_id") @db.Uuid
+  action            ClaimEventAction
+  previousStatus    ClaimStatus?      @map("previous_status")
+  newStatus         ClaimStatus       @map("new_status")
+  evidenceTier      ClaimEvidenceTier @map("evidence_tier")
+  evidenceId        String?           @map("evidence_id") @db.Uuid
+  actorId           String?           @map("actor_id") @db.Uuid
+  actorType         String            @default("SYSTEM") @map("actor_type") @db.VarChar(32)
+  reason            String?           @db.VarChar(255)
+  metadata          Json?
+  createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  claim             PaymentReferenceClaim @relation(fields: [claimId], references: [id], onDelete: Restrict)
+  organization      Organization?         @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@index([claimId], map: "claim_events_claim_idx")
+  @@index([provider, providerReference], map: "claim_events_provider_ref_idx")
+  @@map("payment_reference_claim_events")
+}
+
+model PaymentReferenceClaimCollision {
+  id                     String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  claimId                String          @map("claim_id") @db.Uuid
+  provider               PaymentProvider
+  providerReference      String          @map("provider_reference") @db.VarChar(100)
+  competingRecords       Json            @map("competing_records")
+  status                 String          @default("UNRESOLVED") @db.VarChar(32)
+  detectedAt             DateTime        @default(now()) @map("detected_at") @db.Timestamptz(6)
+  adjudicatedAt          DateTime?       @map("adjudicated_at") @db.Timestamptz(6)
+  adjudicatedById        String?         @map("adjudicated_by_id") @db.Uuid
+  adjudicationRationale  String?         @map("adjudication_rationale") @db.Text
+  awardedOrganizationId String?         @map("awarded_organization_id") @db.Uuid
+
+  claim                  PaymentReferenceClaim @relation(fields: [claimId], references: [id], onDelete: Restrict)
+  awardedOrganization   Organization?         @relation(fields: [awardedOrganizationId], references: [id], onDelete: Restrict)
+
+  @@index([provider, providerReference], map: "claim_collisions_provider_ref_idx")
+  @@map("payment_reference_claim_collisions")
+}
+
 

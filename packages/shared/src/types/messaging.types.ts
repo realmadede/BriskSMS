@@ -1,4 +1,9 @@
-import { GatewayMode, CampaignStatus, MessageIdempotencyStatus } from '../enums/messaging.enum.js';
+import {
+  GatewayMode,
+  CampaignStatus,
+  MessageIdempotencyStatus,
+  OutboundSmsJobStatus,
+} from '../enums/messaging.enum.js';
 
 /**
  * Message Dispatch Request Payload
@@ -135,4 +140,77 @@ export interface UpdateGatewayConfigDto {
   auth?: GatewayAuthCredentials;
   apiToken?: string;
   defaultSimSlot?: number;
+}
+
+export type OutboundSmsDispatchOutcome = 'SUBMITTED' | 'DELIVERED' | 'FAILED' | 'UNCERTAIN';
+
+export interface OutboundSmsJob {
+  id: string;
+  organizationId: string;
+  messageId: string;
+  assignedDeviceId: string | null;
+  claimedByDeviceId: string | null;
+  idempotencyKey: string | null;
+  recipientPhone: string;
+  messageText: string;
+  simSlot: number;
+  status: OutboundSmsJobStatus;
+  leaseToken: string | null;
+  leaseExpiresAt: string | null;
+  expiresAt: string;
+  attemptCount: number;
+  maxAttempts: number;
+  claimedAt: string | null;
+  dispatchStartedAt: string | null;
+  submittedAt: string | null;
+  deliveredAt: string | null;
+  completedAt: string | null;
+  gatewayReference: string | null;
+  radioResultCode: number | null;
+  failureCode: string | null;
+  errorMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface QueueOutboundSmsJobRequest {
+  to: string;
+  content: string;
+  simSlot?: number;
+  deviceId?: string;
+  isPromotional?: boolean;
+  campaignId?: string;
+  idempotencyKey?: string;
+  ttlSeconds?: number;
+  maxAttempts?: number;
+}
+
+export interface AcquireOutboundSmsJobsRequest {
+  limit?: number;
+  leaseSeconds?: number;
+  availableSimSlots?: number[];
+}
+
+export interface StartOutboundSmsDispatchRequest {
+  leaseToken: string;
+  simSlot?: number;
+}
+
+export interface ReportOutboundSmsJobResultRequest {
+  leaseToken: string;
+  outcome: OutboundSmsDispatchOutcome;
+  simSlot?: number;
+  partsCount?: number;
+  radioResultCode?: number;
+  gatewayReference?: string;
+  errorMessage?: string;
+  failureCode?: string;
+  preRadioFailure?: boolean;
+  carrierTimestamp?: string;
+}
+
+export interface OutboundSmsJobResultResponse {
+  accepted: boolean;
+  idempotentReplay: boolean;
+  job: OutboundSmsJob;
 }

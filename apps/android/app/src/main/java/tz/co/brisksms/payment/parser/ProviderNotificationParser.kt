@@ -22,27 +22,52 @@ data class ParsedNotificationResult(
 object ProviderNotificationParser {
 
     private val MPESA_PATTERN = Pattern.compile(
-        "^([A-Z0-9]{8,12})\\s+(?:Imethibitishwa|Confirmed)\\.\\s+Umepokea\\s+Tsh\\s*([\\d,]+(?:\\.\\d{2})?)\\s+kutoka\\s+kwa\\s+([^0-9]+?)\\s+(\\+?255\\d{9}|0\\d{9})",
+        "^([A-Z0-9]{8,12})\\s+(?:Imethibitishwa|Confirmed)\\.\\s+Umepokea\\s+(?:Tsh|TZS)\\s*([\\d,]+(?:\\.\\d{1,2})?)\\s+kutoka\\s+kwa\\s+([^0-9]+?)\\s+(\\+?255\\d{9}|0\\d{9})",
         Pattern.CASE_INSENSITIVE
     )
 
     private val MIXX_PATTERN = Pattern.compile(
-        "^([A-Z0-9]{8,12})\\s+Imethibitishwa\\.\\s+Umepokea\\s+TSh\\s*([\\d,]+(?:\\.\\d{2})?)\\s+kutoka\\s+(\\+?255\\d{9}|0\\d{9})\\s*-\\s*([^.]+?)\\s+tarehe",
+        "^([A-Z0-9]{8,12})\\s+Imethibitishwa\\.\\s+Umepokea\\s+(?:TSh|TZS)\\s*([\\d,]+(?:\\.\\d{1,2})?)\\s+kutoka\\s+(\\+?255\\d{9}|0\\d{9})\\s*-\\s*([^.]+?)\\s+tarehe",
         Pattern.CASE_INSENSITIVE
     )
 
     private val AIRTEL_PATTERN = Pattern.compile(
-        "Kumbukumbu\\s+Namba:\\s*([A-Z0-9.]+)\\s+Umepokea\\s+Tsh\\s*([\\d,]+)\\s+kutoka\\s+([^0-9]+?)\\s+(\\+?255\\d{9}|0\\d{9})",
+        "(?:Kumbukumbu\\s+Namba|Namba\\s+ya\\s+muamala):\\s*([A-Z0-9.]+).*?Umepokea\\s+(?:Tsh|TZS)\\s*([\\d,]+(?:\\.\\d{1,2})?)\\s+kutoka\\s+(?:kwa\\s+)?([^0-9(]+?)\\s*\\(?(\\+?255\\d{9}|0\\d{9})\\)?",
+        Pattern.CASE_INSENSITIVE
+    )
+
+    private val AIRTEL_AMT_FIRST_PATTERN = Pattern.compile(
+        "Umepokea\\s+(?:Tsh|TZS)\\s*([\\d,]+(?:\\.\\d{1,2})?)\\s+kutoka\\s+(?:kwa\\s+)?([^0-9(]+?)\\s*\\(?(\\+?255\\d{9}|0\\d{9})\\)?.*?(?:Namba\\s+ya\\s+muamala|Trans(?:action)?\\s*ID):\\s*([A-Z0-9.]+)",
         Pattern.CASE_INSENSITIVE
     )
 
     private val CRDB_PATTERN = Pattern.compile(
-        "Umelipwa\\s+TZS\\s*([\\d,]+(?:\\.\\d{2})?)\\s+kutoka\\s+([^0-9]+?)\\s+Kumbukumbu:\\s*([A-Z0-9]+)",
+        "Umelipwa\\s+(?:TZS|Tsh)\\s*([\\d,]+(?:\\.\\d{1,2})?)\\s+kutoka\\s+([^0-9]+?)\\s+Kumbukumbu:\\s*([A-Z0-9]+)",
         Pattern.CASE_INSENSITIVE
     )
 
+    private val CRDB_CREDIT_PATTERN = Pattern.compile(
+        "Credit\\s+of\\s+(?:TZS|Tsh)\\s*([\\d,]+(?:\\.\\d{1,2})?).*?from\\s+([^\\n.]+?)\\s+Ref:\\s*([A-Z0-9]+)",
+        Pattern.CASE_INSENSITIVE
+    )
+
+    private val OUTGOING_PATTERN = Pattern.compile(
+        "\\b(Umetuma|Umefanya malipo|Umetoa|You have sent|You paid|Debit of|Withdrawn)\\b",
+        Pattern.CASE_INSENSITIVE
+    )
+
+    private val PERSONAL_PHONE_SENDER = Regex("^\\+?\\d[\\d\\s\\-().]{5,}$")
+
     fun parse(senderAddress: String, rawPayload: String): ParsedNotificationResult? {
+        val cleanSender = senderAddress.trim()
+        if (cleanSender.isEmpty() || PERSONAL_PHONE_SENDER.matches(cleanSender)) {
+            return null
+        }
+
         val clean = rawPayload.trim()
+        if (clean.isEmpty() || OUTGOING_PATTERN.matcher(clean).find()) {
+            return null
+        }
 
         // 1. Vodacom M-Pesa
         val mpesaMatch = MPESA_PATTERN.matcher(clean)
@@ -98,12 +123,45 @@ object ProviderNotificationParser {
             )
         }
 
+        val airtelAmtFirst = AIRTEL_AMT_FIRST_PATTERN.matcher(clean)
+        if (airtelAmtFirst.find()) {
+            val amt = parseAmountCents(airtelAmtFirst.group(1) ?: "")
+            val name = airtelAmtFirst.group(2)?.trim()
+            val phone = normalizePhone(airtelAmtFirst.group(3) ?: "")
+            val ref = airtelAmtFirst.group(4)?.replace(".", "")?.uppercase() ?: return null
+            return ParsedNotificationResult(
+                provider = "AIRTEL",
+                reference = ref,
+                amountCents = amt,
+                senderPhone = phone,
+                senderName = name,
+                customerMemo = null,
+                confidence = 0.95f
+            )
+        }
+
         // 4. CRDB Bank
         val crdbMatch = CRDB_PATTERN.matcher(clean)
         if (crdbMatch.find()) {
             val amt = parseAmountCents(crdbMatch.group(1) ?: "")
             val name = crdbMatch.group(2)?.trim()
             val ref = crdbMatch.group(3)?.uppercase() ?: return null
+            return ParsedNotificationResult(
+                provider = "CRDB",
+                reference = ref,
+                amountCents = amt,
+                senderPhone = null,
+                senderName = name,
+                customerMemo = null,
+                confidence = 0.92f
+            )
+        }
+
+        val crdbCreditMatch = CRDB_CREDIT_PATTERN.matcher(clean)
+        if (crdbCreditMatch.find()) {
+            val amt = parseAmountCents(crdbCreditMatch.group(1) ?: "")
+            val name = crdbCreditMatch.group(2)?.trim()
+            val ref = crdbCreditMatch.group(3)?.uppercase() ?: return null
             return ParsedNotificationResult(
                 provider = "CRDB",
                 reference = ref,

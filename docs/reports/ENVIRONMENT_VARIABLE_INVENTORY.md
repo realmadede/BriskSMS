@@ -2,7 +2,7 @@
 
 **Repository:** `https://github.com/realmadede/BriskSMS`  
 **Branch:** `main`  
-**Baseline Checkpoint:** `081bf25a11c838f13275486389069070f923f865`  
+**Last Synced Against:** `e6c593d0f5bedd41939fd45c9f23082a1bada04b` + Uncommitted P0–P2 & Hard Audit Remediations  
 **Scope:** Complete Static and Dynamic Configuration Inventory Across Monorepo Packages and Services  
 **Compliance Standard:** Production-First, Zero-Leakage, Fail-Closed Security Governance
 
@@ -42,13 +42,28 @@ The following table documents every environment variable referenced in the Brisk
 | `CORS_ORIGIN` | `apps/api` | Optional | No | None | Merged with `ALLOWED_ORIGINS`. | Legacy/alternative comma-separated list of allowed CORS origins. |
 | `FRONTEND_URL` | `apps/api` | **Required in Prod** | No | None | Merged with `ALLOWED_ORIGINS`. | Canonical URL of the merchant web console for email links and CORS validation. |
 | `API_BASE_URL` | `apps/api`, `apps/worker` | **Required in Prod** | No | `http://localhost:3000` | Fallback to localhost. | Public canonical URL of the BriskSMS API used in webhook payloads and companion app pairing codes. |
-| `ALLOW_PRIVATE_GATEWAY_NETWORKS` | `apps/api` | **PROHIBITED in Prod** | No | `false` | When not `'true'`, SSRF filter strictly blocks loopback, link-local (169.254.x), and private subnets (10.x, 172.16-31.x, 192.168.x). | Toggle allowing private IP targets for local SMSGate test gateways during local integration testing. |
+| `PAIRING_CHALLENGE_TTL_SECONDS` | `apps/api` | Optional | No | `120` | Rejects values outside integer range `10..300` with `500 INVALID_PAIRING_CONFIG`. | Single-use Android device pairing Proof-of-Possession challenge lifetime in seconds (capped by pairing token expiry). |
+| `DEVICE_COMMAND_TTL_SECONDS` | `apps/api` | Optional | No | `3600` | Rejects values outside `5..604800` with `500 INVALID_DEVICE_COMMAND_CONFIG`. | Default expiration lifetime for durable PostgreSQL `device_commands`. |
+| `DEVICE_COMMAND_LEASE_SECONDS` | `apps/api` | Optional | No | `60` | Rejects values outside `5..3600` with `500 INVALID_DEVICE_COMMAND_CONFIG`. | Bounded delivery lease window before unacknowledged `device_commands` become eligible for redelivery. |
+| `PLATFORM_ADMIN_SECRET` | `apps/api` | **Required for `/v1/admin/catalog/*`** | **YES (CRITICAL)** | None | Fails closed with `503 PLATFORM_ADMIN_UNCONFIGURED` when unset or `< 24` chars; invalid `X-Platform-Admin-Key` returns `403`. | Shared constant-time admin secret protecting platform subscription catalog mutations. |
+| `TRUST_PROXY` | `apps/api` | Recommended behind TLS proxy | No | `false` | When not `'true'` in staging/prod, ignores `X-Forwarded-For` and uses raw socket IP. | Enables `X-Forwarded-For` extraction behind a sanitizing reverse proxy. |
+| `STRICT_MIGRATION_CHECKSUMS` | `packages/db` | Auto `'true'` in prod | No | `false` | Rejects mismatch between disk `migration.sql` SHA-256 and `_prisma_migrations.checksum`. | Enforces strict SQL migration checksum integrity on boot/deploy. |
+| `ALLOW_PRIVATE_GATEWAY_NETWORKS` | `apps/api`, `apps/worker` | **PROHIBITED in Prod** | No | `false` | When not `'true'`, SSRF filter strictly blocks loopback, link-local (169.254.x), and private subnets (10.x, 172.16-31.x, 192.168.x). | Toggle allowing private IP targets for local SMSGate test gateways during local integration testing. |
+| `ALLOW_PRIVATE_WEBHOOK_NETWORKS` | `apps/api`, `apps/worker` | **PROHIBITED in Prod** | No | `false` | Blocks private/loopback/metadata webhook destinations unless `'true'`. | Toggle permitting private network webhook targets in local development. |
+| `ALLOW_INSECURE_WEBHOOK_HTTP` | `apps/api`, `apps/worker` | **PROHIBITED in Prod** | No | `false` | Requires HTTPS webhook URLs in production unless explicitly `'true'`. | Development escape hatch for non-HTTPS local webhook test endpoints. |
 | `PROMOTIONAL_CURFEW_ENABLED` | `apps/api`, `apps/worker` | Optional | No | `true` | When not explicitly `'false'`, TCRA promotional curfew is strictly enforced. | Governs whether outbound promotional SMS are held outside permitted commercial hours. |
 | `PROMOTIONAL_CURFEW_START_HOUR_EAT` | `apps/api`, `apps/worker` | Optional | No | `20` (8:00 PM) | Fallback to 20 | Commercial curfew start hour in East Africa Time (UTC+3). Outbound promotional SMS held after this hour. |
 | `PROMOTIONAL_CURFEW_END_HOUR_EAT` | `apps/api`, `apps/worker` | Optional | No | `7` (7:00 AM) | Fallback to 7 | Commercial curfew end hour in East Africa Time (UTC+3). Held promotional SMS resume delivery at this hour. |
-| `BRISKSMS_SILENT_LOGS` | `packages/db`, Tests | Optional | No | `false` | Fallback to verbose logging. | When `'true'`, suppresses error logs on stdout/stderr (used in automated test runners to keep output clean). |
-| `CLIENT_ID` | `packages/zapier-app` | Optional | No | `brisksms_zapier_client` | Fallback to standard client ID. | OAuth / App client identifier for the BriskSMS Zapier integration. |
-| `BRISKSMS_API_KEY` | Developer SDKs / Web | Optional | **YES** | None | Used by SDK examples and client documentation. | Sample environment variable used in developer documentation and client SDK initialization snippets. |
+| `GOOGLE_CLIENT_ID` | `apps/api` | Required for Google SSO | No | None | Rejects Google Sign-In tokens when unset or audience mismatches. | Expected OAuth 2.0 `aud`/`azp` Client ID for Google ID token verification. |
+| `GOOGLE_NONCE_TTL_SECONDS` | `apps/api` | Optional | No | `300` | Clamped/validated to `30..900` seconds (fallback `300`). | Server-issued OpenID Connect `bsk_g_nonce` lifetime. |
+| `RESEND_API_KEY` | `apps/api` | Required for Email | **YES** | None | Logs configuration error and returns failure cleanly when unset. | Bearer API key for Resend transactional verification emails. |
+| `RESEND_FROM_EMAIL` | `apps/api` | Optional | No | `BriskSMS <verify@brisksms.com>` | Fallback to default verified address. | Sender identity for verification emails. |
+| `EMAIL_VERIFICATION_EXPIRY_HOURS` | `apps/api` | Optional | No | `24` | Fallback to 24 hours. | Lifetime of single-use `bsk_ev_...` verification tokens. |
+| `DISPATCH_PENDING_GRACE_SECONDS` / `DISPATCH_RECOVERY_INTERVAL_MS` | `apps/worker` | Optional | No | `60` / `30000` (or `10000`) | Safe integer defaults. | Stale `PENDING` SMSGate dispatch grace window and worker recovery sweep cadence. |
+| `MAINTENANCE_INTERVAL_MS` / `MAINTENANCE_RETENTION_DAYS` | `apps/worker` | Optional | No | `3600000` / `30` | Safe integer defaults. | `MaintenanceRunner` cleanup schedule and retention window. |
+| `BRISKSMS_SILENT_LOGS` | `packages/db`, Tests | Optional | No | `false` | Fallback to standard logging. | When `'true'`, suppresses error logs on stdout/stderr during test runs. |
+| `CLIENT_ID` / `CLIENT_SECRET` | `packages/zapier-app` | Optional | **YES (`CLIENT_SECRET`)** | `brisksms_zapier_client` | Public client flow unless confidential secret set. | OAuth credentials for `@brisksms/zapier-app`. |
+| `BRISKSMS_API_KEY` / `BRISKSMS_DEVICE_TOKEN` / `BRISKSMS_SESSION_TOKEN` | CLI / Docs | Optional | **YES** | None | Client-side REST integration / helper env vars only (not required by API boot). | Sample env vars used by client helpers and REST developer portal snippets. |
 
 ---
 
@@ -116,7 +131,7 @@ flowchart TD
 ### 3.3 Asynchronous Queues & Background Processing (Redis 7+ & BullMQ)
 
 #### `REDIS_URL`
-- **Format:** `redis://[:password@]host:port[/db]` or `rediss://` (TLS encrypted).
+- **Format:** `redis://[:password@]host:port[/db]` (raw TCP `net.Socket` or Unix domain socket). Internal in-transit TLS (`rediss://`) is **NOT** implemented in `packages/db/src/redis.ts`, so Redis must run inside a private VPC subnet or localhost.
 - **Staging Requirements:**
   - In staging/production, password authentication is mandatory.
   - Prefix/namespace separation is maintained via BullMQ queue configurations (`staging:bullmq:events`, `staging:bullmq:outbox`).

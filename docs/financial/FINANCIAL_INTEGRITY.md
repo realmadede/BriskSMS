@@ -113,8 +113,8 @@ The lifecycle of every payment received by BriskSMS follows a strict, determinis
    - External automation failure (e.g., MikroTik router unreachable or WHMCS server 500 error) must **never** reverse or invalidate a verified payment. 
    - The payment remains in `VERIFIED`, while the action transitions to `FULFILLMENT_FAILED`. Fulfillment can be retried independently without affecting financial records.
 5. **Ledger Segregation (Product A vs Product B):**
-   - **Product A (SaaS Subscriptions):** Tracked in `tenant_subscriptions` and `subscription_invoices`.
-   - **Product B (Bulk Messaging Credits):** Tracked in an append-only immutable credit transaction ledger `messaging_credit_ledger`:
+   - **Product A (SaaS Subscriptions):** Tracked in `organization_subscriptions`, `subscription_history`, and `subscription_billing_invoices`.
+   - **Product B (Bulk Messaging Credits):** Tracked in an append-only immutable credit transaction ledger `messaging_credit_ledger` alongside `messaging_accounts`:
      ```sql
      CREATE TABLE messaging_credit_ledger (
        id UUID PRIMARY KEY,
@@ -169,9 +169,9 @@ Mark as [UNMATCHED] -> Move to Accountant Review Queue
 
 | Threat Vector | Attack Scenario | Architectural Defense & Mitigation |
 |---|---|---|
-| **Forged SMS Ingestion** | Attacker sends malicious HTTP payload to `/v1/ingest/notifications` pretending to be an Android device. | Device tokens are bound to Android Keystore public keys. Payloads must be signed with ECDSA (P-256) on-device; requests with invalid signatures are rejected with HTTP 401. |
-| **Replay Attack** | Attacker intercepts a valid signed payload and replays it multiple times. | Every payload includes a unique monotonic sequence number, device timestamp, and a random cryptographic nonce. Timestamps older than 300 seconds are rejected; nonces are cached in Redis with a 10-minute TTL. |
-| **Cross-Tenant Bleed** | Tenant A queries API or crafts ID parameter to read Tenant B's invoices or payments. | Tenant ID is extracted strictly from the validated JWT claims. Prisma queries use an organization middleware filter. Direct ID lookups include `WHERE id = :id AND organization_id = :orgId`. |
+| **Forged SMS Ingestion** | Attacker sends malicious HTTP payload to `/v1/ingestion/evidence` pretending to be an Android device. | Device tokens (`bsk_dev_...`) are bound via two-step EC P-256 Proof-of-Possession to Android Keystore public keys; requests without valid device credentials/signatures are rejected fail-closed (`401`/`403`). |
+| **Replay Attack** | Attacker submits duplicate payment payloads or replays an already-claimed reference. | Cryptographic SHA-256 deduplication (`deduplication_hash`) plus global `payment_reference_claims` uniqueness and PostgreSQL `pg_advisory_xact_lock` block duplicate settlements. |
+| **Cross-Tenant Bleed** | Tenant A queries API or crafts `organizationId` parameter to read Tenant B's invoices or payments. | Tenant ID is derived strictly from verified JWT/OAuth/API-key/device context; parameterized `Bun.SQL` queries enforce `WHERE organization_id = $1` and reject mismatches with `403 CROSS_ORGANIZATION_FORBIDDEN`. |
 | **Cashier Collusion** | Rogue cashier marks a friend's unpaid invoice as paid without a valid payment reference. | Manual reconciliation requires the `Finance Manager` or `Owner` role. Every manual override requires entering an audit reason and creates an immutable entry in `audit_logs` capturing actor ID, timestamp, and IP address. |
 | **Stolen Android Device** | Physical device running the relay is stolen or compromised. | The organization owner can click "Revoke Device" in the web dashboard. The device's public key is immediately marked revoked in PostgreSQL and blacklisted in Redis. All future requests from that device fail instantly. |
 | **Webhook Spoofing** | Attacker attempts to impersonate BriskSMS when notifying an external merchant server (WHMCS). | All webhooks include the `X-BriskSMS-Signature` header containing `HMAC-SHA256(webhook_secret, payload_body)`. Merchants verify the signature using their private endpoint secret. |

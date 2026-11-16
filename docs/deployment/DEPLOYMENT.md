@@ -1,8 +1,8 @@
 # Deployment Architecture & Operations Guide
 
+**Last Synced:** 2026-11-16  
 **Environments:** Development (Local), Staging, Production  
-**Cloud Providers:** Cloudflare (Edge, CDN, DNS, WAF), Hetzner / AWS (Compute & Storage)  
-**Containerization:** Docker Compose / Kamal  
+**Runtime:** Bun `1.4.2` / Node.js `20+` / `24`, PostgreSQL `16+`, Redis `7+`  
 
 ---
 
@@ -10,85 +10,95 @@
 
 ```
 +--------------------------------------------------------------------------------+
-|                             Cloudflare Edge Network                            |
-|             (SSL Termination, DDoS Mitigation, Geo-DNS, Cloudflare WAF)        |
+|                     Cloudflare / Edge TLS 1.3 Reverse Proxy                    |
+|     (TLS Termination, WAF, CSP Injection, Sanitizes X-Forwarded-For Header)    |
 +--------------------------------------------------------------------------------+
                       |                                       |
                       v                                       v
-         [app.brisksms.co.tz]                        [api.brisksms.co.tz]
-      (Cloudflare Pages / Angular SPA)           (Application Ingress / Reverse Proxy)
+         [console.brisksms.com]                      [api.brisksms.com]
+       (apps/web Static Portal :4200)            (apps/api Modular Monolith :3000)
                                                               |
                                                               v
                                               +----------------------------------+
                                               |        Compute Node (Linux)      |
-                                              |  - Docker Container: `api`       |
-                                              |  - Docker Container: `worker`    |
-                                              |  - Docker Container: `redis`     |
+                                              |  - Process/Container: `api`      |
+                                              |  - Process/Container: `worker`   |
+                                              |  - Private VPC: `redis` (No TLS) |
                                               +----------------------------------+
                                                               |
                                                               v
                                               +----------------------------------+
-                                              |    Managed PostgreSQL Database   |
-                                              |    (Automated Backups & PITR)    |
+                                              |  Managed PostgreSQL 16+ (SSL)    |
+                                              |  (53 Tables, 15 SQL Migrations)  |
                                               +----------------------------------+
 ```
+
+- **Redis Transport Security Boundary:** `packages/db/src/redis.ts` uses raw TCP (`net.createConnection`) or local Unix domain sockets without internal TLS. In staging and production, Redis **must** remain inside a private VPC / localhost or behind a private TLS tunnel.
+- **Reverse Proxy Trust Boundary:** Set `TRUST_PROXY=true` only when the upstream reverse proxy strips and overwrites `X-Forwarded-For` with the real client socket address.
 
 ---
 
 ## 2. Local Development Environment
 
-Local services are containerized via `docker-compose.yml`:
-- **PostgreSQL 16:** Available on `localhost:5432`.
-- **Redis 7:** Available on `localhost:6379`.
+Local services are orchestrated via `docker-compose.yml` (or host PostgreSQL 16 + Redis 7):
+- **PostgreSQL 16:** Default `localhost:5432` (configurable via `DATABASE_URL`).
+- **Redis 7:** Default `localhost:6379` (configurable via `REDIS_URL` / `REDIS_SOCKET_PATH`).
 
-To start local services:
+Common local workflow commands (Bun `1.4.2`):
+
 ```bash
-docker compose up -d
-npm run db:migrate
-npm run dev
+bun install --frozen-lockfile
+docker compose up -d postgres redis
+bun run db:migrate
+bun run db:seed
+bun run db:status
+bun run typecheck
+bun run build
+bun run test
+bun run worker:start
 ```
 
 ---
 
-## 3. Environment Variables & Secret Configuration
+## 3. Environment Variables & Secret Governance
 
-Production secrets must never be committed to Git. The `.env.example` template documents all required environment variables:
+Production secrets must never be committed to Git. See `.env.example` and [`ENVIRONMENT_VARIABLE_INVENTORY.md`](../reports/ENVIRONMENT_VARIABLE_INVENTORY.md) for the complete validated inventory. Core variables include:
 
-| Variable | Scope | Purpose |
+| Variable | Scope | Fail-Closed Behavior / Purpose |
 |---|---|---|
-| `NODE_ENV` | Global | `development`, `staging`, or `production`. |
-| `PORT` | API | HTTP port for the NestJS API (default: `3000`). |
-| `DATABASE_URL` | Global | PostgreSQL connection string with connection pool options. |
-| `REDIS_URL` | Worker/API | Redis connection string for BullMQ and cache. |
-| `JWT_SECRET` | Auth | Secret or private key used for signing JWT access tokens. |
-| `ENCRYPTION_MASTER_KEY` | Security | 256-bit hexadecimal key for AES-256-GCM data encryption. |
-| `SMSGATE_BASE_URL` | Messaging | Base URL for SMSGate cellular gateway (VPS behind Cloudflare or external relay). |
-| `SMSGATE_API_TOKEN` | Messaging | Bearer token for authenticating with the SMSGate relay server. |
-| `SENTRY_DSN` | Telemetry | Sentry error tracking endpoint. |
+| `NODE_ENV` | Global | `development`, `staging`, or `production`. Enables strict boot & CSRF/origin checks. |
+| `PORT` | API (`apps/api`) | HTTP listening port (default: `3000`). |
+| `DATABASE_URL` | API / Worker / DB | PostgreSQL 16+ connection URI (`sslmode=require` recommended in staging/prod). |
+| `REDIS_URL` | API / Worker / DB | Redis 7+ URI (`FORCE_TCP_REDIS=true` in containers). |
+| `ENCRYPTION_MASTER_KEY` | API / Worker / DB | **Mandatory in prod.** 64-hex or >= 32-char AES-256-GCM key; rejects known defaults on boot. |
+| `JWT_ACCESS_SECRET` | API (`apps/api`) | **Mandatory in prod.** Independent >= 32-char HMAC-SHA256 secret for `15m` access tokens. |
+| `CSRF_SECRET` | API (`apps/api`) | **Mandatory in prod.** Independent >= 32-char secret for double-submit CSRF tokens (cannot equal JWT/AES keys). |
+| `PLATFORM_ADMIN_SECRET` | API (`/v1/admin/catalog/*`) | Minimum 24 chars; fails closed `503 PLATFORM_ADMIN_UNCONFIGURED` when unset. |
+| `ALLOWED_ORIGINS` / `FRONTEND_URL` | API (`apps/api`) | Exact allowed web origins for CORS & Login/Refresh CSRF defense (wildcard `*` forbidden). |
+| `TRUST_PROXY` | API (`apps/api`) | `'true'` enables `X-Forwarded-For` client IP resolution in prod/staging behind a trusted proxy. |
+| `ALLOW_PRIVATE_GATEWAY_NETWORKS` / `ALLOW_PRIVATE_WEBHOOK_NETWORKS` / `ALLOW_INSECURE_WEBHOOK_HTTP` | API / Worker | Keep `'false'` / unset in production to enforce SSRF & HTTPS webhook protections. |
+| `STRICT_MIGRATION_CHECKSUMS` | `packages/db` | Defaults true in `NODE_ENV=production`; validates applied `_prisma_migrations` SHA-256 checksums. |
 
 ---
 
-## 4. CI/CD Pipeline (GitHub Actions)
+## 4. CI/CD Pipeline (`.github/workflows/ci.yml`)
 
-The deployment pipeline is automated via GitHub Actions:
-1. **Pull Request Stage:**
-   - Linting check (`npm run lint`).
-   - TypeScript build check (`npm run build`).
-   - Unit tests and parser corpus validation (`npm run test`).
-   - Integration tests with ephemeral PostgreSQL container.
-2. **Main Branch Deployment:**
-   - Automated Docker image build and push to container registry.
-   - Database migration execution (`npx prisma migrate deploy`).
-   - Rolling restart of `api` and `worker` containers with zero downtime.
-   - Sentry release tracking and source map upload.
+GitHub Actions executes two automated verification jobs on push and pull request to `main`:
+
+1. **`verify` (Monorepo Build & Integration Tests on `ubuntu-latest`):**
+   - Spins up `postgres:16-alpine` (port `5433`) and `redis:7-alpine` (port `6380`).
+   - Sets up Node.js `24` and Bun `1.4.2`, generates independent ephemeral `ENCRYPTION_MASTER_KEY`, `JWT_ACCESS_SECRET`, and `CSRF_SECRET`.
+   - Runs `bun install --frozen-lockfile`, `bun run typecheck`, `bun run build`, `bun run db:migrate`, and `bun run test`.
+2. **`android-verify` (Android Companion on `ubuntu-latest`):**
+   - Sets up Temurin JDK `17` and Android SDK.
+   - Runs `./gradlew --version`, `./gradlew projects --no-daemon`, `./gradlew testDebugUnitTest --no-daemon`, `./gradlew lintDebug --no-daemon`, and `./gradlew assembleDebug --no-daemon` under `set -e -o pipefail`, uploading logs and the debug APK artifact (`if-no-files-found: error`).
+
+Container image publishing, multi-AZ production failover drills, and automated CD rollout pipelines remain planned deployment tasks (see [`STAGING_DEPLOYMENT_RUNBOOK.md`](../reports/STAGING_DEPLOYMENT_RUNBOOK.md)).
 
 ---
 
-## 5. Disaster Recovery & Backup Strategy
+## 5. Disaster Recovery & Backup Objectives
 
 1. **PostgreSQL Snapshots:** Automated daily snapshots retained for 30 days.
-2. **Point-in-Time Recovery (PITR):** Continuous Write-Ahead Logging (WAL) archiving allows restoring the database to any millisecond within the preceding 7 days.
-3. **Disaster Recovery Target:**
-   - Recovery Point Objective (RPO): < 5 minutes.
-   - Recovery Time Objective (RTO): < 30 minutes.
-
+2. **Point-in-Time Recovery (PITR):** Continuous WAL archiving for sub-second transactional recovery.
+3. **Recovery Targets:** RPO < 5 minutes, RTO < 30 minutes (validated via staging drills prior to production launch).

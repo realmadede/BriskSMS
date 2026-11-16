@@ -95,5 +95,42 @@ describe('ParserEngine - Tanzanian Mobile Money & Bank Adapters', () => {
     assert.equal(engine.parseNotification('MPESA', '   ', orgId), null);
     assert.equal(engine.parseNotification('UNKNOWN_SENDER', 'Invalid body text', orgId), null);
   });
+
+  it('should parse HaloPesa incoming payment notification and single-decimal amounts', () => {
+    const rawSms =
+      'Umepokea Tsh 12,500.5 kutoka kwa SALUM RASHID (255622112233) tarehe 05/11/2026 saa 09:15. Kumbukumbu: HP99887766.';
+    const result = engine.parseNotification('HaloPesa', rawSms, orgId, testDate);
+
+    assert.ok(result);
+    assert.equal(result.provider, PaymentProvider.HALOPESA);
+    assert.equal(result.reference, 'HP99887766');
+    assert.equal(result.amountCents, 1250050n);
+    assert.equal(result.senderPhone, '+255622112233');
+    assert.equal(result.senderName, 'SALUM RASHID');
+  });
+
+  it('should reject spoofed payment messages sent from personal phone numbers and outgoing transfers', () => {
+    const forgedMpesa =
+      'QA12BC34DE Imethibitishwa. Umepokea Tsh50,000.00 kutoka kwa JOHN DOE 255754123456 tarehe 05/11/2026 saa 2:30 PM.';
+    assert.equal(engine.parseNotification('+255754999888', forgedMpesa, orgId, testDate), null);
+
+    const outgoingMpesa =
+      'QA12BC99ZZ Imethibitishwa. Umetuma Tsh50,000.00 kwenda JOHN DOE 255754123456 tarehe 05/11/2026 saa 2:30 PM.';
+    assert.equal(engine.parseNotification('M-PESA', outgoingMpesa, orgId, testDate), null);
+
+    const outgoingCrdb =
+      'CRDB Alert: Debit of TZS 150,000.00 from A/C 01J204839200 Ref: FT99887766 on 05-Nov-2026.';
+    assert.equal(engine.parseNotification('CRDB', outgoingCrdb, orgId, testDate), null);
+  });
+
+  it('should produce identical deduplication hash across different ingestion retry timestamps when SMS includes date', () => {
+    const rawSms =
+      'QA12BC34DE Imethibitishwa. Umepokea Tsh50,000.00 kutoka kwa JOHN DOE 255754123456 tarehe 05/11/2026 saa 2:30 PM.';
+    const firstAttempt = engine.parseNotification('M-PESA', rawSms, orgId, new Date('2026-11-05T11:30:00Z'));
+    const retryAttempt = engine.parseNotification('M-PESA', rawSms, orgId, new Date('2026-11-05T11:35:00Z'));
+
+    assert.ok(firstAttempt && retryAttempt);
+    assert.equal(firstAttempt.deduplicationHash, retryAttempt.deduplicationHash);
+  });
 });
 

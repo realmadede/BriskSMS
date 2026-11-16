@@ -827,10 +827,12 @@
             </div>
           </div>
 
-          <div style="background: var(--bg-canvas); border: 1px dashed var(--border-subtle); border-radius: 12px; padding: 3.5rem 1.5rem; text-align: center;">
-            <div style="font-weight: 700; font-size: 1rem; color: var(--text-main); margin-bottom: 0.4rem;">No Discrepancies Requiring Review</div>
-            <div style="font-size: 0.85rem; color: var(--text-muted); max-width: 460px; margin: 0 auto; line-height: 1.6;">
-              When ambiguous reference numbers, underpayments, or excess payments are ingested, they are isolated here for auditor review, credit allocation, or refund approval.
+          <div id="reviewQueueItems">
+            <div style="background: var(--bg-canvas); border: 1px dashed var(--border-subtle); border-radius: 12px; padding: 3.5rem 1.5rem; text-align: center;">
+              <div style="font-weight: 700; font-size: 1rem; color: var(--text-main); margin-bottom: 0.4rem;">No Discrepancies Requiring Review</div>
+              <div style="font-size: 0.85rem; color: var(--text-muted); max-width: 460px; margin: 0 auto; line-height: 1.6;">
+                When ambiguous reference numbers, underpayments, or excess payments are ingested, they are isolated here for auditor review, credit allocation, or refund approval.
+              </div>
             </div>
           </div>
 
@@ -911,8 +913,13 @@
                     </button>
                   </div>
                 </div>
-                <input type="file" class="form-input" accept=".csv,.xlsx" onchange="previewCsvUpload(this)">
+                <input type="file" class="form-input" accept=".csv,.xlsx,.xml" onchange="previewCsvUpload(this)">
                 <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.35rem;">Safu za faili (Spreadsheet columns): Namba ya Simu, Jina la Mteja, Kiasi, Namba ya Ankara</div>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label" for="singleRecipientPhone">Single Recipient Phone (optional when not using CSV)</label>
+                <input type="tel" class="form-input" id="singleRecipientPhone" placeholder="+255754000111">
               </div>
 
               <div class="form-group">
@@ -1131,8 +1138,8 @@
               <p style="font-size: 0.8rem; color: var(--text-sub); margin-bottom: 1rem;">Trigger a native prompt on customer handset with exact amount locking. Telco callbacks auto-reconcile invoices.</p>
 
               <div style="display: flex; gap: 0.75rem; margin-bottom: 0.75rem;">
-                <input type="text" id="stkTestPhone" placeholder="Customer Phone (e.g., 0754 123 456)" class="form-input" style="flex: 1;" value="0754123456" />
-                <input type="number" id="stkTestAmount" placeholder="Amount (TZS)" class="form-input" style="width: 130px;" value="10000" />
+                <input type="text" id="stkTestPhone" placeholder="Customer Phone (e.g., 0754 123 456)" class="form-input" style="flex: 1;" />
+                <input type="number" id="stkTestAmount" placeholder="Amount (TZS)" class="form-input" style="width: 130px;" />
                 <button class="btn btn-primary" onclick="triggerConsoleStkPush()">Send STK Push</button>
               </div>
               <div id="stkPushFeedback" style="font-size: 0.8rem; color: var(--text-muted); font-family: var(--font-mono); min-height: 24px;"></div>
@@ -1247,28 +1254,24 @@
         </div>
       </div>
 
-      <!-- Step 2: Verification Code displayed AFTER scanning -->
+      <!-- Step 2: Confirm Enrolling Device Registration -->
       <div id="pairingStep2" style="display: none;">
-        <div class="modal-title">Device Verification &amp; Authorization</div>
-        <div class="modal-desc">Android handset detected. Confirm the verification code matches what is displayed on your device screen.</div>
+        <div class="modal-title">Verify Device Enrollment</div>
+        <div class="modal-desc">Once the BriskSMS Android companion app completes challenge-response enrollment on your handset, click below to check registered devices for this token.</div>
 
         <div style="background: var(--bg-canvas); border: 1px solid var(--border-subtle); border-radius: 12px; padding: 1.25rem; margin-bottom: 1.25rem;">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
-            <span style="font-size: 0.8rem; color: var(--text-muted);">Detected Hardware</span>
-            <span style="font-weight: 700; font-size: 0.85rem;">Samsung Galaxy A15 (Dual SIM)</span>
-          </div>
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
-            <span style="font-size: 0.8rem; color: var(--text-muted);">Pairing Verification Code</span>
-            <span style="font-family: var(--font-mono); font-size: 1.25rem; font-weight: 800; letter-spacing: 0.08em; background: #FFFFFF; padding: 0.2rem 0.6rem; border-radius: 6px; border: 1px solid var(--border-subtle);" id="modalTokenDisplay">BRK-8821</span>
+            <span style="font-size: 0.8rem; color: var(--text-muted);">Pairing Token Reference</span>
+            <span style="font-family: var(--font-mono); font-size: 0.825rem; font-weight: 700; word-break: break-all; max-width: 240px; text-align: right; background: #FFFFFF; padding: 0.2rem 0.6rem; border-radius: 6px; border: 1px solid var(--border-subtle);" id="modalTokenDisplay">Sign in to generate token</span>
           </div>
           <div style="display: flex; justify-content: space-between; align-items: center;">
-            <span style="font-size: 0.8rem; color: var(--text-muted);">Android Keystore ECDSA Fingerprint</span>
-            <span style="font-family: var(--font-mono); font-size: 0.725rem; color: var(--text-sub);">SHA256:7b:99:a2:14:f8:d0:31:ec</span>
+            <span style="font-size: 0.8rem; color: var(--text-muted);">Verification Protocol</span>
+            <span style="font-family: var(--font-mono); font-size: 0.725rem; color: var(--text-sub);">ECDSA P-256 Challenge-Response</span>
           </div>
         </div>
 
         <div style="display: flex; gap: 0.75rem;">
-          <button class="btn btn-primary" style="flex: 1;" onclick="confirmDevicePairing()">Authorize &amp; Connect Relay</button>
+          <button class="btn btn-primary" style="flex: 1;" onclick="confirmDevicePairing()">Check Connected Devices</button>
           <button class="btn btn-outline" onclick="resetPairingSteps()">Back</button>
         </div>
       </div>
@@ -1298,26 +1301,24 @@
   <div class="modal-overlay" id="orgProfileModal">
     <div class="modal-card">
       <div class="modal-title">Registered Business Profile</div>
-      <div class="modal-desc">Business details and subscription tier configured by system administrator.</div>
+      <div class="modal-desc">Registered workspace details and live subscription catalog tiers.</div>
       <div class="form-group">
         <label class="form-label">Registered Business Name (BRELA / TIN)</label>
-        <input type="text" class="form-input" id="modalOrgNameInput" value="Alpha Traders Ltd">
+        <input type="text" class="form-input" id="modalOrgNameInput" value="" placeholder="Sign in to view business name" readonly>
       </div>
       <div class="form-group">
         <label class="form-label">TIN / Registration Number</label>
-        <input type="text" class="form-input" id="modalOrgTinInput" value="142-890-554">
+        <input type="text" class="form-input" id="modalOrgTinInput" value="" placeholder="Not configured" readonly>
       </div>
       <div class="form-group">
-        <label class="form-label">Active Subscription Tier (Admin Plan)</label>
+        <label class="form-label">Available Subscription Plans</label>
         <select class="form-select" id="modalOrgPlanSelect">
-          <option value="Standard">Standard Tier (Max 2 Devices)</option>
-          <option value="Professional">Professional Tier (Max 5 Devices)</option>
-          <option value="Enterprise">Enterprise Tier (Max 25 Devices)</option>
+          <option value="">Loading subscription catalog...</option>
         </select>
       </div>
       <div style="display: flex; gap: 0.75rem; justify-content: flex-end; margin-top: 1.5rem;">
-        <button class="btn btn-outline" onclick="closeOrgProfileModal()">Cancel</button>
-        <button class="btn btn-primary" onclick="saveOrgProfile()">Save Profile</button>
+        <button class="btn btn-outline" onclick="closeOrgProfileModal()">Close</button>
+        <button class="btn btn-primary" onclick="saveOrgProfile()">Refresh Profile</button>
       </div>
     </div>
   </div>
@@ -1438,14 +1439,48 @@
   <div class="toast-container" id="toastContainer"></div>
 
   <script>
-    // Tab Switching
-    function switchTab(tabId, el) {
-      document.querySelectorAll('.tab-pane').forEach(p => p.style.display = 'none');
+    function escapeHtml(value) {
+      if (value === null || value === undefined) return '';
+      return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function formatMinorTzs(amountCents) {
+      const numeric = Number(amountCents || 0);
+      if (!Number.isFinite(numeric)) return '0';
+      const major = numeric / 100;
+      const hasFraction = Math.abs(major % 1) > 0.0001;
+      return major.toLocaleString(undefined, {
+        minimumFractionDigits: hasFraction ? 2 : 0,
+        maximumFractionDigits: hasFraction ? 2 : 0,
+      });
+    }
+
+    // Tab Switching & URL Hash Persistence
+    const VALID_CONSOLE_TABS = new Set(['reconciliation', 'review-queue', 'messaging', 'devices', 'integrations']);
+
+    function switchTab(tabId, el, updateHash = true) {
+      const normalized = VALID_CONSOLE_TABS.has(tabId) ? tabId : 'reconciliation';
+      document.querySelectorAll('.tab-pane').forEach(p => { p.style.display = 'none'; p.classList.remove('active'); });
       document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
 
-      const pane = document.getElementById(`pane-${tabId}`);
-      if (pane) pane.style.display = 'block';
-      if (el) el.classList.add('active');
+      const pane = document.getElementById(`pane-${normalized}`);
+      if (pane) {
+        pane.style.display = 'block';
+        pane.classList.add('active');
+      }
+      if (el) {
+        el.classList.add('active');
+      } else {
+        const navMatch = Array.from(document.querySelectorAll('.nav-item')).find(a =>
+          (a.getAttribute('onclick') || '').includes(`'${normalized}'`)
+        );
+        if (navMatch) navMatch.classList.add('active');
+      }
 
       const titles = {
         'reconciliation': 'Payment Reconciliation & Financial Feed',
@@ -1454,7 +1489,11 @@
         'devices': 'Authorized Android Relay Fleet',
         'integrations': 'Zapier Integration & OAuth 2.0'
       };
-      document.getElementById('tabHeaderTitle').textContent = titles[tabId] || 'Merchant Console';
+      const headerEl = document.getElementById('tabHeaderTitle');
+      if (headerEl) headerEl.textContent = titles[normalized] || 'Merchant Console';
+      if (updateHash && window.location.hash !== `#${normalized}`) {
+        history.replaceState(null, '', `#${normalized}`);
+      }
     }
 
     // Secure Cookie-Based Session & CSRF Architecture
@@ -1538,21 +1577,40 @@
     }
 
     function resetDashboardToBlank() {
-      // Clear sensitive financial metrics from visible DOM
-      const kpis = document.querySelectorAll('.kpi-value');
-      if (kpis.length >= 4) {
-        kpis[0].textContent = 'TZS 0';
-        kpis[1].textContent = 'TZS 0';
-        kpis[2].textContent = '0';
-        kpis[3].textContent = '0 Active';
+      const kpiCards = document.querySelectorAll('.kpi-card');
+      if (kpiCards.length >= 4) {
+        kpiCards[0].querySelector('.kpi-value').textContent = 'TZS 0';
+        kpiCards[0].querySelector('.kpi-sub').textContent = 'Sign in to view settled volume';
+        kpiCards[1].querySelector('.kpi-value').textContent = '0';
+        kpiCards[1].querySelector('.kpi-sub').textContent = '0 transactions in queue';
+        kpiCards[2].querySelector('.kpi-value').textContent = '0';
+        kpiCards[2].querySelector('.kpi-sub').textContent = 'Prepaid Carrier Units';
+        kpiCards[3].querySelector('.kpi-value').textContent = '0 Active';
+        kpiCards[3].querySelector('.kpi-sub').textContent = 'No relay devices paired';
       }
-      const feedBody = document.getElementById('paymentFeedBody');
+
+      const feedBody = document.querySelector('#paymentsTable tbody');
       if (feedBody) {
-        feedBody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 2rem;">Authentication required. Please sign in.</td></tr>';
+        feedBody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 2.5rem 1.5rem;">Sign in to inspect your workspace payment reconciliation feed.</td></tr>';
       }
-      const reviewBody = document.getElementById('reviewQueueBody');
-      if (reviewBody) {
-        reviewBody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 2rem;">Authentication required. Please sign in.</td></tr>';
+
+      const reviewList = document.getElementById('reviewQueueItems');
+      if (reviewList) {
+        reviewList.innerHTML = '<div style="background: var(--bg-canvas); border: 1px dashed var(--border-subtle); border-radius: 12px; padding: 2.5rem 1.5rem; text-align: center; color: var(--text-muted);">Sign in to inspect discrepancy and review queue items.</div>';
+      }
+
+      const fleet = document.getElementById('deviceFleetContainer');
+      if (fleet) {
+        fleet.innerHTML = '<div style="background: var(--bg-canvas); border: 1px dashed var(--border-subtle); border-radius: 14px; padding: 2.5rem 1.5rem; text-align: center; color: var(--text-muted);">Sign in to manage connected Android relay devices.</div>';
+      }
+
+      const keyContainer = document.getElementById('apiKeyList');
+      if (keyContainer) {
+        keyContainer.textContent = 'Sign in to view or create scoped API keys.';
+      }
+      const hookContainer = document.getElementById('webhookList');
+      if (hookContainer) {
+        hookContainer.textContent = 'Sign in to view or register webhook endpoints.';
       }
     }
 
@@ -1577,9 +1635,9 @@
       try {
         const sessionData = await apiFetch('/v1/auth/session');
         if (sessionData && sessionData.user) {
-          const orgs = sessionData.organizations || [];
+          const orgs = Array.isArray(sessionData.organizations) ? sessionData.organizations : [];
           const savedOrgId = localStorage.getItem('brisksms_active_org_id');
-          const matchedOrg = orgs.find(o => o.id === savedOrgId) || orgs[0] || { id: 'default', name: 'Alpha Traders Ltd' };
+          const matchedOrg = orgs.find(o => o.id === savedOrgId) || orgs[0] || null;
 
           currentSession = {
             user: sessionData.user,
@@ -1604,9 +1662,9 @@
         if (refreshData) {
           const sessionData = await apiFetch('/v1/auth/session');
           if (sessionData && sessionData.user) {
-            const orgs = sessionData.organizations || [];
+            const orgs = Array.isArray(sessionData.organizations) ? sessionData.organizations : [];
             const savedOrgId = localStorage.getItem('brisksms_active_org_id');
-            const matchedOrg = orgs.find(o => o.id === savedOrgId) || orgs[0] || { id: 'default', name: 'Alpha Traders Ltd' };
+            const matchedOrg = orgs.find(o => o.id === savedOrgId) || orgs[0] || null;
 
             currentSession = {
               user: sessionData.user,
@@ -1620,76 +1678,30 @@
         // Silent refresh not possible (first-time visitor or logged out)
       }
 
-      // 3. Fallback: Authenticate demo merchant session in local development
-      let authData = null;
-      try {
-        authData = await apiFetch('/v1/auth/login', {
-          method: 'POST',
-          body: JSON.stringify({ email: 'merchant-a@brisksms.co.tz', password: 'Password123!' })
-        });
-      } catch {
-        try {
-          const email = `merchant_${Date.now()}@brisksms.co.tz`;
-          authData = await apiFetch('/v1/auth/register', {
-            method: 'POST',
-            body: JSON.stringify({
-              email,
-              password: 'Password123!',
-              fullName: 'Merchant Admin'
-            })
-          });
-          const orgData = await apiFetch('/v1/organizations', {
-            method: 'POST',
-            body: JSON.stringify({ name: 'Alpha Traders Ltd', tin: '142-890-554' })
-          });
-          if (authData) authData.org = orgData;
-        } catch (regErr) {
-          console.warn('Registration fallback notice:', regErr);
-        }
-      }
-
-      if (authData && authData.user) {
-        const orgs = await apiFetch('/v1/organizations').catch(() => []);
-        currentSession = {
-          user: authData.user,
-          org: orgs && orgs.length > 0 ? orgs[0] : (authData.org || { id: 'default', name: 'Alpha Traders Ltd' }),
-          organizations: orgs || []
-        };
-        if (authData.csrfToken) {
-          memoryCsrfToken = authData.csrfToken;
-        }
-        return currentSession;
-      }
-
-      currentSession = {
-        user: { fullName: 'Demo Merchant' },
-        org: { id: 'default', name: 'Alpha Traders Ltd', plan: 'STANDARD', deviceQuota: 2, deviceCount: 0 }
-      };
-      return currentSession;
+      currentSession = null;
+      return null;
     }
 
     function getActiveOrg() {
-      return (currentSession && currentSession.org) ? currentSession.org : {
-        name: 'Alpha Traders Ltd',
-        tin: '142-890-554',
-        plan: 'STANDARD',
-        deviceCount: 0,
-        deviceQuota: 2
-      };
+      return (currentSession && currentSession.org) ? currentSession.org : null;
     }
 
     function updateOrgDisplay() {
       const org = getActiveOrg();
       const nameEl = document.getElementById('sidebarOrgName');
-      if (nameEl) nameEl.textContent = org.name;
+      if (nameEl) nameEl.textContent = org ? org.name : 'Not Signed In';
       const planEl = document.getElementById('sidebarPlanName');
-      if (planEl) planEl.textContent = `Plan: ${(org.plan || 'STANDARD').toUpperCase()}`;
+      if (planEl) planEl.textContent = org ? `Plan: ${(org.plan || 'FREE').toUpperCase()}` : 'Plan: SIGN IN';
       const quotaEl = document.getElementById('sidebarDeviceQuota');
-      if (quotaEl) quotaEl.textContent = `${org.deviceCount || 0} / ${org.deviceQuota || 2} Devices Connected`;
+      if (quotaEl) {
+        quotaEl.textContent = org
+          ? `${org.deviceCount || 0} / ${org.deviceQuota || 2} Devices Connected`
+          : 'Sign in to connect devices';
+      }
 
       const signInBtn = document.getElementById('signInNavBtn');
       const signOutBtn = document.getElementById('signOutNavBtn');
-      const isAuthenticated = Boolean(currentSession?.user?.email || (currentSession?.user?.id && currentSession?.user?.id !== 'usr_demo'));
+      const isAuthenticated = Boolean(currentSession?.user?.id || currentSession?.user?.email);
       if (signInBtn) signInBtn.style.display = isAuthenticated ? 'none' : 'inline-flex';
       if (signOutBtn) signOutBtn.style.display = isAuthenticated ? 'inline-flex' : 'none';
     }
@@ -1697,12 +1709,22 @@
     async function loadSubscriptionsCatalog() {
       try {
         const catData = await apiFetch('/v1/catalog/public');
-        const products = catData?.products || [];
+        const products = Array.isArray(catData?.products) ? catData.products : [];
         const planSelect = document.getElementById('modalOrgPlanSelect');
-        if (planSelect && products.length > 0) {
-          planSelect.innerHTML = products.flatMap(p => p.plans || []).map(plan => `
-            <option value="${plan.code}">${plan.name} &mdash; ${plan.currency || 'TZS'} ${Number(plan.priceCents || plan.unitPriceCents || 0).toLocaleString()} / ${plan.billingInterval || 'MONTHLY'}</option>
-          `).join('');
+        if (planSelect) {
+          const allPlans = products.flatMap(p => Array.isArray(p.plans) ? p.plans : []);
+          if (allPlans.length > 0) {
+            planSelect.innerHTML = allPlans.map(plan => {
+              const prices = plan.currentVersion?.prices || [];
+              const primaryPrice = prices[0];
+              const priceLabel = primaryPrice
+                ? `${escapeHtml(primaryPrice.currency || 'TZS')} ${formatMinorTzs(primaryPrice.amountCents)} / ${escapeHtml(primaryPrice.billingInterval || 'MONTHLY')}`
+                : 'Custom pricing';
+              return `<option value="${escapeHtml(plan.code)}">${escapeHtml(plan.name)} — ${priceLabel}</option>`;
+            }).join('');
+          } else {
+            planSelect.innerHTML = '<option value="">No public plans configured</option>';
+          }
         }
       } catch (err) {
         console.warn('Unable to load public catalog:', err);
@@ -1711,7 +1733,12 @@
 
     function openOrgProfileModal() {
       const org = getActiveOrg();
-      document.getElementById('modalOrgNameInput').value = org.name;
+      if (!org) {
+        showToast('Please sign in to inspect workspace profile details.', 'info');
+        openAuthModal('signin');
+        return;
+      }
+      document.getElementById('modalOrgNameInput').value = org.name || '';
       document.getElementById('modalOrgTinInput').value = org.tin || '';
       document.getElementById('orgProfileModal').classList.add('active');
       loadSubscriptionsCatalog();
@@ -1722,25 +1749,20 @@
     }
 
     async function saveOrgProfile() {
-      const name = document.getElementById('modalOrgNameInput').value.trim() || 'My Business';
-      const tin = document.getElementById('modalOrgTinInput').value.trim();
-      const plan = document.getElementById('modalOrgPlanSelect').value;
-      const quotas = { 'Standard': 2, 'starter': 2, 'Professional': 5, 'growth': 5, 'Enterprise': 25, 'enterprise': 25 };
-      const current = getActiveOrg();
-      const updated = {
-        ...current,
-        name,
-        tin,
-        plan,
-        deviceQuota: quotas[plan] || 2
-      };
-      if (currentSession) {
-        currentSession.org = updated;
-        localStorage.setItem('brisksms_active_org_id', updated.id || 'default');
+      if (!currentSession?.user) {
+        closeOrgProfileModal();
+        openAuthModal('signin');
+        return;
       }
+      await bootstrapMerchantSession();
       updateOrgDisplay();
-      closeOrgProfileModal();
-      showToast(`Business profile updated: ${name}`, 'success');
+      const org = getActiveOrg();
+      if (org) {
+        document.getElementById('modalOrgNameInput').value = org.name || '';
+        document.getElementById('modalOrgTinInput').value = org.tin || '';
+      }
+      await loadSubscriptionsCatalog();
+      showToast('Synced workspace profile & subscription catalog from server.', 'info');
     }
 
     // BriskSMS Liquid Glass Dialog System
@@ -1817,10 +1839,12 @@
       if (type === 'error') dotColor = '#EF4444';
       if (type === 'info') dotColor = '#F4F1EA';
 
-      toast.innerHTML = `
-        <span style="width: 7px; height: 7px; border-radius: 50%; background: ${dotColor}; flex-shrink: 0;"></span>
-        <span>${message}</span>
-      `;
+      const dotSpan = document.createElement('span');
+      dotSpan.style.cssText = `width: 7px; height: 7px; border-radius: 50%; background: ${dotColor}; flex-shrink: 0;`;
+      const textSpan = document.createElement('span');
+      textSpan.textContent = String(message ?? '');
+      toast.appendChild(dotSpan);
+      toast.appendChild(textSpan);
 
       container.appendChild(toast);
       requestAnimationFrame(() => toast.classList.add('show'));
@@ -1972,49 +1996,210 @@
       showToast('Downloaded .XLSX template: BriskSMS_Bulk_Contacts_Template.xlsx', 'success');
     }
 
-    // CSV / Spreadsheet Upload Preview with Skeleton Loading
+    // CSV / Spreadsheet Upload Preview (real client-side parser, no mocked rows)
+    const MAX_SPREADSHEET_BYTES = 2 * 1024 * 1024;
+    const MAX_SPREADSHEET_ROWS = 5000;
     let parsedContactsCount = 0;
     window.parsedContactsList = [];
+    window.lastSpreadsheetParseStats = { totalRows: 0, skippedInvalid: 0, skippedDuplicates: 0 };
 
-    function previewCsvUpload(input) {
+    function normalizeTzPhoneClient(raw) {
+      const cleaned = String(raw || '').trim();
+      if (!cleaned || !/^[+\d\s().-]+$/.test(cleaned)) return null;
+      const digits = cleaned.replace(/[^\d+]/g, '');
+      if (/^0[67]\d{8}$/.test(digits)) {
+        return '+255' + digits.slice(1);
+      }
+      if (/^255[67]\d{8}$/.test(digits)) {
+        return '+' + digits;
+      }
+      if (/^\+255[67]\d{8}$/.test(digits)) {
+        return digits;
+      }
+      return null;
+    }
+
+    function parseCsvRowsRfc4180(text, maxRows = MAX_SPREADSHEET_ROWS + 1) {
+      const rows = [];
+      let currentRow = [];
+      let currentField = '';
+      let inQuotes = false;
+
+      for (let i = 0; i < text.length; i++) {
+        const ch = text[i];
+        if (inQuotes) {
+          if (ch === '"') {
+            if (text[i + 1] === '"') {
+              currentField += '"';
+              i++;
+            } else {
+              inQuotes = false;
+            }
+          } else {
+            currentField += ch;
+          }
+          continue;
+        }
+
+        if (ch === '"') {
+          inQuotes = true;
+        } else if (ch === ',') {
+          currentRow.push(currentField.trim());
+          currentField = '';
+        } else if (ch === '\r' || ch === '\n') {
+          if (ch === '\r' && text[i + 1] === '\n') {
+            i++;
+          }
+          currentRow.push(currentField.trim());
+          currentField = '';
+          if (currentRow.some((cell) => cell.length > 0)) {
+            rows.push(currentRow);
+            if (rows.length > maxRows) {
+              throw new Error(`Spreadsheet exceeds maximum supported limit of ${MAX_SPREADSHEET_ROWS} rows.`);
+            }
+          }
+          currentRow = [];
+        } else {
+          currentField += ch;
+        }
+      }
+
+      if (inQuotes) {
+        throw new Error('Malformed CSV: unclosed double quote in spreadsheet.');
+      }
+
+      currentRow.push(currentField.trim());
+      if (currentRow.some((cell) => cell.length > 0)) {
+        rows.push(currentRow);
+        if (rows.length > maxRows) {
+          throw new Error(`Spreadsheet exceeds maximum supported limit of ${MAX_SPREADSHEET_ROWS} rows.`);
+        }
+      }
+      return rows;
+    }
+
+    function parseContactsFromSpreadsheetText(text) {
+      const raw = String(text || '');
+      if (raw.length > MAX_SPREADSHEET_BYTES) {
+        throw new Error(`Spreadsheet exceeds maximum size limit of ${Math.round(MAX_SPREADSHEET_BYTES / (1024 * 1024))} MB.`);
+      }
+      const trimmed = raw.trim();
+      if (!trimmed) {
+        window.lastSpreadsheetParseStats = { totalRows: 0, skippedInvalid: 0, skippedDuplicates: 0 };
+        return [];
+      }
+
+      let rawRows = [];
+      // Support SpreadsheetML XML files generated by downloadXlsxTemplate()
+      if (trimmed.startsWith('<')) {
+        if (/<!\s*(DOCTYPE|ENTITY)\b/i.test(trimmed)) {
+          throw new Error('XML DTD / ENTITY declarations are prohibited for security reasons.');
+        }
+        const doc = new DOMParser().parseFromString(trimmed, 'application/xml');
+        const parserError = doc.querySelector('parsererror');
+        if (parserError) {
+          throw new Error('Malformed SpreadsheetML XML file.');
+        }
+        const xmlRows = Array.from(doc.querySelectorAll('Row'));
+        if (xmlRows.length > MAX_SPREADSHEET_ROWS + 1) {
+          throw new Error(`Spreadsheet exceeds maximum supported limit of ${MAX_SPREADSHEET_ROWS} rows.`);
+        }
+        rawRows = xmlRows.map((row) =>
+          Array.from(row.querySelectorAll('Data')).map((d) => (d.textContent || '').trim())
+        );
+      } else {
+        rawRows = parseCsvRowsRfc4180(trimmed);
+      }
+
+      const contacts = [];
+      const seenPhones = new Set();
+      let skippedInvalid = 0;
+      let skippedDuplicates = 0;
+
+      rawRows.forEach((cols, idx) => {
+        const firstCell = (cols[0] || '').trim();
+        if (idx === 0 && /phone|namba|simu/i.test(firstCell)) return;
+        const normalizedPhone = normalizeTzPhoneClient(firstCell);
+        if (!normalizedPhone) {
+          if (cols.some((c) => String(c || '').trim().length > 0)) {
+            skippedInvalid++;
+          }
+          return;
+        }
+        if (seenPhones.has(normalizedPhone)) {
+          skippedDuplicates++;
+          return;
+        }
+        seenPhones.add(normalizedPhone);
+        contacts.push({
+          phone: normalizedPhone,
+          name: (cols[1] || '').trim() || 'Customer',
+          amount: (cols[2] || '').trim(),
+          invoice: (cols[3] || '').trim()
+        });
+      });
+
+      window.lastSpreadsheetParseStats = {
+        totalRows: rawRows.length,
+        skippedInvalid,
+        skippedDuplicates
+      };
+      return contacts;
+    }
+
+    async function previewCsvUpload(input) {
       if (!input.files || input.files.length === 0) return;
       const file = input.files[0];
       const previewList = document.getElementById('previewList');
-      previewList.innerHTML = `
-        <div style="display: flex; flex-direction: column; gap: 0.65rem; padding: 0.5rem; text-align: left;">
-          <div style="display: flex; justify-content: space-between; align-items: center;">
-            <div class="skeleton-bar" style="width: 45%; height: 14px;"></div>
-            <div class="skeleton-pill" style="width: 75px;"></div>
-          </div>
-          <div class="skeleton-bar" style="width: 85%; height: 12px;"></div>
-          <div class="skeleton-bar" style="width: 70%; height: 12px;"></div>
-          <div class="skeleton-bar" style="width: 80%; height: 12px;"></div>
-          <div style="font-size: 0.75rem; color: var(--text-muted); text-align: center; margin-top: 0.25rem;">Kusoma na kuhakiki anwani kutoka ${file.name}...</div>
-        </div>
-      `;
+      previewList.textContent = `Reading recipients from ${file.name}...`;
 
-      setTimeout(() => {
-        window.parsedContactsList = [
-          { phone: '+255712345678', name: 'Amani Mwamba', amount: '45,000', invoice: 'INV-2026-001' },
-          { phone: '+255754987654', name: 'Zubeda Juma', amount: '120,000', invoice: 'INV-2026-002' },
-          { phone: '+255784112233', name: 'Barakael Mushi', amount: '15,000', invoice: 'INV-2026-003' }
-        ];
-        parsedContactsCount = window.parsedContactsList.length;
+      try {
+        const lowerName = file.name.toLowerCase();
+        if (lowerName.endsWith('.xlsx')) {
+          const headerBytes = new Uint8Array(await file.slice(0, 2).arrayBuffer());
+          const isZipArchive = headerBytes.length >= 2 && headerBytes[0] === 0x50 && headerBytes[1] === 0x4b;
+          if (isZipArchive) {
+            window.parsedContactsList = [];
+            parsedContactsCount = 0;
+            previewList.textContent = 'Binary OOXML .xlsx spreadsheets must be saved/exported as .csv before uploading.';
+            showToast('Binary .xlsx files require CSV export before upload.', 'warning');
+            return;
+          }
+        }
+
+        const content = await file.text();
+        const parsed = parseContactsFromSpreadsheetText(content);
+        if (parsed.length === 0) {
+          window.parsedContactsList = [];
+          parsedContactsCount = 0;
+          previewList.textContent = `No valid recipient rows found in ${file.name}. First column must contain phone numbers.`;
+          showToast('No valid phone numbers found in uploaded file.', 'warning');
+          return;
+        }
+
+        window.parsedContactsList = parsed;
+        parsedContactsCount = parsed.length;
         previewList.innerHTML = `
           <div style="display: flex; justify-content: space-between; font-weight: 700; font-size: 0.85rem; border-bottom: 1px solid var(--border-subtle); padding-bottom: 0.5rem; margin-bottom: 0.5rem;">
-            <span>Faili: ${file.name}</span>
+            <span>Faili: ${escapeHtml(file.name)}</span>
             <span style="color: var(--status-matched);">Wateja ${parsedContactsCount} Wamethibitishwa</span>
           </div>
-          ${window.parsedContactsList.map(c => `
+          ${parsed.slice(0, 20).map(c => `
             <div style="display: flex; justify-content: space-between; font-size: 0.8rem; padding: 0.25rem 0;">
-              <span>${c.name} (${c.phone})</span>
-              <span style="font-family: var(--font-mono); color: var(--text-sub);">TZS ${c.amount} &bull; ${c.invoice}</span>
+              <span>${escapeHtml(c.name)} (${escapeHtml(c.phone)})</span>
+              <span style="font-family: var(--font-mono); color: var(--text-sub);">${c.amount ? `TZS ${escapeHtml(c.amount)}` : ''}${c.amount && c.invoice ? ' &bull; ' : ''}${escapeHtml(c.invoice)}</span>
             </div>
           `).join('')}
+          ${parsed.length > 20 ? `<div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.35rem;">+ ${parsed.length - 20} more recipients loaded</div>` : ''}
         `;
         renderLivePreview();
         showToast(`Spreadsheet parsed: ${parsedContactsCount} valid recipients ready for dispatch.`, 'success');
-      }, 500);
+      } catch (err) {
+        window.parsedContactsList = [];
+        parsedContactsCount = 0;
+        previewList.textContent = 'Unable to parse spreadsheet file.';
+        showToast(err.message || 'Spreadsheet parsing failed.', 'warning');
+      }
     }
 
     // 1. Load Real Reconciliation Feed from Backend
@@ -2022,7 +2207,7 @@
       const tableBody = document.querySelector('#paymentsTable tbody');
       if (!tableBody || !currentSession?.org?.id) return;
       try {
-        const data = await apiFetch(`/v1/reconciliation/payments?organizationId=${currentSession.org.id}`);
+        const data = await apiFetch(`/v1/reconciliation/payments?organizationId=${encodeURIComponent(currentSession.org.id)}`);
         const payments = data?.payments || [];
         if (payments.length === 0) {
           tableBody.innerHTML = `
@@ -2040,21 +2225,23 @@
         }
 
         tableBody.innerHTML = payments.map(p => {
-          const amountFormatted = Number(p.amountCents).toLocaleString();
+          const amountFormatted = formatMinorTzs(p.amountCents);
           let statusClass = 'status-queued';
           if (p.state === 'MATCHED' || p.state === 'VERIFIED' || p.state === 'SETTLED') statusClass = 'status-matched';
           else if (p.state === 'REVIEW_REQUIRED') statusClass = 'status-review';
 
-          const invoiceLabel = p.matchedInvoiceId || p.candidateInvoiceId || '<span style="color:var(--text-muted);">Unmatched</span>';
+          const rawInvoice = p.matchedInvoiceId || p.candidateInvoiceId;
+          const invoiceLabel = rawInvoice ? escapeHtml(rawInvoice) : '<span style="color:var(--text-muted);">Unmatched</span>';
+          const sender = escapeHtml(p.senderName || p.senderPhone || '-');
           return `
             <tr>
-              <td style="font-family: var(--font-mono); font-weight: 600;">${p.reference}</td>
-              <td><span class="provider-badge">${p.provider}</span></td>
-              <td>${p.senderName || p.senderPhone || '-'}</td>
-              <td style="font-family: var(--font-mono); font-weight: 700;">TZS ${amountFormatted}</td>
+              <td style="font-family: var(--font-mono); font-weight: 600;">${escapeHtml(p.reference)}</td>
+              <td><span class="provider-badge">${escapeHtml(p.provider)}</span></td>
+              <td>${sender}</td>
+              <td style="font-family: var(--font-mono); font-weight: 700;">TZS ${escapeHtml(amountFormatted)}</td>
               <td style="font-family: var(--font-mono);">${invoiceLabel}</td>
-              <td><span style="font-size: 0.75rem; color: var(--text-sub);">${p.confidenceTier || 'HEURISTIC'}</span></td>
-              <td><span class="status-pill ${statusClass}">${p.state}</span></td>
+              <td><span style="font-size: 0.75rem; color: var(--text-sub);">${escapeHtml(p.confidenceTier || 'HEURISTIC')}</span></td>
+              <td><span class="status-pill ${statusClass}">${escapeHtml(p.state)}</span></td>
             </tr>
           `;
         }).join('');
@@ -2076,7 +2263,7 @@
       }
 
       try {
-        const data = await apiFetch(`/v1/reconciliation/payments?organizationId=${currentSession.org.id}&state=REVIEW_REQUIRED`);
+        const data = await apiFetch(`/v1/reconciliation/payments?organizationId=${encodeURIComponent(currentSession.org.id)}&state=REVIEW_REQUIRED`);
         const reviews = data?.payments || [];
         if (reviews.length === 0) {
           reviewList.innerHTML = `
@@ -2091,25 +2278,25 @@
         }
 
         reviewList.innerHTML = reviews.map(r => {
-          const amountFormatted = Number(r.amountCents).toLocaleString();
+          const amountFormatted = formatMinorTzs(r.amountCents);
           return `
             <div style="background: #FFFFFF; border: 1px solid var(--border-subtle); border-radius: 12px; padding: 1.25rem; margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center;">
               <div>
                 <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.35rem;">
-                  <span class="provider-badge">${r.provider}</span>
-                  <span style="font-family: var(--font-mono); font-weight: 700;">${r.reference}</span>
+                  <span class="provider-badge">${escapeHtml(r.provider)}</span>
+                  <span style="font-family: var(--font-mono); font-weight: 700;">${escapeHtml(r.reference)}</span>
                   <span class="status-pill status-review">REVIEW REQUIRED</span>
                 </div>
                 <div style="font-size: 0.85rem; color: var(--text-main);">
-                  Amount: <strong>TZS ${amountFormatted}</strong> &bull; Sender: ${r.senderName || r.senderPhone || '-'}
+                  Amount: <strong>TZS ${escapeHtml(amountFormatted)}</strong> &bull; Sender: ${escapeHtml(r.senderName || r.senderPhone || '-')}
                 </div>
                 <div style="font-size: 0.775rem; color: var(--status-review); margin-top: 0.25rem;">
-                  Discrepancy: ${r.reviewReason || 'Manual review required'}
+                  Discrepancy: ${escapeHtml(r.reviewReason || 'Manual review required')}
                 </div>
               </div>
               <div style="display: flex; gap: 0.5rem;">
-                <button class="btn btn-outline" style="padding: 0.4rem 0.8rem; font-size: 0.775rem; color: #DC2626;" onclick="rejectPaymentAction('${r.id}')">Reject</button>
-                <button class="btn btn-primary" style="padding: 0.4rem 0.8rem; font-size: 0.775rem;" onclick="verifyPaymentAction('${r.id}', '${r.candidateInvoiceId || ''}')">Verify &amp; Settle</button>
+                <button class="btn btn-outline" data-review-action="reject" data-payment-id="${escapeHtml(r.id)}" style="padding: 0.4rem 0.8rem; font-size: 0.775rem; color: #DC2626;">Reject</button>
+                <button class="btn btn-primary" data-review-action="verify" data-payment-id="${escapeHtml(r.id)}" data-candidate-id="${escapeHtml(r.candidateInvoiceId || '')}" style="padding: 0.4rem 0.8rem; font-size: 0.775rem;">Verify &amp; Settle</button>
               </div>
             </div>
           `;
@@ -2124,13 +2311,13 @@
       let defaultId = candidateInvoiceId || '';
 
       try {
-        const candidatesRes = await apiFetch(`/v1/reconciliation/payments/${paymentId}/candidates?organizationId=${currentSession.org.id}`);
+        const candidatesRes = await apiFetch(`/v1/reconciliation/payments/${encodeURIComponent(paymentId)}/candidates?organizationId=${encodeURIComponent(currentSession.org.id)}`);
         const candidates = candidatesRes?.candidates || [];
         if (candidates.length > 0) {
           const top = candidates[0];
           defaultId = defaultId || top.invoiceId;
-          const suggestionsText = candidates.slice(0, 3).map(c => 
-            `• ${c.referenceNumber}: ${c.customerName || 'Customer'} (TZS ${Number(c.balanceCents).toLocaleString()}, ${c.confidenceScore}% confidence)`
+          const suggestionsText = candidates.slice(0, 3).map(c =>
+            `• ${c.referenceNumber}: ${c.customerName || 'Customer'} (TZS ${formatMinorTzs(c.balanceCents)}, ${c.confidenceScore}% confidence)`
           ).join('\n');
           suggestedPrompt = `Top Candidate Invoices Discovered:\n${suggestionsText}\n\nConfirm or enter target Invoice ID:`;
         }
@@ -2203,7 +2390,7 @@
       const fleet = document.getElementById('deviceFleetContainer');
       if (!fleet || !currentSession?.org?.id) return;
       try {
-        const devices = await apiFetch(`/v1/devices?organizationId=${currentSession.org.id}`);
+        const devices = await apiFetch(`/v1/devices?organizationId=${encodeURIComponent(currentSession.org.id)}`);
         const deviceList = devices || [];
         const countEl = document.getElementById('sidebarDeviceQuota');
         if (countEl) {
@@ -2222,27 +2409,34 @@
           return;
         }
 
-        fleet.innerHTML = deviceList.map(d => `
-          <div style="background: #FFFFFF; border: 1px solid var(--border-subtle); border-radius: 12px; padding: 1.25rem; margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
-            <div style="display: flex; align-items: center; gap: 1rem;">
-              <div style="width: 44px; height: 44px; border-radius: 10px; background: var(--bg-bone); display: flex; align-items: center; justify-content: center;">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
-              </div>
-              <div>
-                <div style="font-weight: 700; font-size: 0.95rem;">${d.label || d.deviceName || d.deviceModel || 'Android Relay Device'}</div>
-                <div style="font-size: 0.775rem; color: var(--text-muted); margin-top: 0.2rem;">
-                  Model: ${d.deviceModel || 'Android'} &bull; Ingestion: ${d.ingestionMode || 'NOTIFICATION_LISTENER'} &bull; Status: ${d.status}
+        fleet.innerHTML = deviceList.map(d => {
+          const title = escapeHtml(d.label || d.deviceName || d.deviceModel || 'Android Relay Device');
+          const model = escapeHtml(d.deviceModel || 'Android');
+          const mode = escapeHtml(d.ingestionMode || 'NOTIFICATION_LISTENER');
+          const status = escapeHtml(d.status || 'UNKNOWN');
+          const deviceIdAttr = escapeHtml(d.id);
+          return `
+            <div style="background: #FFFFFF; border: 1px solid var(--border-subtle); border-radius: 12px; padding: 1.25rem; margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
+              <div style="display: flex; align-items: center; gap: 1rem;">
+                <div style="width: 44px; height: 44px; border-radius: 10px; background: var(--bg-bone); display: flex; align-items: center; justify-content: center;">
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+                </div>
+                <div>
+                  <div style="font-weight: 700; font-size: 0.95rem;">${title}</div>
+                  <div style="font-size: 0.775rem; color: var(--text-muted); margin-top: 0.2rem;">
+                    Model: ${model} &bull; Ingestion: ${mode} &bull; Status: ${status}
+                  </div>
                 </div>
               </div>
+              <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                <span class="status-pill ${d.status === 'ACTIVE' ? 'status-matched' : 'status-review'}">${d.status === 'ACTIVE' ? 'Online &amp; Relaying' : status}</span>
+                <button class="btn btn-outline" data-device-action="pause" data-device-id="${deviceIdAttr}" style="padding: 0.35rem 0.7rem; font-size: 0.75rem;">Pause</button>
+                <button class="btn btn-outline" data-device-action="resume" data-device-id="${deviceIdAttr}" style="padding: 0.35rem 0.7rem; font-size: 0.75rem;">Resume</button>
+                <button class="btn btn-outline" data-device-action="revoke" data-device-id="${deviceIdAttr}" style="padding: 0.35rem 0.7rem; font-size: 0.75rem; color: #DC2626;">Revoke</button>
+              </div>
             </div>
-            <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
-              <span class="status-pill ${d.status === 'ACTIVE' ? 'status-matched' : 'status-review'}">${d.status === 'ACTIVE' ? 'Online & Relaying' : d.status}</span>
-              <button class="btn btn-outline" style="padding: 0.35rem 0.7rem; font-size: 0.75rem;" onclick="pauseDeviceAction('${d.id}')">Pause</button>
-              <button class="btn btn-outline" style="padding: 0.35rem 0.7rem; font-size: 0.75rem;" onclick="resumeDeviceAction('${d.id}')">Resume</button>
-              <button class="btn btn-outline" style="padding: 0.35rem 0.7rem; font-size: 0.75rem; color: #DC2626;" onclick="revokeDeviceAction('${d.id}')">Revoke</button>
-            </div>
-          </div>
-        `).join('');
+          `;
+        }).join('');
       } catch (err) {
         console.error('Failed to load device fleet:', err);
       }
@@ -2250,7 +2444,7 @@
 
     async function pauseDeviceAction(deviceId) {
       try {
-        await apiFetch(`/v1/devices/${deviceId}/command`, {
+        await apiFetch(`/v1/devices/${encodeURIComponent(deviceId)}/command`, {
           method: 'POST',
           body: JSON.stringify({
             organizationId: currentSession.org.id,
@@ -2265,7 +2459,7 @@
 
     async function resumeDeviceAction(deviceId) {
       try {
-        await apiFetch(`/v1/devices/${deviceId}/command`, {
+        await apiFetch(`/v1/devices/${encodeURIComponent(deviceId)}/command`, {
           method: 'POST',
           body: JSON.stringify({
             organizationId: currentSession.org.id,
@@ -2286,44 +2480,51 @@
       });
       if (confirmed) {
         try {
-          await apiFetch(`/v1/devices/${deviceId}/revoke`, {
+          await apiFetch(`/v1/devices/${encodeURIComponent(deviceId)}/revoke`, {
             method: 'POST',
             body: JSON.stringify({ organizationId: currentSession.org.id })
           });
           showToast('Device revoked successfully.', 'info');
           loadDeviceFleet();
+          updateKpis();
         } catch (err) {
           showToast(err.message, 'warning');
         }
       }
     }
 
-    // 4. Real Device Pairing Modal Flow with 5-Minute Countdown
+    // 4. Real Device Pairing Modal Flow with Server Expiration Countdown
     let pairingTimerInterval = null;
+    let baselineDeviceIds = new Set();
 
     async function openPairingModal() {
+      if (!currentSession?.org?.id) {
+        showToast('Please sign in to pair an Android relay device.', 'info');
+        openAuthModal('signin');
+        return;
+      }
       resetPairingSteps();
       document.getElementById('pairingModal').classList.add('active');
-      if (!currentSession?.org?.id) return;
       try {
+        const existingDevices = await apiFetch(`/v1/devices?organizationId=${encodeURIComponent(currentSession.org.id)}`).catch(() => []);
+        baselineDeviceIds = new Set((existingDevices || []).map(d => d.id));
+
         const tokenData = await apiFetch('/v1/devices/pairing-token', {
           method: 'POST',
           body: JSON.stringify({ organizationId: currentSession.org.id })
         });
         const rawToken = tokenData?.pairingToken || tokenData?.token;
-        if (rawToken) {
-          const displayEl = document.getElementById('modalTokenDisplay');
-          if (displayEl) {
-            displayEl.textContent = rawToken;
-          }
+        const displayEl = document.getElementById('modalTokenDisplay');
+        if (displayEl) {
+          displayEl.textContent = rawToken || 'Token unavailable';
         }
 
-        // Initialize 5-minute countdown timer
         const timerEl = document.getElementById('pairingTimerCountdown');
         if (timerEl) {
           if (pairingTimerInterval) clearInterval(pairingTimerInterval);
-          let remainingSeconds = 300;
+          const expiresAtMs = tokenData?.expiresAt ? Date.parse(tokenData.expiresAt) : Date.now() + 300_000;
           const updateTimer = () => {
+            const remainingSeconds = Math.max(0, Math.floor((expiresAtMs - Date.now()) / 1000));
             const mins = Math.floor(remainingSeconds / 60);
             const secs = remainingSeconds % 60;
             timerEl.textContent = `Token expires in ${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')} (Single-use)`;
@@ -2332,13 +2533,12 @@
               timerEl.textContent = 'Token expired. Please close and re-open to generate a new QR.';
               timerEl.style.color = '#DC2626';
             }
-            remainingSeconds--;
           };
           updateTimer();
           pairingTimerInterval = setInterval(updateTimer, 1000);
         }
       } catch (err) {
-        console.warn('Pairing token generation error:', err);
+        showToast(err.message || 'Unable to generate pairing token.', 'warning');
       }
     }
 
@@ -2359,17 +2559,29 @@
     }
 
     async function confirmDevicePairing() {
-      closePairingModal();
-      showToast('Pairing handshake completed with Android device.', 'success');
-      loadDeviceFleet();
-      updateKpis();
+      if (!currentSession?.org?.id) return;
+      try {
+        const devices = await apiFetch(`/v1/devices?organizationId=${encodeURIComponent(currentSession.org.id)}`);
+        const list = devices || [];
+        const newlyPaired = list.find(d => !baselineDeviceIds.has(d.id));
+        if (!newlyPaired) {
+          showToast('No new enrolled device found yet. Complete pairing in the BriskSMS Android app first.', 'warning');
+          return;
+        }
+        closePairingModal();
+        showToast(`Device enrolled: ${newlyPaired.label || newlyPaired.deviceModel || newlyPaired.id}`, 'success');
+        await loadDeviceFleet();
+        await updateKpis();
+      } catch (err) {
+        showToast(err.message || 'Unable to verify device enrollment status.', 'warning');
+      }
     }
 
     // 5. Load Real Developer Integrations (API Keys & Webhooks)
     async function loadDeveloperIntegrations() {
       if (!currentSession?.org?.id) return;
       try {
-        const keysData = await apiFetch(`/v1/developer/api-keys?organizationId=${currentSession.org.id}`);
+        const keysData = await apiFetch(`/v1/developer/api-keys?organizationId=${encodeURIComponent(currentSession.org.id)}`);
         const apiKeys = keysData?.apiKeys || [];
         const keyContainer = document.getElementById('apiKeyList');
         if (keyContainer) {
@@ -2381,18 +2593,18 @@
             keyContainer.innerHTML = apiKeys.map(k => `
               <div style="border-bottom: 1px solid var(--border-subtle); padding: 0.5rem 0; margin-bottom: 0.35rem;">
                 <div style="display: flex; justify-content: space-between; font-weight: 700; font-size: 0.85rem;">
-                  <span>${k.name}</span>
+                  <span>${escapeHtml(k.name)}</span>
                   <span style="font-size: 0.75rem; color: ${k.revokedAt ? '#DC2626' : 'var(--status-matched)'};">${k.revokedAt ? 'Revoked' : 'Active'}</span>
                 </div>
                 <div style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">
-                  ${k.keyPrefix}... &bull; Scopes: [${k.scopes.join(', ')}]
+                  ${escapeHtml(k.keyPrefix)}... &bull; Scopes: [${escapeHtml((k.scopes || []).join(', '))}]
                 </div>
               </div>
             `).join('');
           }
         }
 
-        const hooksData = await apiFetch(`/v1/developer/webhooks?organizationId=${currentSession.org.id}`);
+        const hooksData = await apiFetch(`/v1/developer/webhooks?organizationId=${encodeURIComponent(currentSession.org.id)}`);
         const endpoints = hooksData?.endpoints || [];
         const hookContainer = document.getElementById('webhookList');
         if (hookContainer) {
@@ -2404,11 +2616,11 @@
             hookContainer.innerHTML = endpoints.map(e => `
               <div style="border-bottom: 1px solid var(--border-subtle); padding: 0.5rem 0; margin-bottom: 0.35rem;">
                 <div style="display: flex; justify-content: space-between; font-weight: 700; font-size: 0.85rem;">
-                  <span>${e.targetUrl || e.url}</span>
+                  <span>${escapeHtml(e.targetUrl || e.url)}</span>
                   <span style="font-size: 0.75rem; color: var(--status-matched);">Listening</span>
                 </div>
                 <div style="font-size: 0.75rem; color: var(--text-sub); margin-top: 0.25rem;">
-                  Events: <code>${(e.subscribedEvents || []).join(', ')}</code>
+                  Events: <code>${escapeHtml((e.subscribedEvents || []).join(', '))}</code>
                 </div>
               </div>
             `).join('');
@@ -2549,9 +2761,21 @@
     }
 
     async function dispatchCampaign() {
+      if (!currentSession?.org?.id) {
+        showToast('Please sign in to send SMS messages.', 'warning');
+        openAuthModal('signin');
+        return;
+      }
       const sim = document.getElementById('simSelector').value;
       const templateArea = document.getElementById('smsTemplate');
-      const content = templateArea ? templateArea.value : '';
+      const content = templateArea ? templateArea.value.trim() : '';
+      const singlePhoneEl = document.getElementById('singleRecipientPhone');
+      const singlePhone = singlePhoneEl ? singlePhoneEl.value.trim() : '';
+
+      if (!content) {
+        showToast('Please enter a message body before dispatching.', 'warning');
+        return;
+      }
 
       try {
         if (parsedContactsCount > 0 && window.parsedContactsList && window.parsedContactsList.length > 0) {
@@ -2570,16 +2794,21 @@
           });
           showToast(`Campaign queued: ${window.parsedContactsList.length} messages scheduled via SIM ${sim}.`, 'success');
         } else {
+          if (!singlePhone) {
+            showToast('Upload a contacts CSV file or enter a recipient phone number first.', 'warning');
+            return;
+          }
           const result = await apiFetch('/v1/messaging/send', {
             method: 'POST',
             body: JSON.stringify({
               organizationId: currentSession.org.id,
-              to: '+255712345678',
-              content: content.replace(/\[.*?\]/g, 'Valued Customer'),
+              to: singlePhone,
+              content: content,
               simSlot: Number(sim)
             })
           });
-          showToast(`SMS dispatched via Cellular Relay SIM ${sim} (Msg ID: ${result.id.slice(0, 8)}).`, 'success');
+          const msgId = result?.messageId || result?.id || '';
+          showToast(`SMS queued via Cellular Relay SIM ${sim}${msgId ? ` (${String(msgId).slice(0, 8)})` : ''}.`, 'success');
         }
         loadMessagingData();
       } catch (err) {
@@ -2591,14 +2820,14 @@
     async function updateKpis() {
       if (!currentSession?.org?.id) return;
       try {
-        const paymentsData = await apiFetch(`/v1/reconciliation/payments?organizationId=${currentSession.org.id}`);
+        const paymentsData = await apiFetch(`/v1/reconciliation/payments?organizationId=${encodeURIComponent(currentSession.org.id)}`);
         const payments = paymentsData?.payments || [];
-        let settledSum = 0;
+        let settledSumCents = 0;
         let settledCount = 0;
         let reviewCount = 0;
         for (const p of payments) {
           if (p.state === 'VERIFIED' || p.state === 'SETTLED') {
-            settledSum += Number(p.amountCents || 0);
+            settledSumCents += Number(p.amountCents || 0);
             settledCount++;
           }
           if (p.state === 'REVIEW_REQUIRED') {
@@ -2608,7 +2837,7 @@
 
         const kpiCards = document.querySelectorAll('.kpi-card');
         if (kpiCards[0]) {
-          kpiCards[0].querySelector('.kpi-value').textContent = `TZS ${settledSum.toLocaleString()}`;
+          kpiCards[0].querySelector('.kpi-value').textContent = `TZS ${formatMinorTzs(settledSumCents)}`;
           kpiCards[0].querySelector('.kpi-sub').textContent = `${settledCount} transactions settled`;
         }
         if (kpiCards[1]) {
@@ -2616,7 +2845,7 @@
           kpiCards[1].querySelector('.kpi-sub').textContent = `${reviewCount} transactions in queue`;
         }
 
-        const devices = await apiFetch(`/v1/devices?organizationId=${currentSession.org.id}`).catch(() => []);
+        const devices = await apiFetch(`/v1/devices?organizationId=${encodeURIComponent(currentSession.org.id)}`).catch(() => []);
         const activeDevices = (devices || []).filter(d => d.status === 'ACTIVE').length;
         if (kpiCards[3]) {
           kpiCards[3].querySelector('.kpi-value').textContent = `${activeDevices} Active`;
@@ -2627,42 +2856,13 @@
       }
     }
 
-    // Infinite Scrolling across Dashboards
-    let scrollPages = { reconciliation: 1, review: 1, devices: 1 };
-
     function setupInfiniteScroll() {
-      const sentinels = document.querySelectorAll('.infinite-scroll-sentinel');
-      if (!('IntersectionObserver' in window)) return;
-
-      const observer = new IntersectionObserver((entries) => {
-        entries.forEach((entry) => {
-          if (entry.isIntersecting) {
-            const feed = entry.target.dataset.feed;
-            loadMoreRecords(feed, entry.target);
-          }
-        });
-      }, { rootMargin: '100px' });
-
-      sentinels.forEach(s => observer.observe(s));
-    }
-
-    function loadMoreRecords(feed, sentinelEl) {
-      const skeleton = sentinelEl.querySelector('.sentinel-skeleton-loader');
-      const end = sentinelEl.querySelector('.sentinel-end');
-      if (scrollPages[feed] >= 4) {
+      document.querySelectorAll('.infinite-scroll-sentinel').forEach(sentinelEl => {
+        const skeleton = sentinelEl.querySelector('.sentinel-skeleton-loader');
+        const end = sentinelEl.querySelector('.sentinel-end');
         if (skeleton) skeleton.style.display = 'none';
-        if (end) end.style.display = 'block';
-        return;
-      }
-      if (skeleton) skeleton.style.display = 'block';
-
-      setTimeout(() => {
-        scrollPages[feed]++;
-        if (skeleton) skeleton.style.display = 'none';
-        if (scrollPages[feed] >= 4) {
-          if (end) end.style.display = 'block';
-        }
-      }, 750);
+        if (end && currentSession?.org?.id) end.style.display = 'block';
+      });
     }
 
     // Merchant Authentication & Email Verification Modal Logic
@@ -2771,7 +2971,7 @@
         await ensureCsrfToken();
         const res = await apiFetch('/v1/auth/register', {
           method: 'POST',
-          body: JSON.stringify({ email, password, fullName, orgName: orgName || undefined })
+          body: JSON.stringify({ email, password, fullName, organizationName: orgName || undefined })
         });
         const pendingDesc = document.getElementById('pendingVerificationEmailDesc');
         if (pendingDesc) {
@@ -2862,7 +3062,9 @@
         const token = await showBriskDialog({
           title: 'Google Identity Sign-In (Local Dev Double)',
           message: 'Provide your test Google ID token with matching nonce claim to simulate Google SSO in local development:',
-          inputPlaceholder: 'eyJhbGciOiJSUzI1NiIsImtpZCI...',
+          input: true,
+          inputLabel: 'Google ID Token (JWT):',
+          placeholder: 'eyJhbGciOiJSUzI1NiIsImtpZCI...',
           confirmText: 'Sign In with Google'
         });
         if (!token) return;
@@ -2959,21 +3161,67 @@
       }
     }
 
-    // Initialize On Load
+    // Initialize On Load & Bind Delegated Event Handlers
     document.addEventListener('DOMContentLoaded', async () => {
+      const reviewContainer = document.getElementById('pane-review-queue');
+      if (reviewContainer) {
+        reviewContainer.addEventListener('click', (event) => {
+          const btn = event.target.closest('[data-review-action]');
+          if (!btn) return;
+          const action = btn.dataset.reviewAction;
+          const paymentId = btn.dataset.paymentId;
+          if (!paymentId) return;
+          if (action === 'reject') {
+            rejectPaymentAction(paymentId);
+          } else if (action === 'verify') {
+            verifyPaymentAction(paymentId, btn.dataset.candidateId || '');
+          }
+        });
+      }
+
+      const deviceFleet = document.getElementById('deviceFleetContainer');
+      if (deviceFleet) {
+        deviceFleet.addEventListener('click', (event) => {
+          const btn = event.target.closest('[data-device-action]');
+          if (!btn) return;
+          const action = btn.dataset.deviceAction;
+          const deviceId = btn.dataset.deviceId;
+          if (!deviceId) return;
+          if (action === 'pause') pauseDeviceAction(deviceId);
+          else if (action === 'resume') resumeDeviceAction(deviceId);
+          else if (action === 'revoke') revokeDeviceAction(deviceId);
+        });
+      }
+
+      const initialHash = (window.location.hash || '').replace(/^#/, '');
+      if (VALID_CONSOLE_TABS.has(initialHash)) {
+        switchTab(initialHash, null, false);
+      }
+
+      window.addEventListener('hashchange', () => {
+        const nextHash = (window.location.hash || '').replace(/^#/, '');
+        if (VALID_CONSOLE_TABS.has(nextHash)) {
+          switchTab(nextHash, null, false);
+        }
+      });
+
       await bootstrapMerchantSession();
       updateOrgDisplay();
       setupInfiniteScroll();
       renderLivePreview();
       await checkUrlVerificationToken();
-      await Promise.allSettled([
-        loadReconciliationFeed(),
-        loadReviewQueue(),
-        loadDeviceFleet(),
-        loadMessagingData(),
-        loadDeveloperIntegrations(),
-        updateKpis(),
-      ]);
+      if (currentSession?.org?.id) {
+        await Promise.allSettled([
+          loadReconciliationFeed(),
+          loadReviewQueue(),
+          loadDeviceFleet(),
+          loadMessagingData(),
+          loadDeveloperIntegrations(),
+          updateKpis(),
+        ]);
+      } else {
+        resetDashboardToBlank();
+      }
     });
   </script>
 </body>

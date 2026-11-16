@@ -1,72 +1,59 @@
 # Security Architecture & Operations Policy
 
-**Classification:** Internal Production Security Standard  
-**Target Systems:** API, Worker, Android Client, Database, Edge Network  
+**Last Synced:** 2026-11-16  
+**Classification:** Production Security Standard (Synced with Current Runtime Implementation)  
+**Target Systems:** API, Worker, Web Portal, Android Client, Database, Edge Network  
 
 ---
 
 ## 1. Core Security Tenets
 
-1. **Security by Design:** Security controls are woven into the relational architecture, API middleware, and deployment pipelines from Day Zero.
-2. **Zero Trust Tenant Isolation:** Every data access path must authenticate the caller and strictly scope queries to the authenticated `organizationId`. Cross-tenant data bleed is treated as a critical P0 incident.
-3. **Defense in Depth:** Multiple independent security barriers protect financial evidence: Cloudflare Edge WAF -> API Rate Limiting -> JWT & Keystore Signature Verification -> Application RBAC -> Database Row Constraints.
-4. **Least Privilege:** Services, database users, and human operators have access only to the exact resources required to perform their functions.
+1. **Security by Design:** Security controls are woven into the relational architecture, API middleware, and CI pipelines.
+2. **Zero Trust Tenant Isolation:** Every data access path authenticates the caller and strictly scopes queries to the authenticated `organizationId`.
+3. **Defense in Depth:** Multiple independent security barriers protect financial evidence: Edge WAF/CSP -> Rate Limiting -> JWT/CSRF & Keystore PoP Signature Verification -> Application RBAC -> Database Row Locks & Triggers.
+4. **Least Privilege:** Services, database users, devices (`bsk_dev_...`), and developer/OAuth tokens (`bsk_live_...`, `bsk_at_...`) enforce strict boundary separation.
 
 ---
 
 ## 2. Authentication & Credential Management
 
 ### 2.1. User Authentication
-- **Password Storage:** Passwords hashed using **Argon2id** (memory cost: 64 MB, iterations: 3, parallelism: 1). Legacy algorithms (MD5, SHA1, plain SHA256) are strictly banned.
-- **Session Tokens:**
-  - Access Token: Short-lived JSON Web Token (JWT), valid for 15 minutes, signed with RS256 or Ed25519 asymmetric keys.
-  - Refresh Token: Opaque 256-bit cryptographic random string, stored hashed in PostgreSQL, valid for 7 days, transmitted via HTTP-only, Secure, SameSite=Strict cookies.
-  - Token Rotation: Every refresh token exchange revokes the old token and issues a new one. Reusing a revoked refresh token triggers immediate invalidation of all active sessions for that user.
+- **Password Storage:** Passwords hashed using **`scrypt`** (`node:crypto` `scryptSync` with 16-byte random salt, stored as `scrypt:<salt>:<derivedKeyHex>`) and compared via `timingSafeEqual`. Legacy weak hashes (MD5, SHA1, plain SHA256) are banned; invited unactivated users have `passwordHash = undefined` (zero sentinel hashes).
+- **Session & Refresh Tokens:**
+  - **Access Token:** Short-lived JSON Web Token (JWT), valid for **15 minutes** (`900s`), signed with **HMAC-SHA256** (`HS256`) using `JWT_ACCESS_SECRET` (minimum 32 chars in production; fail-closed boot validation). Emitted in HttpOnly `bsk_session` cookie (and bearer payload for API clients).
+  - **Refresh Token:** Opaque 256-bit cryptographic random string (`bsk_ref_...`), stored SHA-256 hashed in PostgreSQL `refresh_tokens`, valid for **30 days** (`2,592,000s`), transmitted via `HttpOnly; Secure (prod); SameSite=Strict; Path=/v1/auth` cookie (`bsk_refresh`).
+  - **Rotation & Family Revocation:** Refresh exchanges execute under `SELECT ... FOR UPDATE`. Replaying an already-consumed token revokes the entire `family_id` and records active session `jti`s in durable `revoked_sessions` + Redis (`auth:revoked_jti:<jti>`). Every `authenticate()` check verifies active user status (`401 ACCOUNT_DEACTIVATED`) and active org membership (`403 FORBIDDEN`).
 - **Multi-Factor Authentication (MFA):**
-  - TOTP (RFC 6238) supported via authenticator apps (Google Authenticator, Authy).
-  - Mandatory for all users holding `Owner`, `Admin`, or `Finance` roles.
+  - *Implementation Note:* `users.two_factor_secret` / `two_factor_enabled` schema columns exist for future TOTP (RFC 6238) rollout; mandatory TOTP challenge enforcement during login is deferred roadmap work.
 
 ### 2.2. Android Device Authentication
-- Android devices do not use standard username/password authentication.
-- **Pairing Ceremony:**
-  1. Web dashboard generates a cryptographically signed QR code containing a single-use enrollment token (valid for 5 minutes).
-  2. Android app scans the QR code and generates a P-256 keypair in the hardware-backed **Android Keystore**.
-  3. The app submits its public key and enrollment token to `/v1/devices/enroll`.
-  4. Backend verifies the enrollment token, binds the public key to the device ID, and issues a device credential.
-- **Payload Signing:**
-  - Every batch of relayed payment notifications is signed on-device using the Keystore private key (`SHA256withECDSA`).
-  - Backend verifies the signature against the registered public key before accepting the payload.
+- Android devices do not use human username/password credentials (`bsk_dev_...` tokens only).
+- **Pairing Ceremony (Two-Step Challenge-Response Proof-of-Possession):**
+  1. Web dashboard generates a single-use enrollment token (`bsk_pair_...`, valid for 5 minutes) via `POST /v1/devices/pairing-token` and renders it as a QR payload.
+  2. Android app scans the QR code and generates a hardware-backed EC P-256 (`secp256r1`) keypair in **Android Keystore**.
+  3. **Challenge Issuance (`POST /v1/devices/pairing-challenge`):** The app submits `enrollmentToken`, its X.509 SPKI `publicKeyPem`, and allowed algorithms (`EC_P256`, `SHA256_ECDSA`). Backend validates key curve/size/uniqueness and issues a cryptographically random 256-bit single-use challenge (`device_pairing_challenges`, default TTL `120s`, capped by token expiry).
+  4. **Local Proof Signing & Atomic Verification (`POST /v1/devices/pair`):** The app constructs the length-prefixed binary transcript (`BRISKSMS-DEVICE-PAIRING-POP-V1`), signs it with its Keystore EC P-256 private key (`SHA256withECDSA`), and submits the proof. Under strict row-level lock order (`pairing_tokens -> device_pairing_challenges -> devices`), the backend verifies bindings, expiry, key fingerprint, and ASN.1 DER ECDSA signature, atomically consumes both challenge and token, and issues a `bsk_dev_...` credential.
+- **Threat Mitigations Built Into Enrollment:**
+  - **Intercepted Pairing Token Attack:** Stealing a `bsk_pair_...` token fails without completing PoP for the bound key.
+  - **Cross-Token / Cross-Org Substitution & Replay:** Challenges bind `sha256Hex(token)`, `organizationId`, `enrollmentId`, `challengeId`, `publicKeyFingerprint`, and `expiresAtIso`.
+  - **Silent Key Replacement Prohibited:** Requests presenting `bsk_dev_...`, `deviceId`/`existingDeviceId`, or an already-registered `publicKeyFingerprint` receive HTTP `409` (`DEVICE_KEY_REPLACEMENT_FORBIDDEN` / `PUBLIC_KEY_ALREADY_REGISTERED`).
+- **Payload Ingestion:** Paired devices authenticate with `bsk_dev_...` (verified via constant-time `timingSafeEqual` on SHA-256 hashes; revoked devices fail closed `403 DEVICE_REVOKED`).
 
-### 2.3. Developer API Keys
-- API keys follow the prefix standard: `bsk_live_[32 random alphanumeric characters]` (Production) and `bsk_test_[32 random alphanumeric characters]` (Sandbox).
-- The raw key is shown to the developer **only once** upon generation.
-- The database stores only the SHA-256 hash of the API key:
-  ```sql
-  CREATE TABLE api_keys (
-    id UUID PRIMARY KEY,
-    organization_id UUID NOT NULL,
-    key_hash VARCHAR(64) NOT NULL UNIQUE,
-    key_prefix VARCHAR(16) NOT NULL,
-    label VARCHAR(100),
-    permissions JSONB NOT NULL,
-    last_used_at TIMESTAMPTZ,
-    revoked_at TIMESTAMPTZ
-  );
-  ```
+### 2.3. Developer API Keys & OAuth 2.0 PKCE
+- Developer API keys follow the prefix standard **`bsk_live_<random>`** and are stored SHA-256 hashed in `api_keys` (plaintext returned once upon creation).
+- OAuth 2.0 (`/v1/oauth/*`) issues **`bsk_at_...`** access tokens and **`bsk_rt_...`** refresh tokens strictly enforcing **RFC 7636 PKCE `S256`** (`plain` rejected with `400 INVALID_REQUEST`), `https://` (or loopback dev) `redirect_uri` checks, and `clientSecret` validation on confidential clients.
+- Platform catalog admin mutations (`/v1/admin/catalog/*`) require independent `PLATFORM_ADMIN_SECRET` verification via `X-Platform-Admin-Key` (`503 PLATFORM_ADMIN_UNCONFIGURED` / `403`).
 
 ---
 
 ## 3. Cryptography & Data Protection at Rest and in Transit
 
 1. **In Transit:**
-   - Strict TLS 1.3 requirement for all external communication.
-   - HSTS (`Strict-Transport-Security: max-age=63072000; includeSubDomains; preload`) enforced at Cloudflare Edge.
-   - Android client employs SSL certificate pinning against the API host.
+   - Reverse proxy / Cloudflare Edge terminates **TLS 1.3**, injects HSTS and CSP headers, and sanitizes `X-Forwarded-For` (`TRUST_PROXY=true`).
+   - Android pairing/network client enforces HTTPS-only server endpoints (`PairingUrlValidator` & `EvidenceUploadAndPairingPolicyTest`). *(Certificate pinning and Edge WAF deployment are Phase 8 production infrastructure tasks.)*
 2. **At Rest:**
-   - Database volumes encrypted at rest with AES-256.
-   - Sensitive third-party credentials (MikroTik passwords, WHMCS API secrets) are encrypted application-side using AES-256-GCM before writing to the database:
-     $$\text{Ciphertext} = \text{AES-256-GCM}(\text{MasterKey}, \text{IV}, \text{Secret}, \text{OrgId})$$
-   - Master encryption keys are injected via environment variables and managed securely outside the database.
+   - Sensitive secrets (`webhook_endpoints.secret` encrypted via migration `20261116010000_encrypt_webhook_endpoint_secrets`, `messaging_accounts.encrypted_api_token`, `smsgate_signing_keys`) are encrypted application-side using **AES-256-GCM** (`encryptSecret` / `decryptSecret`) with independent 12-byte IVs and authenticated tags backed by `ENCRYPTION_MASTER_KEY`.
+   - `processWebhookDeliveryJob` and `SmsGateProvider` validate destination URLs via `validateOutboundHttpUrl()` + `redirect: 'error'` to block SSRF into loopback, link-local (`169.254.169.254`), and RFC 1918 private subnets.
 
 ---
 

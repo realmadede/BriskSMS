@@ -2,9 +2,12 @@
 
 **Product Name:** BriskSMS  
 **Document Version:** 1.0.0  
+**Last Synced:** 2026-11-16  
 **Target Market:** Tanzania (Initial), East Africa & SADC (Expansion)  
 **Classification:** Commercial SaaS Platform  
-**Architecture Lead:** Principal Architect & Senior Full-Stack Lead  
+
+> [!NOTE]
+> **Implementation Alignment Note (2026-11-16):** This PRD captures the original commercial product scope. In the current codebase (see [`IMPLEMENTATION_ROADMAP.md`](../roadmap/IMPLEMENTATION_ROADMAP.md) and [`FULL_REPOSITORY_HARD_AUDIT.md`](../audit/FULL_REPOSITORY_HARD_AUDIT.md)), **TOTP 2FA challenge enforcement (FR-1.4)**, **NMB Bank parser adapter (FR-3.3)**, **OOXML `.xlsx` import (use CSV/SpreadsheetML XML)**, **native RouterOS/WHMCS worker adapters (FR-5.2/5.3 — currently served via signed webhooks & Zapier)**, and **live MNO STK push carrier credentials (FR-7.3 — fail-closed)** remain deferred/gated items. Refresh token lifetime (**FR-1.3**) is **30 days** in the runtime.
 
 ---
 
@@ -100,7 +103,7 @@ BriskSMS enforces strict role-based access control across organization boundarie
 ### Module 1: Identity, Multi-Tenancy & Security
 - **FR-1.1:** Organizations are strictly isolated multi-tenant entities. Every resource (devices, payments, invoices, contacts, API keys) must be bound to a unique `organizationId`.
 - **FR-1.2:** Users can belong to multiple organizations with distinct roles per organization.
-- **FR-1.3:** Authentication via secure JWT with short expiration (15 minutes) and rotating HTTP-only refresh tokens (7 days).
+- **FR-1.3:** Authentication via secure HMAC-SHA256 JWT with short expiration (15 minutes) and rotating opaque HTTP-only refresh tokens (**30 days**, family-tracked for replay revocation).
 - **FR-1.4:** Two-Factor Authentication (2FA) via TOTP (RFC 6238) for all administrative and financial roles.
 
 ### Module 2: Device Management & Secure Android Ingestion

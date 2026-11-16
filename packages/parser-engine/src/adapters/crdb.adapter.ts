@@ -6,15 +6,18 @@ export class CrdbAdapter extends BaseProviderAdapter {
   readonly provider = PaymentProvider.CRDB_BANK;
 
   canParse(senderAddress: string, body: string): boolean {
+    if (this.isPersonalPhoneSender(senderAddress)) {
+      return false;
+    }
     const address = senderAddress.toUpperCase();
-    return address.includes('CRDB') || /CRDB\s*Alert/i.test(body);
+    return address.includes('CRDB') || /CRDB\s*Alert:\s*Credit\s+of/i.test(body);
   }
 
   parse(body: string, defaultDate: Date = new Date()): ParsedPaymentResult | null {
     const text = this.cleanText(body);
 
-    // Only process incoming credits (Credit of TZS...)
-    if (!/Credit\s+of/i.test(text)) {
+    // Only process incoming credits (Credit of TZS...) and reject debits
+    if (!this.isIncomingCreditMessage(text) || !/Credit\s+of/i.test(text)) {
       return null;
     }
 
@@ -26,7 +29,7 @@ export class CrdbAdapter extends BaseProviderAdapter {
     const reference = refMatch[1].toUpperCase();
 
     // Extract Amount (Credit of TZS 100,000.00)
-    const amountMatch = text.match(/Credit\s+of\s+(?:TZS|Tsh)\s*([\d,]+(?:\.\d{2})?)/i);
+    const amountMatch = text.match(/Credit\s+of\s+(?:TZS|Tsh)\s*(\d[\d,]*(?:\.\d{1,2})?)/i);
     if (!amountMatch || !amountMatch[1]) {
       return null;
     }
@@ -55,7 +58,7 @@ export class CrdbAdapter extends BaseProviderAdapter {
       senderName,
       recipientAccount,
       customerMemo: null,
-      providerTimestamp: defaultDate,
+      providerTimestamp: this.extractTimestamp(text, defaultDate),
       rawText: body,
     };
   }

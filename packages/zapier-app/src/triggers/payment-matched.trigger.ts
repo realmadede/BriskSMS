@@ -11,41 +11,61 @@ export const paymentMatchedTrigger = {
     type: 'hook',
     performSubscribe: async (z: ZapierZ, bundle: ZapierBundle) => {
       const response = await z.request({
-        url: 'https://api.brisksms.com/v1/webhooks/endpoints',
+        url: 'https://api.brisksms.com/v1/developer/webhooks',
         method: 'POST',
         headers: {
           Authorization: `Bearer ${bundle.authData.access_token}`,
           'Content-Type': 'application/json',
         },
         body: {
-          targetUrl: bundle.targetUrl,
+          url: bundle.targetUrl,
           subscribedEvents: ['payment.matched'],
         },
       });
-      return response.json;
+      if (response.status >= 400) {
+        throw new Error(`Webhook subscribe failed with HTTP status ${response.status}`);
+      }
+      const raw = response.json as Record<string, unknown>;
+      const data = raw?.data as Record<string, unknown> | undefined;
+      return (data?.endpoint as Record<string, unknown> | undefined) ?? data ?? raw;
     },
     performUnsubscribe: async (z: ZapierZ, bundle: ZapierBundle<{ id: string }>) => {
       const response = await z.request({
-        url: `https://api.brisksms.com/v1/webhooks/endpoints/${bundle.inputData.id}`,
+        url: `https://api.brisksms.com/v1/developer/webhooks/${bundle.inputData.id}`,
         method: 'DELETE',
         headers: {
           Authorization: `Bearer ${bundle.authData.access_token}`,
         },
       });
-      return response.json;
+      if (response.status >= 400) {
+        throw new Error(`Webhook unsubscribe failed with HTTP status ${response.status}`);
+      }
+      const raw = response.json as Record<string, unknown>;
+      return (raw?.data as Record<string, unknown> | undefined) ?? raw;
     },
     perform: async (_z: ZapierZ, bundle: ZapierBundle<{ data: Record<string, unknown> }>) => {
       return [bundle.inputData.data || bundle.inputData];
     },
     performList: async (z: ZapierZ, bundle: ZapierBundle) => {
       const response = await z.request({
-        url: 'https://api.brisksms.com/v1/payments?state=MATCHED&limit=5',
+        url: 'https://api.brisksms.com/v1/reconciliation/payments?state=MATCHED&limit=5',
         method: 'GET',
         headers: {
           Authorization: `Bearer ${bundle.authData.access_token}`,
         },
       });
-      return Array.isArray(response.json) ? response.json : [response.json];
+      if (response.status >= 400) {
+        throw new Error(`List matched payments failed with HTTP status ${response.status}`);
+      }
+      if (Array.isArray(response.json)) {
+        return response.json;
+      }
+      const raw = response.json as Record<string, unknown>;
+      const data = raw?.data as Record<string, unknown> | undefined;
+      if (Array.isArray(data?.payments)) {
+        return data.payments as Array<Record<string, unknown>>;
+      }
+      return [raw];
     },
     sample: {
       paymentId: 'pay_992018491',

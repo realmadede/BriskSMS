@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import {
   BusinessEventType,
+  ClaimStatus,
   InvoiceStatus,
   MatchConfidenceTier,
+  PaymentVerificationState,
   ReconciliationMatchResult,
   TransactionState,
   VerificationMethod,
@@ -16,6 +18,11 @@ import {
   mapInvoiceRow,
   mapNormalizedPaymentRow,
 } from '../../core/store.js';
+import { HttpException } from '../../core/http.js';
+import {
+  PaymentReferenceClaimService,
+  paymentReferenceClaimService,
+} from './payment-reference-claim.service.js';
 import { assertTenantContext, sql, SqlExecutor, withTransaction } from '@brisksms/db';
 
 export interface CreateInvoiceDto {
@@ -36,6 +43,8 @@ export interface VerifyPaymentDto {
   verifiedById?: string;
   externalVerificationRef?: string;
   notes?: string;
+  isProviderAuthenticated?: boolean;
+  requireAuditMetadata?: boolean;
 }
 
 export interface RejectPaymentDto {
@@ -50,6 +59,9 @@ export interface VerificationSettlementResult {
   invoice: InvoiceRecord;
   invoicePayment: InvoicePaymentRecord;
   fulfillmentEligible: boolean;
+  verificationState: PaymentVerificationState;
+  claimId: string;
+  claimStatus: ClaimStatus;
 }
 
 export interface CandidateMatchSuggestion {
@@ -80,6 +92,9 @@ export interface CandidateMatchSuggestion {
  *    and determines fulfillment eligibility.
  */
 export class ReconciliationService {
+  constructor(
+    private readonly claimService: PaymentReferenceClaimService = paymentReferenceClaimService,
+  ) {}
   /**
    * Creates an open invoice for a tenant organization in PostgreSQL.
    */
@@ -474,40 +489,119 @@ export class ReconciliationService {
   ): Promise<VerificationSettlementResult> {
     assertTenantContext({ organizationId });
 
-    return withTransaction(async (tx) => {
-      // Lock payment row
+    if (dto.requireAuditMetadata) {
+      if (!dto.externalVerificationRef || dto.externalVerificationRef.trim().length < 6) {
+        throw new HttpException(
+          400,
+          'INVALID_EXTERNAL_VERIFICATION_REF',
+          'externalVerificationRef must be at least 6 characters for manual reconciliation.',
+        );
+      }
+      if (!dto.notes || dto.notes.trim().length < 10) {
+        throw new HttpException(
+          400,
+          'INVALID_VERIFICATION_NOTES',
+          'notes must be at least 10 characters for manual reconciliation.',
+        );
+      }
+    } else {
+      if (dto.externalVerificationRef !== undefined && dto.externalVerificationRef.trim().length < 6) {
+        throw new HttpException(
+          400,
+          'INVALID_EXTERNAL_VERIFICATION_REF',
+          'externalVerificationRef must be at least 6 characters when provided.',
+        );
+      }
+      if (dto.notes !== undefined && dto.notes.trim().length < 10) {
+        throw new HttpException(
+          400,
+          'INVALID_VERIFICATION_NOTES',
+          'notes must be at least 10 characters when provided.',
+        );
+      }
+    }
+
+    const executeVerification = async (tx: SqlExecutor): Promise<VerificationSettlementResult> => {
+      // Unlocked pre-lookup to derive canonical (provider, reference) BEFORE acquiring Level 4 payment lock
+      const previewRows = await tx`
+        SELECT "id", "provider", "reference", "device_id"
+        FROM "normalized_payments"
+        WHERE "id" = ${dto.paymentId} AND "organization_id" = ${organizationId}
+      `;
+      if (!previewRows[0]) {
+        throw new HttpException(404, 'PAYMENT_NOT_FOUND', `Payment '${dto.paymentId}' not found in organization`);
+      }
+
+      // Lock Order Level 1 -> Level 2: Advisory reference lock + global claim verification/refresh
+      const claimResult = await this.claimService.verifyOrRefreshManualClaim(tx, {
+        provider: previewRows[0].provider,
+        reference: previewRows[0].reference,
+        organizationId,
+        paymentId: dto.paymentId,
+        verifiedById: dto.verifiedById ?? null,
+        allowConfirmedClaimSameOrg: Boolean(dto.isProviderAuthenticated),
+      });
+
+      // Lock Order Level 4: Lock payment row
       const payRows = await tx`
         SELECT * FROM "normalized_payments"
         WHERE "id" = ${dto.paymentId} AND "organization_id" = ${organizationId}
         FOR UPDATE
       `;
       if (!payRows[0]) {
-        throw new Error(`Payment '${dto.paymentId}' not found in organization`);
+        throw new HttpException(404, 'PAYMENT_NOT_FOUND', `Payment '${dto.paymentId}' not found in organization`);
       }
       const payment = mapNormalizedPaymentRow(payRows[0]);
 
       if (payment.state === TransactionState.VERIFIED) {
-        throw new Error(`Payment '${dto.paymentId}' is already VERIFIED`);
+        throw new HttpException(409, 'ALREADY_VERIFIED', `Payment '${dto.paymentId}' is already VERIFIED`);
       }
       if (payment.state === TransactionState.REJECTED || payment.state === TransactionState.DUPLICATE_REJECTED) {
-        throw new Error(`Payment '${dto.paymentId}' cannot be verified from terminal state '${payment.state}'`);
+        throw new HttpException(
+          409,
+          'TERMINAL_PAYMENT_STATE',
+          `Payment '${dto.paymentId}' cannot be verified from terminal state '${payment.state}'`,
+        );
+      }
+
+      // Enforce Separation of Duties on manual/human reconciliation:
+      // The verifier cannot be the same user who paired the ingesting Android relay device.
+      if (!dto.isProviderAuthenticated && payment.deviceId && dto.verifiedById) {
+        const pairingRows = await tx`
+          SELECT "created_by_id" FROM "pairing_tokens"
+          WHERE "organization_id" = ${organizationId}
+            AND "used_by_device_id" = ${payment.deviceId}
+          LIMIT 1
+        `;
+        if (pairingRows[0]?.created_by_id === dto.verifiedById) {
+          throw new HttpException(
+            403,
+            'SEPARATION_OF_DUTIES_VIOLATION',
+            'Separation of duties violation: a user cannot verify a payment relayed by a device they paired.',
+          );
+        }
       }
 
       const targetInvoiceId = dto.invoiceId ?? payment.matchedInvoiceId ?? payment.candidateInvoiceId;
       if (!targetInvoiceId) {
-        throw new Error(`Cannot verify payment '${dto.paymentId}' without a target invoiceId`);
+        throw new HttpException(400, 'MISSING_INVOICE_ID', `Cannot verify payment '${dto.paymentId}' without a target invoiceId`);
       }
 
-      // Lock target invoice row
+      // Lock Order Level 5: Lock target invoice row
       const invRows = await tx`
         SELECT * FROM "invoices"
         WHERE "id" = ${targetInvoiceId} AND "organization_id" = ${organizationId}
         FOR UPDATE
       `;
       if (!invRows[0]) {
-        throw new Error(`Target invoice '${targetInvoiceId}' not found in organization`);
+        throw new HttpException(404, 'INVOICE_NOT_FOUND', `Target invoice '${targetInvoiceId}' not found in organization`);
       }
       const invoice = mapInvoiceRow(invRows[0]);
+
+      const verificationState =
+        dto.isProviderAuthenticated && claimResult.status === ClaimStatus.CONFIRMED_PROVIDER
+          ? PaymentVerificationState.PROVIDER_AUTHENTICATED
+          : PaymentVerificationState.HUMAN_ATTESTED;
 
       const previousPaymentState = payment.state;
       const previousInvoiceStatus = invoice.status;
@@ -640,6 +734,8 @@ export class ReconciliationService {
           },
           newState: {
             paymentState: TransactionState.VERIFIED,
+            verificationState,
+            claimStatus: claimResult.status,
             invoiceStatus: newInvoiceStatus,
             paidAmountCents: newPaidCents.toString(),
             balanceCents: newBalanceCents.toString(),
@@ -648,6 +744,9 @@ export class ReconciliationService {
           metadata: {
             verificationId,
             verificationMethod: dto.verificationMethod,
+            verificationState,
+            claimId: claimResult.claimId,
+            claimStatus: claimResult.status,
             externalVerificationRef: dto.externalVerificationRef ?? null,
             notes: dto.notes ?? null,
           },
@@ -664,6 +763,9 @@ export class ReconciliationService {
             verificationId,
             invoiceId: invoice.id,
             verificationMethod: dto.verificationMethod,
+            verificationState,
+            claimId: claimResult.claimId,
+            claimStatus: claimResult.status,
             amountCents: payment.amountCents.toString(),
           },
         },
@@ -724,8 +826,17 @@ export class ReconciliationService {
         invoice: updatedInvoice,
         invoicePayment,
         fulfillmentEligible,
+        verificationState,
+        claimId: claimResult.claimId,
+        claimStatus: claimResult.status,
       };
-    }, existingTx);
+    };
+
+    if (existingTx) {
+      return executeVerification(existingTx);
+    }
+
+    return this.claimService.executeWithSerializationRetry(executeVerification);
   }
 
   /**
@@ -745,11 +856,11 @@ export class ReconciliationService {
         FOR UPDATE
       `;
       if (!payRows[0]) {
-        throw new Error(`Payment '${dto.paymentId}' not found in organization`);
+        throw new HttpException(404, 'PAYMENT_NOT_FOUND', `Payment '${dto.paymentId}' not found in organization`);
       }
       const payment = mapNormalizedPaymentRow(payRows[0]);
       if (payment.state === TransactionState.VERIFIED) {
-        throw new Error(`Cannot reject an already VERIFIED payment '${dto.paymentId}'`);
+        throw new HttpException(409, 'ALREADY_VERIFIED', `Cannot reject an already VERIFIED payment '${dto.paymentId}'`);
       }
 
       const previousState = payment.state;

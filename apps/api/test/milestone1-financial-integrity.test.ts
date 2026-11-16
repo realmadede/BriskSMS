@@ -1,5 +1,7 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { sql } from '@brisksms/db';
 import {
   BillingInterval,
   CreditLedgerEntryType,
@@ -107,6 +109,18 @@ describe('Milestone 1: Concurrency Safety, Ledger Separation & Financial Invaria
   it('enforces complete ledger separation between SaaS subscriptions and prepaid SMS credits', async () => {
     // Purchase 500 SMS credits
     await messagingService.purchaseCredits(orgId, 500, 'SMS-PACK-500');
+
+    // Seed verified STK settlement backing the subscription checkout paymentMethodRef
+    await sql`
+      INSERT INTO "stk_push_transactions" (
+        "id", "organization_id", "provider", "phone_number",
+        "amount_cents", "currency", "status", "provider_reference"
+      )
+      VALUES (
+        ${randomUUID()}, ${orgId}, 'MPESA'::"PaymentProvider", '255754000001',
+        6500000, 'TZS', 'SUCCESS'::"StkPushStatus", 'SUB-PAY-001'
+      )
+    `;
 
     // Checkout Growth SaaS subscription
     await subService.checkoutSubscription(orgId, userId, {

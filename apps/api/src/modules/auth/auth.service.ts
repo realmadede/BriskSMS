@@ -189,11 +189,18 @@ export class AuthService {
       throw new HttpException(400, 'INVALID_PAYLOAD', 'Email, password, and fullName are required');
     }
 
+    const emailNorm = dto.email.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailNorm) || emailNorm.length > 255) {
+      throw new HttpException(400, 'INVALID_EMAIL', 'A valid email address is required');
+    }
+
     if (dto.password.length < 8) {
       throw new HttpException(400, 'WEAK_PASSWORD', 'Password must be at least 8 characters long');
     }
+    if (dto.password.length > 256) {
+      throw new HttpException(400, 'INVALID_PAYLOAD', 'Password must not exceed 256 characters');
+    }
 
-    const emailNorm = dto.email.trim().toLowerCase();
     const existingUser = await dbStore.findUserByEmail(emailNorm);
     if (existingUser) {
       throw new HttpException(409, 'EMAIL_EXISTS', 'A user with this email address is already registered');
@@ -314,6 +321,9 @@ export class AuthService {
   }> {
     if (!dto.email || !dto.password) {
       throw new HttpException(400, 'INVALID_PAYLOAD', 'Email and password are required');
+    }
+    if (dto.password.length > 256) {
+      throw new HttpException(400, 'INVALID_PAYLOAD', 'Password exceeds maximum permitted length');
     }
 
     const emailNorm = dto.email.trim().toLowerCase();

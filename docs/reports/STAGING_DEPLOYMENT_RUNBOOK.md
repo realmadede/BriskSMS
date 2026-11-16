@@ -2,7 +2,7 @@
 
 **Repository:** `https://github.com/realmadede/BriskSMS`  
 **Branch:** `main`  
-**Baseline Checkpoint:** `c7b4a50ab8ad636996f328645be2d18517230bd2`  
+**Last Synced Against:** `e6c593d0f5bedd41939fd45c9f23082a1bada04b` + P0–P2 & Hard Audit Remediations  
 **Scope:** Canonical, Step-by-Step Staging Deployment Runbook, Service Orchestration, Post-Deployment Verification, Rollback Protocols, and Disaster Recovery Procedures.
 
 ---
@@ -108,23 +108,13 @@ EOF
 > Ensure permissions are restricted: `chmod 600 /opt/brisksms/.env`.
 
 ### Step 4: Execute Database Migrations
-Run the transactional migration runner against the staging database. Exactly 5 migrations must apply:
+Run the transactional migration runner against a fresh staging database. **15 sequential SQL migrations** must apply cleanly (`20261107000000_init_foundation` through `20261116010000_encrypt_webhook_endpoint_secrets`):
 ```bash
 # Check current migration status
 bun run db:status
 
 # Apply pending Prisma SQL migrations
 bun run db:migrate
-```
-*Expected Output:*
-```text
-[BriskSMS DB] Checking migration status...
-[BriskSMS DB] Applied migration: 20261107000000_init_foundation
-[BriskSMS DB] Applied migration: 20261107010000_smsgate_keys_and_webhook_events
-[BriskSMS DB] Applied migration: 20261109000000_durable_message_idempotency
-[BriskSMS DB] Applied migration: 20261109010000_message_dispatch_recovery
-[BriskSMS DB] Applied migration: 20261110000000_email_verification_and_google_auth
-[BriskSMS DB] Migrations up to date.
 ```
 
 ### Step 5: Seed Commercial Catalog

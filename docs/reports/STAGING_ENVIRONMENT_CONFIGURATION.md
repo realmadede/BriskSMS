@@ -2,7 +2,7 @@
 
 **Repository:** `https://github.com/realmadede/BriskSMS`  
 **Branch:** `main`  
-**Baseline Checkpoint:** `c7b4a50ab8ad636996f328645be2d18517230bd2`  
+**Last Synced Against:** `e6c593d0f5bedd41939fd45c9f23082a1bada04b` + P0–P2 & Hard Audit Remediations  
 **Scope:** Exhaustive Static and Dynamic Environment Variable Inventory, Validation Rules, Fail-Closed Security Invariants, and Secret Provisioning Protocols for Staging & Production.
 
 ---
@@ -32,7 +32,7 @@ BriskSMS enforces a strict **Production-First, Security-First** configuration go
 
 ## 2. Exhaustive Server-Side Environment Variable Inventory
 
-Static analysis of the BriskSMS codebase reveals exactly **32 server-side environment variables** consumed by backend services and CLI tools:
+Static analysis of the BriskSMS codebase (`apps/*`, `packages/*`) catalogs the server-side and tooling environment variables below (see also [`ENVIRONMENT_VARIABLE_INVENTORY.md`](./ENVIRONMENT_VARIABLE_INVENTORY.md) for P0–P2 and Hard Audit additions such as `PLATFORM_ADMIN_SECRET`, `PAIRING_CHALLENGE_TTL_SECONDS`, `DEVICE_COMMAND_*`, `TRUST_PROXY`, `STRICT_MIGRATION_CHECKSUMS`, `ALLOW_PRIVATE_WEBHOOK_NETWORKS`, and `ALLOW_INSECURE_WEBHOOK_HTTP`):
 
 | Variable Name | Consuming Service(s) | Required in Staging/Prod? | Sensitive / Secret? | Development Default | Fail-Closed Behavior | Expected Format & Validation Rules | Operational Purpose |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |

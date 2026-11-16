@@ -16,7 +16,7 @@ Welcome to the **BriskSMS** engineering repository. This document defines the op
    - Differentiate strictly between verified facts, assumptions, and recommendations.
 
 3. **Product Boundaries (Non-Negotiable):**
-   - **Android & Web Only:** Android client for notification ingestion; Angular web application for administration. No iOS/Swift development.
+   - **Android & Web Only:** Android client for notification ingestion and Model B SMSGate relay; Web application (`apps/web`, currently lightweight Glisse HTML/CSS/JS portal served via `server.ts`, with Angular 19+ SPA planned) for administration. No iOS/Swift development.
    - **Product Separation:** Product A (Payment Intelligence) and Product B (Bulk Messaging) are independently monetized and logically separate. Payment reconciliation must **never** require bulk messaging credits.
    - **Non-Custodial:** BriskSMS never holds customer funds, operates an escrow, or acts as a payment clearing house.
    - **No Automated Guesswork:** Financial decisions require deterministic rule matching. Uncertain matches must be routed to `REVIEW_REQUIRED` (human review). AI must never make authoritative payment settlement decisions.
@@ -63,7 +63,7 @@ All AI agents (Google Antigravity, Claude Code, Cursor, Copilot, etc.) and contr
   2. [Step 2 description] → verify: [command / test / check]
   3. [Step 3 description] → verify: [command / test / check]
   ```
-- Run test suites (`npm test` / `bun test`), linters, or manual verification commands in your execution environment after each change. Do not declare a task complete until verification criteria pass.
+- Run test suites (`bun run test`, `bun run typecheck`, `bun run build`, or Android `./gradlew testDebugUnitTest`), linters, or manual verification commands in your execution environment after each change. Do not declare a task complete until verification criteria pass.
 
 ### 2.5. Summary of Working Behavior
 These guidelines are functioning correctly when:
@@ -87,26 +87,31 @@ BriskSMS/
 ├── package.json                       # Root workspace configuration
 ├── docker-compose.yml                 # Local development PostgreSQL and Redis
 ├── docs/                              # System specifications and documentation
-│   ├── prd/                           # Product Requirements Documents
-│   ├── architecture/                  # System architecture, monorepo, & module boundaries
+│   ├── android/                       # Android companion & SMSGate integration specs
+│   ├── architecture/                  # System architecture, monorepo, topology, & carrier readiness
+│   ├── audit/                         # Day-zero & full-repository hard audit reports
 │   ├── competitive/                   # Market research and competitive analyses
 │   ├── financial/                     # Financial state machine, invariants, ledger design
 │   ├── security/                      # Threat modeling, encryption, isolation, key management
 │   ├── compliance/                    # Legal, PDPA/PDPC, BoT, TCRA, Play Store compliance
+│   ├── prd/                           # Product Requirements Documents
+│   ├── reports/                       # Staging, CI, session security, P0.2, & env configuration audits
 │   ├── roadmap/                       # Phased commercial implementation roadmap
+│   ├── skills/                        # Agent design system governance skills
 │   ├── standards/                     # API, Database, Coding, and Testing conventions
 │   ├── deployment/                    # Cloudflare, Docker, CI/CD, and infrastructure ops
 │   └── CONTRIBUTING.md                # Contribution workflow and pull request rules
 ├── apps/
-│   ├── api/                           # NestJS backend API (modular monolith)
-│   ├── worker/                        # Background queue consumer (BullMQ/Redis)
-│   ├── web/                           # Angular enterprise web application
-│   └── android/                       # Kotlin + Jetpack background relay application
+│   ├── api/                           # Custom TypeScript/Bun HTTP Router backend (modular monolith)
+│   ├── worker/                        # Background queue consumer & recovery runner (`workers.ts`)
+│   ├── web/                           # Static Glisse web portal & console (`server.ts`, HTML/JS)
+│   └── android/                       # Kotlin + Jetpack Compose background relay application
 └── packages/
-    ├── shared/                        # Shared TypeScript DTOs, interfaces, and constants
+    ├── shared/                        # Shared TypeScript DTOs, enums, errors, and crypto/phone/currency utils
     ├── parser-engine/                 # Provider parsing, normalization, and hashing engine
     ├── ui/                            # Liquid Glass design system & optical refraction (Glisse)
-    ├── db/                            # Prisma schema, migrations, seeders, and client
+    ├── db/                            # Prisma schema, migrations, Bun.SQL client, Redis, and queues
+    ├── zapier-app/                    # Official BriskSMS Zapier Platform integration app
     └── config/                        # Shared ESLint, Prettier, and TypeScript configs
 ```
 
@@ -127,7 +132,7 @@ When implementing or modifying financial, invoice, or ledger logic:
 ## 5. Coding & Security Rules
 
 1. **Tenant Isolation:** Every database table representing tenant data must include `organizationId`. All queries must filter by `organizationId`. Multi-tenant leaks are critical security vulnerabilities.
-2. **Secrets Management:** Never commit secrets, API keys, private keys, or credentials to version control. Use `.env.example` templates and load configuration via validated environment schemas (Zod / `@nestjs/config`).
+2. **Secrets Management:** Never commit secrets, API keys, private keys, or credentials to version control. Use `.env.example` templates and enforce fail-closed startup/runtime config validation (e.g., `validateProductionEncryptionConfig()`, `getCsrfSecret()`, `assertPlatformAdmin()`).
 3. **Commit Signing:** All Git commits must be signed using the developer's registered SSH key (`realmadede`).
 4. **Testing Standards:**
    - Parser tests must run against real, anonymized provider SMS samples.
@@ -143,7 +148,7 @@ When an AI agent operates in this repository:
 2. Do not introduce new third-party dependencies without demonstrating a clear engineering need and verifying licensing/maintenance.
 3. Keep documentation in `docs/` synchronised with actual code changes.
 4. Report concrete file changes, executed commands, and test verification results in every turn.
-5. **Design System Governance:** Before creating, editing, or styling any UI component (Angular or Jetpack Compose), consult `docs/skills/brisksms-design/SKILL.md`. Adhere to the Stitch warm palette, geometric typography, performance-guarded Liquid Glass guidelines, and the Anti-AI-Slop 9-pass quality rubric. Never introduce raw unapproved colors, generic AI mesh gradients, or unvetted UI frameworks.
+5. **Design System Governance:** Before creating, editing, or styling any UI component (Web HTML/Glisse, Angular, or Jetpack Compose), consult `docs/skills/brisksms-design/SKILL.md`. Adhere to the Stitch warm palette, geometric typography, performance-guarded Liquid Glass guidelines, and the Anti-AI-Slop 9-pass quality rubric. Never introduce raw unapproved colors, generic AI mesh gradients, or unvetted UI frameworks.
 6. **Remote CI & Diagnostic Invariants (Evidence-Based Debugging):**
    - **Telemetry Before Modification:** When remote CI, builds, or test suites fail, NEVER make speculative edits to build scripts, dependencies, or source code. Always extract the literal compiler error, stack trace, or failing assertion from execution logs first.
    - **Diagnostic Pipes on Gated Logs:** If remote logs are not directly streamable via API (e.g., GitHub Actions unauthenticated 403 endpoints), the immediate first step must be establishing an error diagnostic channel (e.g., streaming failure lines to GitHub check annotations `::error::` or uploading raw failure logs as downloadable artifacts). Never guess error causes.

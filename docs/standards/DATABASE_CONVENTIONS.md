@@ -1,7 +1,8 @@
 # Database Design Conventions & Migration Standards
 
+**Last Synced:** 2026-11-16  
 **Database Engine:** PostgreSQL 16+  
-**ORM & Migration Tool:** Prisma ORM  
+**Schema & Driver:** Prisma Schema (`schema.prisma`, **53 models**) + `Bun.SQL` parameterized client & custom migration runner (**15 SQL migrations**)  
 **Target Package:** `packages/db`  
 
 ---
@@ -58,12 +59,12 @@ updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 
 ## 5. Migration Rules & CLI Workflow
 
-1. **Forward-Only Versioned Migrations:** All schema changes are committed via version-controlled SQL migrations under `packages/db/prisma/migrations/` and tracked in the PostgreSQL `_prisma_migrations` table with SHA-256 checksums (`20261107000000_init_foundation`). Never edit applied migration files.
-2. **Database Lifecycle Commands:**
-   - `npm run db:migrate` — Applies pending SQL migrations idempotently inside ACID transactions and records SHA-256 checksums in `_prisma_migrations`.
-   - `npm run db:seed` — Idempotently seeds the dynamic commercial catalog (`PROD_PAYMENT_INTELLIGENCE`, `PROD_BULK_MESSAGING`, `PLAN_STARTER`, `PLAN_GROWTH`, `PLAN_ENTERPRISE`, feature definitions, and plan entitlements).
-   - `npm run db:status` — Reports PostgreSQL connectivity, latency, and applied migrations.
-   - `npm run db:reset:dev` — Truncates development/test tables and re-seeds the commercial catalog (strictly blocked when `NODE_ENV=production`).
+1. **Forward-Only Versioned Migrations:** All schema changes are committed via additive, version-controlled SQL migrations under `packages/db/prisma/migrations/` (**15 sequential migrations** from `20261107000000_init_foundation` through `20261116010000_encrypt_webhook_endpoint_secrets`) and tracked in PostgreSQL `_prisma_migrations` with SHA-256 checksums. Never edit previously applied migration files (`STRICT_MIGRATION_CHECKSUMS=true` / `NODE_ENV=production` validates checksums).
+2. **Database Lifecycle Commands (Bun Runtime Required):**
+   - `bun run db:migrate` — Applies pending SQL migrations idempotently inside ACID transactions and records SHA-256 checksums in `_prisma_migrations`.
+   - `bun run db:seed` — Idempotently seeds the dynamic commercial catalog (`PROD_PAYMENT_INTELLIGENCE`, `PROD_BULK_MESSAGING`, `PLAN_STARTER`, `PLAN_GROWTH`, `PLAN_ENTERPRISE`, feature definitions, and plan entitlements).
+   - `bun run db:status` — Reports PostgreSQL connectivity, latency, and applied migrations.
+   - `bun run db:reset:dev` — Truncates development/test tables and re-seeds the commercial catalog (strictly blocked when `NODE_ENV=production`).
 3. **Zero-Downtime Schema Evolution:**
    - Never rename or drop a column in a single release.
    - Follow the Expand-Contract pattern:

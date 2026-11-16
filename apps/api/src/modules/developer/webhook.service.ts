@@ -3,8 +3,14 @@ import {
   BusinessEventType,
   OutboxStatus,
   WebhookEndpointDto,
+  encryptSecret,
+  decryptSecret,
+  isEncryptedSecret,
+  maskSecret,
+  validateResolvedOutboundUrl,
 } from '@brisksms/shared';
 import { sql, withTransaction } from '@brisksms/db';
+import { HttpException } from '../../core/http.js';
 import { WebhookEndpointRecord } from '../../core/store.js';
 
 export interface RegisterWebhookEndpointDto {
@@ -34,11 +40,13 @@ export class WebhookService {
       typeof row.subscribed_events === 'string'
         ? JSON.parse(row.subscribed_events)
         : row.subscribed_events;
+    const rawSecret = String(row.secret ?? '');
+    const secret = isEncryptedSecret(rawSecret) ? decryptSecret(rawSecret) : rawSecret;
     return {
       id: row.id,
       organizationId: row.organization_id,
       url: row.url,
-      secret: row.secret,
+      secret,
       subscribedEvents: Array.isArray(rawEvents) ? rawEvents : [],
       isActive: Boolean(row.is_active),
       createdAt: new Date(row.created_at),
@@ -54,14 +62,29 @@ export class WebhookService {
     dto: RegisterWebhookEndpointDto,
   ): Promise<WebhookEndpointRecord> {
     if (!dto.url || (!dto.url.startsWith('https://') && !dto.url.startsWith('http://'))) {
-      throw new Error('Valid HTTP/HTTPS webhook URL is required');
+      throw new HttpException(400, 'INVALID_WEBHOOK_URL', 'Valid HTTP/HTTPS webhook URL is required');
+    }
+
+    try {
+      await validateResolvedOutboundUrl(dto.url, {
+        allowPrivateEnvVar: 'ALLOW_PRIVATE_WEBHOOK_NETWORKS',
+        allowHttpInProd: process.env.ALLOW_INSECURE_WEBHOOK_HTTP === 'true',
+        label: 'Webhook URL',
+      });
+    } catch (err: unknown) {
+      throw new HttpException(
+        400,
+        'INVALID_WEBHOOK_URL',
+        err instanceof Error ? err.message : 'Invalid webhook URL destination',
+      );
     }
 
     if (!dto.subscribedEvents || dto.subscribedEvents.length === 0) {
-      throw new Error('At least one subscribed event type is required');
+      throw new HttpException(400, 'VALIDATION_ERROR', 'At least one subscribed event type is required');
     }
 
-    const secret = dto.secret ?? `whsec_${randomBytes(24).toString('hex')}`;
+    const plainSecret = dto.secret ?? `whsec_${randomBytes(24).toString('hex')}`;
+    const encryptedSecret = encryptSecret(plainSecret);
     const now = new Date();
     const id = randomUUID();
     const events = [...dto.subscribedEvents];
@@ -70,12 +93,15 @@ export class WebhookService {
       INSERT INTO webhook_endpoints (
         id, organization_id, url, secret, subscribed_events, is_active, created_at, updated_at
       ) VALUES (
-        ${id}, ${organizationId}, ${dto.url.trim()}, ${secret}, ${JSON.stringify(events)}::text::jsonb, true, ${now}, ${now}
+        ${id}, ${organizationId}, ${dto.url.trim()}, ${encryptedSecret}, ${JSON.stringify(events)}::text::jsonb, true, ${now}, ${now}
       )
       RETURNING *
     `;
 
-    return this.mapEndpointRow(inserted[0]!);
+    return {
+      ...this.mapEndpointRow(inserted[0]!),
+      secret: plainSecret,
+    };
   }
 
   /**
@@ -93,13 +119,21 @@ export class WebhookService {
         typeof row.subscribed_events === 'string'
           ? JSON.parse(row.subscribed_events)
           : row.subscribed_events;
+      let signingSecret = '****[DECRYPTION_ERROR]';
+      try {
+        const rawSecret = String(row.secret ?? '');
+        const plainSecret = isEncryptedSecret(rawSecret) ? decryptSecret(rawSecret) : rawSecret;
+        signingSecret = maskSecret(plainSecret);
+      } catch {
+        // Isolate corrupted secret decryption per row without failing tenant endpoint listing
+      }
       return {
         id: row.id,
         organizationId: row.organization_id,
         targetUrl: row.url,
         subscribedEvents: Array.isArray(rawEvents) ? rawEvents : [],
         isActive: Boolean(row.is_active),
-        signingSecret: row.secret,
+        signingSecret,
         createdAt: new Date(row.created_at),
       };
     });
@@ -169,8 +203,11 @@ export class WebhookService {
         AND is_active = true
     `;
     const endpointsRows = allActiveRows.filter((epRow) => {
-      const mapped = this.mapEndpointRow(epRow);
-      return mapped.subscribedEvents.includes(row.event_type as BusinessEventType);
+      const rawEvents =
+        typeof epRow.subscribed_events === 'string'
+          ? JSON.parse(epRow.subscribed_events)
+          : epRow.subscribed_events;
+      return Array.isArray(rawEvents) && rawEvents.includes(row.event_type as BusinessEventType);
     });
 
     const now = new Date();
@@ -203,27 +240,40 @@ export class WebhookService {
     const nextAttemptCount = Number(row.attempt_count) + 1;
 
     for (const epRow of endpointsRows) {
-      const endpoint = this.mapEndpointRow(epRow);
-      const signature = this.computeSignature(payloadString, endpoint.secret, timestampSeconds);
+      const epId = String(epRow.id);
+      const epUrl = String(epRow.url ?? '');
 
       try {
-        let responseStatus = 200;
-        let isOk = true;
+        const endpoint = this.mapEndpointRow(epRow);
+        const signature = this.computeSignature(payloadString, endpoint.secret, timestampSeconds);
 
-        if (customFetch) {
-          const res = await customFetch(endpoint.url, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-BriskSMS-Event': row.event_type,
-              'X-BriskSMS-Delivery': row.id,
-              'X-BriskSMS-Signature': signature,
-            },
-            body: payloadString,
-          });
-          responseStatus = res.status;
-          isOk = res.ok;
-        }
+        await validateResolvedOutboundUrl(endpoint.url, {
+          allowPrivateEnvVar: 'ALLOW_PRIVATE_WEBHOOK_NETWORKS',
+          allowHttpInProd: process.env.ALLOW_INSECURE_WEBHOOK_HTTP === 'true',
+          label: 'Webhook URL',
+        });
+
+        const fetchImpl =
+          customFetch ??
+          ((url: string, init: RequestInit) =>
+            fetch(url, {
+              ...init,
+              redirect: 'error',
+              signal: AbortSignal.timeout(10_000),
+            }));
+
+        const res = await fetchImpl(endpoint.url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-BriskSMS-Event': row.event_type,
+            'X-BriskSMS-Delivery': row.id,
+            'X-BriskSMS-Signature': signature,
+          },
+          body: payloadString,
+        });
+        const responseStatus = res.status;
+        const isOk = res.ok;
 
         await sql`
           INSERT INTO webhook_deliveries (
@@ -239,8 +289,8 @@ export class WebhookService {
 
         if (isOk) {
           results.push({
-            endpointId: endpoint.id,
-            url: endpoint.url,
+            endpointId: epId,
+            url: epUrl,
             statusCode: responseStatus,
             success: true,
           });
@@ -248,8 +298,8 @@ export class WebhookService {
           allEndpointsSucceeded = false;
           lastError = `HTTP status ${responseStatus}`;
           results.push({
-            endpointId: endpoint.id,
-            url: endpoint.url,
+            endpointId: epId,
+            url: epUrl,
             statusCode: responseStatus,
             success: false,
             error: lastError,
@@ -265,15 +315,15 @@ export class WebhookService {
             payload, response_status, response_body, attempt_number,
             status, next_retry_at, delivered_at, created_at
           ) VALUES (
-            ${randomUUID()}, ${organizationId}, ${endpoint.id}, ${row.id}, ${row.event_type},
+            ${randomUUID()}, ${organizationId}, ${epId}, ${row.id}, ${row.event_type},
             ${JSON.stringify(payloadObj)}::jsonb, 0, ${lastError}, ${nextAttemptCount},
             'FAILED', NULL, ${now}, ${now}
           )
         `;
 
         results.push({
-          endpointId: endpoint.id,
-          url: endpoint.url,
+          endpointId: epId,
+          url: epUrl,
           statusCode: 0,
           success: false,
           error: lastError,

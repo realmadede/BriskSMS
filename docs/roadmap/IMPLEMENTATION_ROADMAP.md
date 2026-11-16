@@ -1,8 +1,10 @@
 # Deliverable G: Phased Commercial Implementation Roadmap
 
-**Document Version:** 1.0.0  
-**Classification:** Engineering Roadmap & Milestones  
+**Document Version:** 2.0.0  
+**Last Synced:** 2026-11-16  
+**Classification:** Engineering Roadmap & Current Execution Status  
 **Target:** Full Commercial SaaS Platform (Enterprise Grade)  
+**Authoritative Verification Snapshot:** [`FULL_REPOSITORY_HARD_AUDIT.md`](../audit/FULL_REPOSITORY_HARD_AUDIT.md)
 
 ---
 
@@ -19,201 +21,170 @@ Every phase has:
 
 ---
 
-## 2. Phase-by-Phase Implementation Plan
+## 2. Current Roadmap Status Overview
 
 ```
 Phase 0: Engineering Foundation & Monorepo Scaffolding (COMPLETED)
    |
    v
-Phase 1: Multi-Tenancy, Identity & Cryptographic Device Management (COMPLETED - e2f4dd4)
+Phase 1: Multi-Tenancy, Identity & Cryptographic Device Management (COMPLETED)
    |
    v
 Phase 2: Dynamic Subscription Catalog & Entitlements Engine (COMPLETED)
    |
    v
-Phase 3: Native Android Ingestion Relay & Keystore Client (IMMEDIATE NEXT MILESTONE)
+[P0 Security & Dispatch Gates: P0.1 / P0.2 / Carrier Dispatch / Device Pairing PoP (COMPLETED)]
    |
    v
-Phase 4: Payment Parsing Engine, Deduplication & Multi-Tier Reconciliation
+[P1 Durable Database-Backed Fleet Command Queue (COMPLETED)]
    |
    v
-Phase 5: BriskSMS Cellular Gateway & Bulk Messaging Engine (Dual-Mode SIM Relay)
+[P1 Android Outbound SMSGate Job Acquisition (COMPLETED)]
    |
    v
-Phase 6: Developer Platform, Transactional Outbox & BriskSMS Zapier Application
+[P2 MNP-Safe Carrier Routing & Docs Reconciliation (COMPLETED)]
    |
    v
-Phase 7: Enterprise Web Portal (Angular 19+) & Commercial Self-Service
+Phase 3: Android Companion App & Keystore Relay (CORE APP IMPLEMENTED & APK/UNIT VERIFIED; Physical Device Field Tests Pending)
    |
    v
-Phase 8: Security Hardening, Penetration Testing & Production Launch
+Phase 4: Payment Parsing Engine, Deduplication & Invoicing Reconciliation (CORE ENGINE IMPLEMENTED & VERIFIED; NMB Parser Deferred)
+   |
+   v
+Phase 5: BriskSMS Cellular Gateway & Bulk Messaging Engine (CORE ENGINE IMPLEMENTED & VERIFIED; Physical Hardware Trial Pending)
+   |
+   v
+Phase 6: Developer Platform, Transactional Outbox & Zapier App (CORE PLATFORM IMPLEMENTED; Native RouterOS/WHMCS Workers Deferred)
+   |
+   v
+Phase 7: Merchant Web Portal (CUSTOM GLISSE PORTAL IMPLEMENTED in apps/web; Angular 19+ SPA / Playwright E2E Deferred)
+   |
+   v
+[Full Repository Hard Audit & Remediation: AUD-01..AUD-17 (COMPLETED — 532/532 Workspace Tests + 52/52 Android Unit Tests)]
+   |
+   v
+Phase 8: External Carrier Onboarding, Live Staging, Penetration Testing & Production Launch (IN PROGRESS / EXTERNAL PREREQUISITES)
 ```
 
 ---
 
-### Phase 0: Engineering Foundation & Monorepo Scaffolding
-- **Objective:** Establish the development environment, monorepo workspace, shared packages, containerized local services, and CI/CD pipelines.
-- **Dependencies:** None.
+### Phase 0: Engineering Foundation & Monorepo Scaffolding (COMPLETED)
+- **Status:** **Completed & Verified.**
 - **Deliverables:**
-  - Workspace root `package.json` with npm workspaces (`apps/*`, `packages/*`).
-  - `.gitignore`, `.editorconfig`, shared ESLint (`packages/config`), Prettier, and `tsconfig.base.json`.
-  - `docker-compose.yml` defining PostgreSQL 16+ and Redis 7+ containers.
-  - `packages/shared` initialized with base TypeScript types, error classes, and DTO contracts.
-  - `packages/db` initialized with Prisma ORM setup.
-  - GitHub Actions CI workflow (`.github/workflows/ci.yml`) enforcing linting, typechecking, and tests.
-- **Tests:**
-  - Workspace compilation test (`npm run build`).
-  - Docker Compose healthcheck test for PostgreSQL and Redis.
-- **Security Gate:** Zero secret leaks in commit history; all commits signed with SSH key.
-- **Acceptance Criteria:** Clean workspace build and passing CI workflow with 100% green status.
+  - Bun workspace root (`package.json`, `bun.lock`, `apps/*`, `packages/*`), `.gitignore`, `.editorconfig`, `packages/config`.
+  - `docker-compose.yml` defining PostgreSQL 16+ and Redis 7+.
+  - `packages/shared` (DTOs, enums, domain errors, crypto/phone/currency utilities) and `packages/db` (Prisma schema, `Bun.SQL` parameterized client, custom migration CLI, custom RESP Redis client & queue primitives).
+  - `.github/workflows/ci.yml` (`verify` monorepo job and `android-verify` Gradle job).
 
 ---
 
-### Phase 1: Multi-Tenancy, Identity & Cryptographic Device Management (COMPLETED — commit e2f4dd4)
+### Phase 1: Multi-Tenancy, Identity & Cryptographic Device Management (COMPLETED)
 - **Status:** **Completed & Verified.**
-- **Objective:** Build the core tenant isolation layer, authentication, role-based access control (RBAC), and asymmetric Android device pairing.
-- **Dependencies:** Phase 0.
 - **Deliverables:**
-  - `apps/api/src/modules/auth/`: Registration, JWT issuance, HTTP-only refresh tokens, Scrypt password hashing, verification.
-  - `apps/api/src/modules/organization/`: Organization creation, membership management, RBAC guards (`OWNER`, `ADMIN`, `OPERATOR`, `CASHIER`, `AUDITOR`).
-  - `apps/api/src/modules/device/`: 5-minute cryptographic QR pairing flow, device public key registration, heartbeat telemetry, device revocation.
-  - Multi-tenant in-memory transactional store with ACID row locks and query-level tenant assertions.
-- **Tests:**
-  - 14 automated integration tests across `auth.test.ts`, `organization.test.ts`, and `device.test.ts` (100% passing).
-- **Security Gate:** Verified cross-tenant isolation; all tenant queries enforce `organizationId`.
-- **Acceptance Criteria:** Met in full.
+  - `apps/api/src/modules/auth/`: Registration, email/password login, Google OpenID Connect RS256 + `bsk_g_nonce` protection, Resend email verification (`bsk_ev_...`), HMAC-SHA256 JWT access tokens (`15m`), opaque SHA-256 hashed 30-day rotating refresh token families (`refresh_tokens.family_id`), distributed `revoked_sessions` lookup, Double-Submit CSRF + Origin/Fetch Metadata guards, and Redis atomic Lua rate limiting.
+  - `apps/api/src/modules/organization/`: Organization creation, member invitations (no sentinel password hashes), and RBAC (`UserRole`: `OWNER`, `ADMIN`, `FINANCE`, `CASHIER`, `DEVELOPER`) with `OWNER` protection.
+  - `apps/api/src/modules/device/`: 5-minute single-use QR pairing (`bsk_pair_...`), EC P-256 Proof-of-Possession challenge/pair flow (`bsk_dev_...`), telemetry, durable `device_commands`, and revocation.
+  - Multi-tenant PostgreSQL persistence with ACID row locks and query-level tenant assertions. *(Note: TOTP 2FA challenge enforcement is deferred beyond `users.two_factor_secret` schema storage.)*
 
 ---
 
 ### Phase 2: Dynamic Subscription Catalog & Entitlements Engine (COMPLETED)
 - **Status:** **Completed & Verified.**
-- **Objective:** Implement a 100% backend-managed dynamic commercial catalog, versioned subscription plans, snapshot pricing, and dynamic entitlement guards across all client channels.
-- **Dependencies:** Phase 1 (Organizations & Auth).
 - **Deliverables:**
-  - Database models in `packages/db`: `CommercialProduct`, `SubscriptionPlan`, `PlanVersion`, `PlanPrice`, `FeatureDefinition`, `PlanEntitlement`, `OrganizationSubscription`, `SubscriptionBillingInvoice`.
-  - Zero hardcoded commercial variables: all plan names, prices, currencies, device limits, member limits, API caps, and feature flags resolved from database records.
-  - `apps/api/src/modules/subscription/`:
-    - `catalog.service.ts`: Dynamic public catalog retrieval and privileged administrative catalog versioning.
-    - `subscription.service.ts`: Atomic checkout, immutable price snapshotting, and billing invoice generation.
-    - `entitlement.service.ts`: Dynamic evaluation of numeric quotas (`MAX_CONNECTED_DEVICES`, `MAX_ORGANIZATION_MEMBERS`) and boolean feature flags (`API_ACCESS`, `ZAPIER_INTEGRATION`).
-    - Enforced quotas inside `device.service.ts` and `organization.service.ts`.
-  - Secure Administrative Catalog APIs (`/v1/admin/catalog/plans`, `/v1/admin/catalog/plans/:code/versions`).
-- **Tests:**
-  - 7 automated integration tests in `apps/api/test/subscription.test.ts` (100% passing).
-  - Overall monorepo test suite: **39/39 passing** (0 failures).
-- **Security Gate:** Mathematical separation between Product A recurring SaaS ledger and Product B prepaid SMS credit ledger; no client-controlled price injection; immutable price snapshotting.
-- **Acceptance Criteria:** Met in full.
+  - Database models in `packages/db/prisma/schema.prisma`: `CommercialProduct`, `SubscriptionPlan`, `PlanVersion`, `PlanPrice`, `FeatureDefinition`, `PlanEntitlement`, `OrganizationSubscription`, `SubscriptionHistory`, `SubscriptionBillingInvoice`.
+  - `apps/api/src/modules/subscription/`: `catalog.service.ts`, fail-closed `subscription.service.ts` (requires matching verified `stk_push_transactions` or `normalized_payments` before paid activation, returning `402 PAYMENT_VERIFICATION_REQUIRED` otherwise), and period/trial-bounded `entitlement.service.ts`.
+  - Platform-admin protected catalog mutation endpoints (`/v1/admin/catalog/plans`, `/v1/admin/catalog/plans/:code/versions`) guarded by `PLATFORM_ADMIN_SECRET` (`503` unconfigured / `403` mismatch).
+- **Security Gate:** Mathematical separation between Product A SaaS subscriptions and Product B prepaid SMS credit ledger; immutable price snapshotting.
 
 ---
 
-### Phase 3: Android Ingestion Relay & Keystore Client (IMMEDIATE NEXT MILESTONE)
-- **Objective:** Develop the native Android companion application with hardware-backed Keystore security, local offline queuing, and resilient background synchronization for payment notifications.
-- **Dependencies:** Phase 1 (Device API endpoints) & Phase 2 (Device quota entitlements).
-- **Deliverables:**
-  - Android application in `apps/android/` using Kotlin and Jetpack Compose.
-  - Android Keystore integration for asymmetric keypair generation and request signing.
-  - Room SQLite database for persistent offline message queuing (`raw_notifications`).
-  - Mode 1: `NotificationListenerService` with strict package filtering and user disclosure flow (Vodacom M-Pesa, Mixx by Yas, Airtel Money, HaloPesa, CRDB, NMB).
-  - Mode 2: Optional `BroadcastReceiver` for direct carrier SMS reception on dedicated business devices.
-  - Foreground Service with persistent status notification and battery optimization exemption onboarding.
-  - WorkManager / Coroutine HTTP client with exponential backoff and network reconnection listeners.
-- **Tests:**
-  - Instrumentation tests for Android Keystore signing and verification.
-  - Offline resilience test: Inject 50 notifications while in Airplane Mode, reconnect, verify 100% synced without duplicates.
-- **Security Gate:** Verification that personal messages (non-financial) are discarded on-device before persistence or transmission.
-- **Acceptance Criteria:** Android device successfully pairs via QR code, captures simulated M-Pesa notifications, and delivers signed payloads to backend API.
+### P0 Financial Integrity, Carrier Dispatch & Device Security Gates (COMPLETED)
+- **P0.1 & P0.2 Global Payment-Reference Claim Boundary (COMPLETED):** Enforced canonical `(provider, provider_reference)` uniqueness (`payment_reference_claims`), monotonic PostgreSQL lock ordering, collision quarantine (`payment_reference_claim_collisions`), append-only `payment_reference_claim_events`, separation-of-duties manual verification, and fail-closed provider callback verification (`DisabledProviderCallbackVerifier`).
+- **P0 Carrier Dispatch Adapter Integrity (COMPLETED):** Eliminated mock STK initiation success/fabricated references; unconfigured MNOs fail closed (`UNCONFIGURED`, HTTP `503`), unsupported rails fail closed (`UNSUPPORTED`, HTTP `422`), checkout state machine separates `INITIATING`, `DISPATCH_UNCERTAIN`, `UNSUPPORTED`, and `PENDING` with org-scoped idempotency (`20261114010000_stk_dispatch_integrity_and_idempotency`). See [`CARRIER_STK_INTEGRATION_READINESS.md`](../architecture/CARRIER_STK_INTEGRATION_READINESS.md).
+- **P0 Android Device Pairing Proof-of-Possession (COMPLETED):** Challenge-response enrollment protocol (`POST /v1/devices/pairing-challenge` -> EC P-256 `SHA256withECDSA` signature over binary transcript `BRISKSMS-DEVICE-PAIRING-POP-V1` -> atomic `POST /v1/devices/pair`, migration `20261114020000_device_pairing_proof_of_possession`), strict SPKI key validation/uniqueness (`public_key_fingerprint`), silent key-replacement prohibition (`DEVICE_KEY_REPLACEMENT_FORBIDDEN`), and revoked-device re-pairing recovery (`BriskApiClient.kt` / `PairingScreen.kt`).
 
 ---
 
-### Phase 4: Payment Parsing Engine, Deduplication & Invoicing Reconciliation Matrix
-- **Objective:** Implement the versioned parser engine for all Tanzanian mobile money providers and banks, deterministic cryptographic deduplication, and the multi-tier reconciliation engine.
-- **Dependencies:** Phase 3 (Raw payload ingestion).
-- **Deliverables:**
-  - `packages/parser-engine/`: Adapters for Vodacom M-Pesa, Mixx by Yas, Airtel Money, HaloPesa, CRDB Bank, NMB Bank.
-  - Fast ingestion endpoint (`POST /v1/ingest/notifications`), append-only immutable `raw_payment_evidence`.
-  - Cryptographic SHA-256 deduplication key: `hash(org_id + provider + provider_ref + amount + timestamp)`.
-  - `apps/api/src/modules/reconciliation/`: Invoices CRUD, matching waterfall (Memo, Customer/Phone, Checkout window), partial/overpayment accounting, and Accountant Review Queue (`REVIEW_REQUIRED`).
-- **Tests:**
-  - 100+ real-world anonymized Tanzanian provider SMS test corpus passing.
-  - Concurrency test: 50 concurrent payments targeting the same invoice without race conditions.
-  - Deduplication replay test: Duplicate notifications safely rejected without duplicate settlement.
-- **Security Gate:** Financial invariant verification: All balance calculations computed in integer minor units (cents); raw evidence table is append-only.
-- **Acceptance Criteria:** Deterministic settlement of matching invoices; ambiguous transactions safely routed to manual accountant review.
+### P1 Durable Database-Backed Fleet Command Queue (COMPLETED)
+- **Objective:** Replaced process-local `pendingCommands` in `device.service.ts` with durable, tenant-isolated PostgreSQL persistence (`device_commands`, migration `20261115000000_durable_device_commands`), monotonic locking + `FOR UPDATE SKIP LOCKED` claiming over `POST /v1/devices/:id/telemetry`, lease recovery (`leaseToken` / `leaseExpiresAt`), org-scoped `Idempotency-Key` + request fingerprinting, strict 4-command allowlist (`PAUSE_RELAY`, `RESUME_RELAY`, `SWITCH_SIM`, `WIPE_AND_REVOKE`), explicit/inline idempotent acknowledgements, and command history/cancellation (`GET /v1/devices/:id/commands`, `POST /v1/devices/:id/commands/:commandId/cancel`).
 
 ---
 
-### Phase 5: BriskSMS Cellular Gateway & Bulk Messaging Engine (Product B)
-- **Objective:** Implement the commercial bulk messaging module with dual-mode cellular SIM gateway integration (Mode A: External Relay, Mode B: Managed BriskSMS Private Gateway on 24/7 VPS behind Cloudflare), multi-SIM slot routing, CSV/XLSX recipient ingestion, and append-only immutable credit transaction ledger with ACID reservations.
-- **Dependencies:** Phase 1 (Organizations & RBAC) & Phase 2 (Entitlements).
-- **Deliverables:**
-  - Internal provider boundary: `MessagingProvider` interface.
-  - `SmsGateProvider` adapter: `POST /api/v1/message`, dual-mode base URL resolution (`gateway.brisksms.com`), multi-SIM slot selection (`simNumber: 1` vs `2`), and HMAC webhook signature verification.
-  - Multi-tenant gateway credentials management: AES-256-GCM encrypted token storage in `messaging_accounts`.
-  - CSV/XLSX upload pipeline: Streaming parser, E.164 phone validation (Tanzanian carriers: 074/075/076, 071/065/067, 078/068/069, 062, 073), duplicate elimination, column mapping, and template variable substitution.
-  - Configurable recipient batch limit (default 1,000 recipients per campaign).
-  - TCRA anti-spam curfew compliance: Automatic marketing broadcast lock between 20:00 and 07:00 EAT.
-  - BullMQ carrier-pacing queue: Sliding-window rate limiter (1 SMS / 3 seconds per SIM) to prevent carrier anti-spam SIM blocks.
-  - Append-only immutable credit transaction ledger (`messaging_credit_ledger`) with atomic usage deductions and delivery-failure refunds.
-- **Tests:**
-  - Mock gateway dispatch and failure retry tests.
-  - CSV/XLSX upload parser test with malformed phone numbers and deduplication.
-  - Prepaid credit ledger concurrency test: High-volume message dispatch cannot overdraw credit balance below zero.
-- **Security Gate:** Complete ledger isolation between Product B prepaid SMS units and Product A SaaS subscriptions.
-- **Acceptance Criteria:** Bulk campaign uploaded via spreadsheet, validated, queued, and dispatched via cellular gateway with live delivery report tracking.
+### P1 Android Outbound SMSGate Job Acquisition (COMPLETED)
+- **Objective:** Implemented durable PostgreSQL-backed Model B Android outbound SMSGate job acquisition and outcome reporting (`outbound_sms_jobs`, migration `20261116000000_android_outbound_sms_jobs`), keeping Product A and Product B strictly isolated.
+- **Delivered Invariants:** `POST /v1/messaging/device-jobs` (and `deliveryChannel: 'ANDROID_COMPANION'` on `POST /v1/messaging/send`) reserve credits atomically and enqueue leased jobs; paired Android companions acquire jobs (`POST /v1/messaging/device-jobs/acquire`), commit `/dispatching` before calling `SmsManager`, fail closed expired `DISPATCHING` leases to `UNCERTAIN` with zero auto-retry or refund, refund credits once on pre-radio failures/expirations/cancellations, and persist encrypted outcomes across process death (`PendingSmsJobResultStore`).
 
 ---
 
-### Phase 6: Developer Platform, Transactional Outbox & BriskSMS Zapier Application
-- **Objective:** Construct the official BriskSMS Zapier application, RFC 6749 OAuth 2.0 authorization server with PKCE, instant REST Hooks, and a resilient Transactional Outbox pattern.
-- **Dependencies:** Phase 4 (Reconciliation events) & Phase 5 (Messaging events).
-- **Deliverables:**
-  - Official Zapier CLI application package (`@brisksms/zapier-app`).
-  - OAuth 2.0 authorization server: `/oauth/authorize`, `/oauth/token`, `/oauth/revoke`, PKCE verification, organization-level consent picker.
-  - Granular OAuth scopes: `payments:read`, `invoices:read`, `devices:read`, `sms:send`, `contacts:write`, `campaigns:read`.
-  - Transactional Outbox pattern: `outbox_events` table written atomically with business transactions; background poller delivers events with exponential backoff.
-  - REST Hook subscription endpoints: `/api/v1/zapier/hooks/subscribe` and `/unsubscribe`, automatic pruning on `410 Gone`.
-  - Developer Platform: Scoped API keys (`bsk_live_...` / `bsk_test_...`), HMAC-SHA256 signed webhooks, rate limiting headers, Make.com and n8n compatibility.
-- **Tests:**
-  - Full OAuth 2.0 lifecycle test: Authorize $\rightarrow$ Exchange Token $\rightarrow$ Refresh Token $\rightarrow$ Revoke.
-  - Outbox resilience test: Simulated webhook server downtime does not block reconciliation; events retried and delivered upon recovery.
-  - Zapier trigger tests (Payment Evidence, Payment Matched, Review Required, Invoice Paid, Device Offline).
-- **Security Gate:** Zero exposure of device private keys, tenant credentials, or financial mutation actions via Zapier.
-- **Acceptance Criteria:** User can connect BriskSMS to Zapier via OAuth 2.0 and trigger automated downstream actions from payment and SMS events.
+### P2 MNP-Safe Carrier Routing & Phone Normalization (COMPLETED)
+- **Objective:** Eliminated prefix-only wallet routing assumptions under Tanzania Mobile Number Portability (MNP) and unified canonical phone normalization.
+- **Delivered Invariants:** `POST /v1/payments/stk-push` accepts an explicit `provider` override (`routingResolution: 'EXPLICIT'`), keeping `inferCarrierHintFromPrefix()` (`detectTanzanianCarrier` deprecated) as a non-authoritative fallback (`PREFIX_HEURISTIC`); `RecipientParserService` delegates to shared `normalizeTanzanianPhone()` (`TANZANIAN_MOBILE_PREFIXES`, including `061` and `077`).
 
 ---
 
-### Phase 7: Enterprise Web Portal (Angular 19+) & Commercial Self-Service
-- **Objective:** Build the modern, responsive enterprise web dashboard for business owners, accountants, support staff, and developers.
-- **Dependencies:** Phases 1–6 (All backend REST APIs).
-- **Deliverables:**
-  - Angular 19+ application in `apps/web/` using Standalone Components and Signals.
-  - Feature Modules:
-    - Real-time Dashboard: Today's revenue, device health, incoming feed, reconciliation rates.
-    - Dynamic Pricing & Subscription Portal: Catalog display, self-service upgrades, billing history.
-    - Integration Management UI: One-click "Connect to Zapier" flow, webhook endpoint management, API keys.
-    - Bulk Messaging Hub: Spreadsheet template download, campaign upload wizard, delivery analytics.
-    - Device Management: QR code pairing modal, device battery/connectivity status, revocation.
-    - Reconciliation & Accountant Review Queue: Manual matching matrix.
-- **Tests:**
-  - Component unit tests with Jasmine/Karma.
-  - End-to-end Cypress/Playwright suites covering login, device pairing, manual reconciliation, and Zapier connection.
-- **Security Gate:** Strict Content Security Policy (CSP), anti-clickjacking headers, and XSS sanitization across all data rendering.
-- **Acceptance Criteria:** Fast, responsive UI with sub-second page transitions, full mobile responsiveness, and clean accessibility.
+### Phase 3: Android Companion App & Keystore Relay (CORE APP IMPLEMENTED & UNIT/APK VERIFIED)
+- **Status:** **Core Application Implemented & Offline Gradle Verified; Physical Hardware / Live SIM Field Validation Pending Staging.**
+- **Implemented in `apps/android/`:**
+  - Hardware-backed EC P-256 `KeystoreManager` + Keystore AES-256-GCM `KeystoreSecureStorage` and `EvidenceEncryptor`.
+  - Room SQLite offline queues (`BriskDatabase`, `OfflineEvidenceEntity`, `SmsDispatchEntity`) + `PendingSmsJobResultStore`.
+  - Play-Store compliant Mode 1 `BriskNotificationListenerService` with strict package whitelist (`PaymentProviderRegistry`) and `ProviderNotificationParser`.
+  - Foreground relay `SmsGateRelayService`, `SimManager` (400/day SIM cap failover + pacing), `OutboundSmsJobCoordinator`, `BootCompletedReceiver`, `EvidenceUploadWorker`, `TelemetryWorker`, `DeviceCommandProcessor`, and Jetpack Compose screens (`PairingScreen` with ML Kit QR scanner, `OverviewScreen`, `DashboardScreen`, `PaymentIntelligenceScreen`, `BulkMessagingScreen`, `DeviceHealthScreen`, `SettingsScreen`).
+  - Verified with **11 JVM unit test classes (52 `@Test` methods)**, Kotlin debug compilation, and `assembleDebug` APK generation under Gradle `8.14.3` + Temurin JDK `17`.
+- **Remaining / Deferred:**
+  - Android instrumented on-device tests (e.g., Airplane Mode offline resilience test on hardware) and physical Tanzanian SIM radio/battery-exemption validation.
+  - Mode 2 Enterprise Direct APK (`RECEIVE_SMS` `BroadcastReceiver`) — intentionally not included in the Play-Store compliant base build.
 
 ---
 
-### Phase 8: Security Hardening, Penetration Testing & Production Launch
-- **Objective:** Final production readiness, external security audit, disaster recovery validation, and commercial launch.
-- **Dependencies:** All previous phases.
-- **Deliverables:**
-  - Cloudflare Edge WAF rules, DDoS mitigation, and SSL pinning configuration.
-  - Production database replication (Multi-AZ) and Point-in-Time Recovery (PITR) testing.
-  - Comprehensive end-to-end load testing (simulating 1,000 requests/sec across API and workers).
-  - Independent penetration test covering API endpoints, Android client, and tenant isolation.
-  - Final legal registration on Tanzania PDPC RCMIS portal.
-- **Tests:**
-  - Disaster recovery drill: Failover database to replica with zero lost committed transactions.
-  - Penetration testing remediations confirmed.
-- **Security Gate:** Formal sign-off on Threat Model, PDPA compliance, and zero critical/high vulnerabilities.
-- **Acceptance Criteria:** Production launch readiness with 99.95% availability SLA.
+### Phase 4: Payment Parsing Engine, Deduplication & Reconciliation (CORE ENGINE IMPLEMENTED & VERIFIED)
+- **Status:** **Core Engine Implemented & Verified; NMB Bank Alert Adapter Deferred.**
+- **Implemented:**
+  - `packages/parser-engine/`: Adapters for Vodacom M-Pesa (`mpesa.adapter.ts`), Mixx by Yas (`mixx.adapter.ts`), Airtel Money (`airtel.adapter.ts`), HaloPesa (`halopesa.adapter.ts`), and CRDB Bank (`crdb.adapter.ts`) extending `BaseProviderAdapter` (personal phone filtering, incoming-credit guard, exact `BigInt` minor-unit conversion, SHA-256 `computeDeduplicationHash`).
+  - `apps/api/src/modules/ingestion/`: `POST /v1/ingestion/evidence` and append-only `raw_payment_evidence` + P0.2 claim acquisition.
+  - `apps/api/src/modules/reconciliation/`: Invoices CRUD, deterministic matching, partial/overpayment `REVIEW_REQUIRED` routing, candidate suggestions, manual `POST /v1/reconciliation/verify`, and separation-of-duties checks.
+- **Remaining / Deferred:** Dedicated NMB Bank SMS/notification parser adapter and expanding the real-world anonymized SMS fixture corpus beyond current unit/integration tests.
 
+---
+
+### Phase 5: BriskSMS Cellular Gateway & Bulk Messaging Engine (CORE ENGINE IMPLEMENTED & VERIFIED)
+- **Status:** **Core Engine Implemented & Verified; Live Physical Gateway Hardware Validation Pending Staging.**
+- **Implemented:**
+  - `SmsGateProvider` (`POST /messages`, `/3rdparty/v1`, SSRF protection via `validateOutboundHttpUrl`, 15s timeout, strict HTTP `429 -> UNCERTAIN` classification), AES-256-GCM encrypted credentials in `messaging_accounts`, dual-key HMAC rotation for inbound `POST /v1/messaging/webhooks/smsgate` (`smsgate_signing_keys`, 24h grace window), durable `message_idempotency_records`, `DispatchRecoveryRunner`, `messaging_credit_ledger`, TCRA curfew gating (`20:00–07:00 EAT` default), campaign queuing/workers (`sms-campaign`, `sms-delivery-retry`), and `outbound_sms_jobs` Android acquisition.
+  - Spreadsheet ingestion in `apps/web/src/console.html`: RFC-4180 CSV and SpreadsheetML XML parser using shared E.164 Tanzania normalization (`normalizeTanzanianPhone`); binary OOXML `.xlsx` uploads are explicitly rejected with guidance to export CSV/XML.
+- **Remaining / Deferred:** Physical Android gateway hardware soak test under carrier rate limiting (429 behavior validation).
+
+---
+
+### Phase 6: Developer Platform, Transactional Outbox & Zapier App (CORE PLATFORM IMPLEMENTED)
+- **Status:** **Core Platform & Zapier Integration Implemented & Verified; Direct Native MikroTik/WHMCS Worker Adapters Deferred.**
+- **Implemented:**
+  - `apps/api/src/modules/oauth/` & `oauth.service.ts`: `/v1/oauth/clients`, `/v1/oauth/authorize`, `/v1/oauth/token`, `/v1/oauth/revoke`, strict RFC 7636 PKCE (`S256` required; `plain` rejected), confidential client secret enforcement, `bsk_at_` / `bsk_rt_` tokens, and middleware authentication with `ApiKeyScope` enforcement (`sms:send`, `sms:read`, `payments:read`, `payments:write`, `payment:stk`, `invoices:read`, `invoices:write`, `devices:read`, `webhooks:manage`).
+  - `apps/api/src/modules/developer/`: Scoped `bsk_live_...` API keys, AES-256-GCM encrypted `webhook_endpoints.secret` (`20261116010000_encrypt_webhook_endpoint_secrets`), `outbox_events` transactional writer, and worker HMAC-SHA256 `webhook-delivery` with SSRF checks and `redirect: 'error'`.
+  - `packages/zapier-app/`: Zapier CLI OAuth2 PKCE (`S256`) config, triggers (`payment_matched`, `payment_needs_review`), and creates (`send_sms`, `create_invoice`) verified in `zapier-app.test.ts`.
+- **Remaining / Deferred:** Native `apps/worker` adapters executing direct RouterOS API / SSH commands or WHMCS PHP calls (currently supported externally via signed webhooks & Zapier) and interactive OAuth consent screen UI.
+
+---
+
+### Phase 7: Enterprise Web Portal (CUSTOM GLISSE PORTAL IMPLEMENTED; Angular SPA Deferred)
+- **Status:** **Lightweight Static Glisse Portal Implemented & Hardened (`apps/web`); Angular 19+ SPA & Browser E2E Deferred.**
+- **Implemented in `apps/web/`:**
+  - `server.ts`: Exported `handleWebRequest` & `createWebServer()`, baseline security headers (`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`), and strict `/assets/` canonical path containment.
+  - `src/index.html`, `src/console.html`, `src/developers.html`: Editorial Stitch/Glisse marketing site, merchant console wired to live `/v1/*` APIs with XSS escaping (`escapeHtml()`), delegated click handlers, `formatMinorTzs()` scaling, CSV/XML campaign parsing, QR pairing polling, hash tab persistence, and honest REST HTTPS developer documentation.
+  - Verified by `apps/web/test/web-server.test.ts` (4 tests, 39 assertions).
+- **Remaining / Deferred:** Future migration to an Angular 19+ SPA with Jasmine/Karma component suites and live Playwright/Chromium browser E2E testing against running API + Web servers.
+
+---
+
+### Full Repository Hard Audit & Remediation (COMPLETED — 2026-11-15)
+- Audited all **17 subsystems** across the monorepo and remediated findings **`AUD-01` through `AUD-17`** (`webhook_endpoints.secret` AES-256-GCM encryption migration `20261116010000`, fail-closed paid subscription verification, `PLATFORM_ADMIN_SECRET` catalog gate, OAuth/session revocation hardening, worker retry locking, `toMinorUnits` BigInt fix, Android `BriskApiClient` Gson fix, Web traversal/XSS/honesty fixes, CI `set -e -o pipefail`, and test-suite reliability fixes).
+- Post-edit verification: **532/532 workspace tests passing across 39 files** (`bun run test` on PostgreSQL 16 + Redis 7), `bun run typecheck` + `bun run build` exit `0`, **15 migrations** applied, and **11 Android JUnit test classes (`52 @Test`s) + `assembleDebug`** passing.
+
+---
+
+### Phase 8: External Carrier Onboarding, Live Staging, Penetration Testing & Launch (IN PROGRESS / EXTERNAL PREREQUISITES)
+- **Objective:** Final live staging validation, third-party carrier onboarding, security penetration testing, and commercial production launch.
+- **Remaining Prerequisites:**
+  1. **Git Commit, Sign & Push:** Commit working-tree changes with registered SSH key and run remote GitHub Actions CI (`verify` + `android-verify`).
+  2. **External Credentials & Carrier Contracts:** Provision Google Cloud OAuth Client IDs, Resend verified domain/API key, official MNO STK agreements/verifiers (`MPESA`, `MIXX`, `AIRTEL_MONEY`, `HALOPESA`), and SMSGate gateway hardware.
+  3. **Live Hardware & Browser Testing:** Physical Android device + Tanzanian SIM field trials and interactive Playwright browser E2E verification.
+  4. **Infrastructure & Compliance:** Private VPC Redis isolation (no internal Redis TLS), edge reverse-proxy CSP & `X-Forwarded-For` sanitization (`TRUST_PROXY=true`), Multi-AZ PostgreSQL PITR drills, pre-existing local `_prisma_migrations` checksum drift note (`20261112000000`), independent penetration test, and PDPC RCMIS registration.

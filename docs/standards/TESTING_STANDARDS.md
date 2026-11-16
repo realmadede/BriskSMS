@@ -1,7 +1,8 @@
 # Testing Standards & Quality Assurance Strategy
 
-**Test Frameworks:** Jest / Vitest (Backend & Shared Packages), JUnit 5 / Espresso (Android), Playwright (E2E)  
-**Target Coverage:** Minimum 85% branch coverage on core financial, parsing, and authentication paths.  
+**Last Synced:** 2026-11-16  
+**Test Frameworks:** `bun test` with `node:test` & `node:assert/strict` (Backend, Worker, Web, Shared Packages), JUnit 4 (`4.13.2`) + Mockito/OkHttp MockWebServer (Android JVM Unit Tests), Playwright E2E *(Deferred Phase 7+/8)*  
+**Current Verified Baseline:** `532` passing tests across `39` workspace files (`bun run test`) + `11` Android unit test classes (`52` `@Test` methods)  
 
 ---
 
@@ -10,48 +11,44 @@
 ```
            / \
           /   \
-         / E2E \         Playwright User Journeys (Signup -> Pair -> Pay -> Reconcile)
+         / E2E \         [Planned] Live Browser Playwright Journeys + Physical SIM Field Trials
         /-------\
-       /  Integ  \       NestJS TestContainers (Postgres, Redis, Real DB Queries)
+       /  Integ  \       Live PostgreSQL 16 + Redis 7 Integration Tests (apps/api, apps/worker, packages/db)
       /-----------\
-     /    Unit     \     Parser Corpus, Deduplication Math, State Transitions, Validators
-    /---------------\
+     /  Contract & \     HTTP Router Security, Web Server Hardening, Android OkHttp/PoP Unit Suites
+    /    Unit       \    Parser Corpus, Exact BigInt Currency Math, Crypto/SSRF, UI Refraction, Zapier
+   /-----------------\
 ```
 
 ---
 
 ## 2. Unit Testing Standards
 
-1. **Parser Test Corpus:**
-   - Every payment provider adapter (`packages/parser-engine`) must have a corresponding test suite validating real-world, anonymized SMS notifications.
-   - Tests must include:
-     - Standard successful payment notification.
-     - Notifications with non-standard formatting, extra whitespace, or localized characters (Swahili/English).
-     - Paybill/Till transactions with and without customer reference memos.
-     - Reversal / cancellation notifications.
-     - Malformed or incomplete strings (ensuring parser fails safely without throwing unhandled exceptions).
-2. **Financial State Machine:**
-   - Explicit tests for every transition in `docs/financial/FINANCIAL_INTEGRITY.md`.
-   - Invariant tests: Submitting duplicate payloads, underpayments, and overpayments.
+1. **Parser Test Corpus (`packages/parser-engine/test/engine.test.ts` & Android `ProviderNotificationParserTest.kt`):**
+   - Validate anonymized provider notifications across Vodacom M-Pesa, Mixx by Yas, Airtel Money, HaloPesa, and CRDB Bank.
+   - Cover standard transactions, Lipa/Paybill memos, single-decimal amounts, personal-phone spoofing rejection, outgoing transfer rejection, malformed strings, and stable deduplication hashing.
+2. **Financial & Security Primitives:**
+   - Cover `toMinorUnits` exact decimal parsing, Tanzanian phone normalization (`061`/`077` included), AES-256-GCM encryption/decryption, SSRF URL blocking (`validateOutboundHttpUrl`), and Android Proof-of-Possession transcripts (`DevicePairingProofOfPossessionTest.kt`).
 
 ---
 
-## 3. Integration Testing Standards
+## 3. Integration Testing Standards (`apps/api/test/`, `apps/worker/test/`, `packages/db/test/`)
 
-1. **Database Integration:**
-   - Integration tests execute against real PostgreSQL test databases (run via Docker).
-   - Verify that Prisma middleware and repository queries strictly filter by `organization_id`.
-   - Test race conditions: Concurrently attempting to settle an invoice using two worker threads.
-2. **Queue & Worker Integration:**
-   - Verify that messages pushed to BullMQ queues are picked up and processed by workers with correct backoff retry behavior on failure.
+1. **Database & Concurrency Integration:**
+   - Integration suites execute directly against live **PostgreSQL 16** (port `54322` locally / `5433` in CI) and **Redis 7** (port `6379` / `6380`).
+   - Verify tenant isolation (`CROSS_ORGANIZATION_FORBIDDEN`, `TENANT_DEVICE_MISMATCH`), append-only trigger immutability (`prevent_immutable_record_mutation`, `trg_claim_events_immutable`), concurrent lock serialization (`pg_advisory_xact_lock`, `FOR UPDATE`, `FOR UPDATE SKIP LOCKED`), fail-closed subscription verification, and idempotent worker credit refunds.
+   - Always run `bun run test` via file-scoped suite directories so compiled `dist/` files are never double-executed.
+   - Clear shared IP rate-limit buckets (`await authService.clearRateLimits()`) in `beforeEach` for multi-test HTTP auth suites sharing synthetic loopback/socket IPs.
 
 ---
 
-## 4. End-to-End (E2E) Testing Standards
+## 4. Android & Web Verification Standards
 
-1. **Critical User Journeys:**
-   - Journey 1: New merchant registration -> Create organization -> Generate device QR code.
-   - Journey 2: Android device pairs -> Relays M-Pesa payment -> Backend parses -> Auto-matches open invoice -> Invoices marked PAID -> Webhook dispatched.
-   - Journey 3: Merchant buys bulk SMS credits -> Launches campaign -> Messages queued -> Delivery reports update credit ledger.
-2. **Execution Environment:** E2E tests run automatically in GitHub Actions on every pull request to `main`.
+- **Android (`apps/android/`):** Run under Temurin JDK `17` via `./gradlew testDebugUnitTest compileDebugKotlin assembleDebug --offline --no-daemon` (covering all 11 JUnit classes / 52 `@Test` methods plus APK assembly). Physical device instrumented tests (`androidTest`) remain a Phase 8 hardware prerequisite.
+- **Web Portal (`apps/web/test/web-server.test.ts`):** Verify Node HTTP route status codes, security headers, `/assets/` encoded/unencoded path traversal blocking, XSS escaping, CSV/SpreadsheetML parsing honesty, and REST docs alignment.
 
+---
+
+## 5. CI Enforcement
+
+GitHub Actions (`.github/workflows/ci.yml`) runs `bun run typecheck`, `bun run build`, `bun run db:migrate`, and `bun run test` against PostgreSQL 16 + Redis 7 in job `verify`, plus `./gradlew testDebugUnitTest`, `lintDebug`, and `assembleDebug` in job `android-verify`.

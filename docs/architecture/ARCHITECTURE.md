@@ -1,85 +1,78 @@
 # Deliverable D: Technical Architecture & System Design
 
-**Document Version:** 1.0.0  
-**Status:** Approved Architectural Blueprint  
+**Document Version:** 2.0.0  
+**Last Synced:** 2026-11-16  
+**Status:** Synced Architectural Blueprint (Reflects Verified Current Monorepo)  
 **System Type:** Commercial SaaS Multi-Tenant Platform  
-**Target Environment:** Linux / Docker / Cloudflare / PostgreSQL / Android  
+**Target Environment:** Linux / Docker / Cloudflare / PostgreSQL 16+ / Redis 7+ / Android  
 
 ---
 
 ## 1. High-Level System Architecture
 
-BriskSMS is engineered as a **distributed, event-driven modular monolith**. 
+BriskSMS is engineered as an **event-driven TypeScript modular monolith** running on Bun/Node.js alongside a background worker runtime and a Kotlin/Jetpack Compose Android companion.
 
-The architecture decouples high-throughput ingest operations from complex financial reconciliation and external third-party automations via persistent queues. This guarantees that bursty payment notifications or slow external APIs (e.g., MikroTik routers over cellular links or telco aggregators) never degrade ingestion throughput or cause data loss.
+The architecture decouples high-throughput payment evidence ingestion and HTTP/messaging dispatch from background webhook delivery, retry sweeps, and maintenance housekeeping via PostgreSQL ACID transactions, an append-only transactional outbox, and Redis-backed queues.
 
 ```
 +---------------------------------------------------------------------------------------------------+
 |                                            CLIENT LAYER                                           |
 +---------------------------------------------------------------------------------------------------+
-|  [Android Relay App]        [Web Management Portal]       [External Merchant Webhooks]            |
-|  - Kotlin + Jetpack Compose - Angular 19+ (Standalone)    - WHMCS / MikroTik / Custom ERP         |
-|  - Room DB (Offline Queue)  - Signals + NgRx/Component    - Signed HMAC Payloads                  |
-|  - Keystore Asymmetric Auth - Responsive Enterprise UI                                            |
+|  [Android Companion App]    [Web Management Portal]       [External Merchant Integrations]        |
+|  - Kotlin 1.9.23 + Compose  - apps/web (Glisse HTML/JS)   - Signed HMAC Webhooks / Zapier App     |
+|  - Room DB + AES-256-GCM    - server.ts Static Host       - External MikroTik / WHMCS / ERP       |
+|  - Keystore EC P-256 PoP    - Future Angular SPA Planned                                          |
 +---------------------------------------------------------------------------------------------------+
-                                                  | TLS 1.3
-                                                  v
-+---------------------------------------------------------------------------------------------------+
-|                                      EDGE & SECURITY GATEWAY                                      |
-+---------------------------------------------------------------------------------------------------+
-|  Cloudflare Edge Network:                                                                         |
-|  - WAF & DDoS Shielding                                                                           |
-|  - Rate Limiting (Token Bucket per IP / API Key)                                                  |
-|  - TLS Termination & SSL Pinning                                                                  |
-|  - Static Asset Delivery (Web App SPA)                                                            |
-+---------------------------------------------------------------------------------------------------+
-                                                  |
+                                                  | TLS 1.3 (Reverse Proxy / Cloudflare)
                                                   v
 +---------------------------------------------------------------------------------------------------+
 |                                    BACKEND MODULAR MONOLITH                                       |
-|                                    (NestJS / TypeScript API)                                      |
+|                              (Custom TypeScript HTTP Router - apps/api)                           |
 +---------------------------------------------------------------------------------------------------+
 |  +---------------------+   +---------------------+   +---------------------+                      |
-|  |     AuthModule      |   |  OrganizationModule |   |    DeviceModule     |                      |
-|  | - JWT / Refresh     |   | - Multi-tenancy     |   | - QR Pairing Flow   |                      |
-|  | - RBAC Guards       |   | - Plan Quotas       |   | - Keystore Auth     |                      |
+|  |     auth module     |   | organization module |   |    device module    |                      |
+|  | - Scrypt / HS256 JWT|   | - Multi-tenancy     |   | - 5m QR Pairing     |                      |
+|  | - 30d Refresh Fam.  |   | - RBAC & Quotas     |   | - EC P-256 PoP      |                      |
+|  | - Google/Resend SSO |   | - OWNER Protection  |   | - Durable Commands  |                      |
 |  +---------------------+   +---------------------+   +---------------------+                      |
 |  +---------------------+   +---------------------+   +---------------------+                      |
-|  |    PaymentModule    |   |ReconciliationModule |   |  AutomationModule   |                      |
-|  | - Fast Ingestion    |   | - Invoicing Engine  |   | - Rule Engine       |                      |
-|  | - Raw Persistence   |   | - Matching Matrix   |   | - Idempotency Keys  |                      |
+|  |  ingestion module   |   |reconciliation module|   |   stk-push module   |                      |
+|  | - /v1/ingestion/... |   | - Invoicing Engine  |   | - Fail-Closed MNO   |                      |
+|  | - Raw Evidence Log  |   | - Global Claim Lock |   | - Callback Verifier |                      |
+|  | - Parser Delegation |   | - REVIEW_REQUIRED   |   | - MNP Routing Spec  |                      |
 |  +---------------------+   +---------------------+   +---------------------+                      |
 |  +---------------------+   +---------------------+   +---------------------+                      |
-|  |   MessagingModule   |   |    BillingModule    |   |  DeveloperModule    |                      |
-|  | - Bulk SMS Engine   |   | - Product A (SaaS)  |   | - API Keys / Tokens |                      |
-|  | - Credit Ledger     |   | - Product B (SMS)   |   | - Webhook Dispatch  |                      |
+|  |  messaging module   |   | subscription module |   | developer / oauth   |                      |
+|  | - SMSGate + Outbound|   | - Dynamic Catalog   |   | - bsk_live_ API Keys|                      |
+|  |   Android Jobs      |   | - Paid Ref Gate     |   | - AES-GCM Webhooks  |                      |
+|  | - Credit Ledger     |   | - Platform Admin    |   | - RFC 7636 PKCE S256|                      |
 |  +---------------------+   +---------------------+   +---------------------+                      |
 +---------------------------------------------------------------------------------------------------+
            |                                                      ^
-           | (Fast Enqueue)                                       | (Transactional State Updates)
+           | (Transactional Outbox + Redis Enqueue)               | (ACID Row Locks / FOR UPDATE)
            v                                                      |
 +------------------------------------+             +------------------------------------+
 |       ASYNC QUEUE BROKER           |             |       PERSISTENCE LAYER            |
-|       (Redis 7+ / BullMQ)          |             |       (PostgreSQL 16+)             |
+|   (Redis 7+ Custom RESP Client)    |             |   (PostgreSQL 16+ via Bun.SQL)     |
 +------------------------------------+             +------------------------------------+
-| Queues:                            |             | Core Tables:                       |
-| - `ingest.parse`                   |             | - `organizations`, `users`         |
-| - `reconcile.match`                |             | - `devices`, `device_telemetry`    |
-| - `automation.execute`             |             | - `raw_payment_evidence` (Append)  |
-| - `webhook.deliver`                |             | - `normalized_payments`            |
-| - `sms.dispatch`                   |             | - `invoices`, `invoice_payments`   |
-+------------------------------------+             | - `messaging_credit_ledger`        |
-           |                                       | - `audit_logs` (Immutable)         |
-           v                                       +------------------------------------+
+| Queues (`QUEUE_NAMES`):            |             | Schema (`53` Models / `15` Migs):  |
+| - `webhook-delivery`               |             | - `organizations`, `users`         |
+| - `payment-processing`             |             | - `devices`, `device_commands`     |
+| - `sms-campaign`                   |             | - `raw_payment_evidence` (Append)  |
+| - `sms-delivery-retry`             |             | - `payment_reference_claims`       |
+| - `maintenance-cleanup`            |             | - `normalized_payments`, `invoices`|
++------------------------------------+             | - `outbound_sms_jobs`, `outbox_...`|
+           |                                       +------------------------------------+
+           v
 +------------------------------------+
-|     BACKGROUND WORKER NODES        |
-|     (NestJS Worker Runners)        |
+|     BACKGROUND WORKER RUNTIME      |
+|   (apps/worker/src/workers.ts)     |
 +------------------------------------+
-| - Worker 1: Parser & Deduplication |
-| - Worker 2: Reconciliation Matcher |
-| - Worker 3: MikroTik / WHMCS Engine|
-| - Worker 4: Bulk SMS Gateway Hub   |
-| - Worker 5: Webhook Retries (Backoff)
+| - OutboxDispatcher (SKIP LOCKED)   |
+| - DispatchRecoveryRunner (SMSGate) |
+| - OutboundSmsJob Lease Sweeper     |
+| - MaintenanceRunner (Token Purge)  |
+| - Queue Processors + Worker Health |
 +------------------------------------+
 ```
 
@@ -87,321 +80,169 @@ The architecture decouples high-throughput ingest operations from complex financ
 
 ## 2. Monorepo Structure
 
-The monorepo uses npm/pnpm workspaces. It strictly enforces dependency direction: `apps` may import from `packages`, but `packages` never import from `apps`.
+The monorepo is managed by **Bun `1.4.2`** (`bun.lock`, workspaces across `apps/*` and `packages/*`). Dependency direction is strict: `apps` may import from `packages`, while `packages` never import from `apps`.
 
 ```
 BriskSMS/
-├── package.json                         # Workspace root definition
-├── package-lock.json                    # Deterministic dependency lockfile
-├── .gitignore                           # Git exclusion rules
-├── .editorconfig                        # Universal formatting standard
-├── AGENTS.md                            # Governance and agent rules
-├── README.md                            # Project overview
-├── docker-compose.yml                   # Local development environment (Postgres, Redis)
+├── package.json                         # Root scripts (typecheck, build, test, db:*, worker:start)
+├── bun.lock                             # Authoritative Bun dependency lockfile
+├── docker-compose.yml                   # Local development environment (Postgres 16, Redis 7)
+├── AGENTS.md                            # Engineering governance and invariants
+├── README.md                            # Project overview & quickstart
 │
 ├── apps/
-│   ├── api/                             # Backend REST API (NestJS)
+│   ├── api/                             # Backend REST API (Custom TypeScript HTTP Router)
 │   │   ├── src/
-│   │   │   ├── main.ts                  # Application bootstrap & validation pipes
-│   │   │   ├── app.module.ts            # Root module registering feature domains
-│   │   │   └── modules/                 # Strict domain-driven modules
-│   │   ├── test/                        # E2E test suites
-│   │   ├── tsconfig.json
-│   │   └── package.json
+│   │   │   ├── main.ts                  # Boot validation (`validateProductionEncryptionConfig`) & HTTP server
+│   │   │   ├── app.ts                   # Health probes (/v1/health*) & route module registration
+│   │   │   ├── core/                    # Router, cookies/CSRF, crypto, auth/device guards, store
+│   │   │   └── modules/                 # auth, developer, device, ingestion, messaging, oauth,
+│   │   │                                # organization, reconciliation, stk-push, subscription
+│   │   └── test/                        # Live PostgreSQL + Redis API integration test suites
 │   │
-│   ├── worker/                          # Background processing service (NestJS/BullMQ)
+│   ├── worker/                          # Standalone worker runtime & outbox/recovery runners
 │   │   ├── src/
-│   │   │   ├── main.ts                  # Worker bootstrap
-│   │   │   ├── processors/              # Queue processors (ingest, match, auto, sms)
-│   │   │   └── adapters/                # External protocol clients (MikroTik, WHMCS)
-│   │   ├── tsconfig.json
-│   │   └── package.json
+│   │   │   ├── index.ts                 # Public worker handler exports
+│   │   │   ├── main.ts                  # `BriskWorkerRuntime` CLI entrypoint
+│   │   │   └── workers.ts               # Queue workers, outbox poller, recovery & maintenance
+│   │   └── test/                        # Worker security & concurrency integration tests
 │   │
-│   ├── web/                             # Web Frontend (Angular 19+)
+│   ├── web/                             # Merchant Web Console, Developer Docs & Landing Portal
+│   │   ├── server.ts                    # Hardened static HTTP server (path traversal & header guards)
 │   │   ├── src/
-│   │   │   ├── app/
-│   │   │   │   ├── core/                # Auth guards, HTTP interceptors, state services
-│   │   │   │   ├── features/            # Dashboard, Devices, Payments, Invoices, SMS
-│   │   │   │   └── shared/              # Reusable UI components, pipes, directives
-│   │   ├── angular.json
-│   │   ├── tsconfig.json
-│   │   └── package.json
+│   │   │   ├── index.html               # Editorial Stitch/Glisse marketing landing page (#privacy/#terms)
+│   │   │   ├── console.html             # Live Merchant Console connected to /v1/* endpoints
+│   │   │   └── developers.html          # REST API & Webhook developer portal
+│   │   └── test/                        # Web server security & portal integrity tests
 │   │
-│   └── android/                         # Mobile Relay App (Kotlin + Jetpack)
-│       ├── app/
-│       │   ├── src/main/java/tz/co/brisksms/
-│       │   │   ├── core/                # Security, Keystore, Room DB, Retrofit
-│       │   │   ├── service/             # Ingestion service (NotificationListener / SMS)
-│       │   │   ├── ui/                  # Jetpack Compose UI (Pairing, Telemetry, Logs)
-│       │   │   └── worker/              # WorkManager offline sync worker
-│       │   └── build.gradle.kts
-│       └── build.gradle.kts
+│   └── android/                         # Mobile Companion & SMSGate Relay (Kotlin 1.9.23 + Compose)
+│       ├── app/src/main/java/tz/co/brisksms/
+│       │   ├── core/                    # BriskApiClient (OkHttp/Gson), KeystoreSecureStorage
+│       │   ├── data/local/              # Room SQLite DB (`BriskDatabase`, `EvidenceDao`, entities)
+│       │   ├── security/                # KeystoreManager (EC P-256), DevicePairingCoordinator/Protocol
+│       │   ├── service/                 # BriskNotificationListenerService (Mode 1 Play-compliant)
+│       │   ├── payment/                 # ProviderNotificationParser, EvidenceEncryptor, provider whitelist
+│       │   ├── messaging/               # SmsDispatcher, SimManager, SmsGateRelayService, OutboundSmsJobCoordinator
+│       │   ├── ui/                      # Jetpack Compose screens + Glisse theme tokens
+│       │   └── worker/                  # WorkManager upload/telemetry workers, DeviceCommandProcessor, BootCompletedReceiver
+│       └── app/src/test/                # 11 JVM unit test suites (52 @Test methods)
 │
 └── packages/
-    ├── shared/                          # Universal types, interfaces, DTOs, and constants
-    │   ├── src/
-    │   │   ├── enums/                   # TransactionState, Role, ProviderType
-    │   │   ├── dtos/                    # Request/Response data transfer objects
-    │   │   └── utils/                   # Hash generators, date utilities, validators
-    │   ├── tsconfig.json
-    │   └── package.json
-    │
-    ├── parser-engine/                   # Payment parser adapters & normalizers
-    │   ├── src/
-    │   │   ├── providers/               # M-Pesa, Mixx, Airtel, HaloPesa, CRDB, NMB
-    │   │   ├── normalizer.ts            # Canonical transaction builder
-    │   │   └── deduplicator.ts          # Deterministic payload hashing
-    │   ├── test/                        # Real-world anonymized SMS test fixtures
-    │   ├── tsconfig.json
-    │   └── package.json
-    │
-    ├── db/                              # Database schema & Prisma client
-    │   ├── prisma/
-    │   │   ├── schema.prisma            # Canonical relational schema
-    │   │   ├── migrations/              # Versioned SQL migrations
-    │   │   └── seeds/                   # Seed data for dev/test
-    │   ├── src/
-    │   │   ├── index.ts                 # Prisma client export with tenant extensions
-    │   │   └── client.ts
-    │   ├── tsconfig.json
-    │   └── package.json
-    │
-    └── config/                          # Shared configurations
-        ├── eslint-preset.js
-        ├── prettier-preset.js
-        └── tsconfig.base.json
+    ├── shared/                          # DTOs, enums (UserRole, TransactionState, ApiKeyScope),
+    │                                    # domain errors, BigInt currency, E.164 TZ phone, AES-GCM & SSRF utils
+    ├── parser-engine/                   # Payment parser adapters (M-Pesa, Mixx, Airtel, HaloPesa, CRDB)
+    ├── db/                              # Prisma schema (53 models), 15 SQL migrations, Bun.SQL client,
+    │                                    # migrate/seed CLI, structured redacting logger, RESP Redis client & queues
+    ├── ui/                              # Glisse Liquid Glass optical refraction & CSS token system
+    ├── zapier-app/                      # Official Zapier Platform integration (@brisksms/zapier-app)
+    └── config/                          # Shared TypeScript & formatting presets
 ```
 
 ---
 
-## 3. Backend Module Boundaries (NestJS)
+## 3. Backend Module Boundaries (`apps/api/src/modules/`)
 
-To maintain long-term maintainability and prevent circular dependencies, the backend follows strict modular boundaries:
+The API monolith avoids circular coupling by organizing route controllers (`*.controller.ts`) and transactional services (`*.service.ts`) behind shared core infrastructure (`apps/api/src/core/`):
 
-```
-                  +----------------------------------------------+
-                  |                 AppModule                    |
-                  +----------------------------------------------+
-                                         |
-     +-----------------+-----------------+-----------------+-----------------+
-     |                 |                 |                 |                 |
-     v                 v                 v                 v                 v
-+----------+     +------------+    +-----------+     +-----------+     +------------+
-|AuthModule|     | OrgModule  |    |DeviceMod  |     |PaymentMod |     |ReconcileMod|
-+----------+     +------------+    +-----------+     +-----------+     +------------+
-     ^                 ^                 ^                 ^                 ^
-     |                 |                 |                 |                 |
-     +-----------------+-----------------+-----------------+-----------------+
-                                         |
-                                         v
-                         +-------------------------------+
-                         |   Core Infrastructure Layer   |
-                         | - PrismaModule (Tenant Scope) |
-                         | - QueueModule (BullMQ/Redis)  |
-                         | - TelemetryModule (Sentry)    |
-                         | - CryptoModule (HMAC, AES)    |
-                         +-------------------------------+
-```
-
-### Module Responsibilities:
-1. **`AuthModule`**: User registration, login, JWT access/refresh token issuance, Scrypt/Argon2id password hashing, RFC 6749 OAuth 2.0 authorization server with PKCE for Zapier.
-2. **`OrgModule`**: Multi-tenant organization CRUD, team member invitations, role hierarchy matrix (`OWNER`, `ADMIN`, `OPERATOR`, `CASHIER`, `AUDITOR`).
-3. **`DeviceModule`**: 5-minute cryptographic QR pairing flow, Android device handshake, hardware public key verification, device heartbeat telemetry, device revocation.
-4. **`PaymentModule`**: Raw payload ingestion endpoint (`POST /v1/ingest/notifications`), append-only persistence, parser delegation, and SHA-256 deduplication.
-5. **`ReconciliationModule`**: Invoice CRUD, automated matching matrix (Memo, Customer/Phone, Checkout window), partial/overpayment accounting, manual Accountant Review Queue (`REVIEW_REQUIRED`).
-6. **`SubscriptionModule`**: Dynamic commercial catalog: Products, Plans, Versions, localized integer minor-unit pricing (PlanPrices), dynamic EntitlementGuard, price snapshotting at obligation generation, zero hardcoded commercial logic.
-7. **`MessagingModule`**: Product B engine: `MessagingProvider` boundary, BriskSMS cellular gateway adapter (Mode A: External Relay, Mode B: Managed BriskSMS Private Gateway on 24/7 VPS behind Cloudflare `gateway.brisksms.com`), multi-SIM slot routing, CSV/XLSX recipient streaming ingestion (configurable 1,000 recipient batch default), BullMQ rate-limited carrier pacing queue (1 SMS / 3s per SIM), TCRA curfew enforcement, and append-only immutable credit transaction ledger with ACID reservations.
-8. **`OutboxModule`**: Transactional outbox engine: writes domain events atomically with business transactions; background poller delivers instant Zapier REST Hooks (`payment.matched`, `invoice.paid`, etc.) and developer webhooks with exponential backoff and `410 Gone` pruning.
-9. **`DeveloperModule`**: Scoped API keys (`bsk_live_...` / `bsk_test_...`), HMAC-SHA256 signed webhook dispatch, rate limiting, Make.com and n8n compatibility.
+1. **`auth`**: User registration, scrypt email/password login, HMAC-SHA256 `15m` JWT access tokens, opaque SHA-256 hashed **30-day** rotating refresh token families (`refresh_tokens.family_id`), distributed `revoked_sessions` lookup, Double-Submit CSRF + Origin/Fetch Metadata checks, Google OpenID Connect RS256 + `bsk_g_nonce` validation, and Resend email verification (`bsk_ev_...`). *(Schema holds `two_factor_secret`; TOTP login challenge enforcement is planned.)*
+2. **`organization`**: Multi-tenant organization CRUD, member invitations (unset `passwordHash` until activation), and RBAC enforcement (`UserRole`: `OWNER`, `ADMIN`, `FINANCE`, `CASHIER`, `DEVELOPER`) with `OWNER` demotion protection.
+3. **`device`**: 5-minute single-use QR pairing (`pairing_tokens`, `bsk_pair_...`), two-step EC P-256 Proof-of-Possession enrollment (`device_pairing_challenges` + `BRISKSMS-DEVICE-PAIRING-POP-V1`), unique SPKI `public_key_fingerprint` enforcement, silent key-replacement prevention (`DEVICE_KEY_REPLACEMENT_FORBIDDEN`), heartbeat telemetry, durable fleet commands (`device_commands` via `FOR UPDATE SKIP LOCKED`, bounded leases, idempotency keys, and device ACKs), and revocation (`bsk_dev_...` invalidated with `403 DEVICE_REVOKED`).
+4. **`ingestion`**: Raw notification ingestion (`POST /v1/ingestion/evidence`), append-only `raw_payment_evidence` persistence, parser delegation, SHA-256 `deduplication_hash`, canonical `(provider, provider_reference)` normalization, and global `PROVISIONAL` (`CLIENT_REPORTED`) claim acquisition via `PaymentReferenceClaimService`. Correlates same-tenant supplementary evidence cleanly and never auto-settles invoices from `ANDROID_NOTIFICATION_RELAY`.
+5. **`reconciliation` & `stk-push`**: Invoice CRUD, deterministic matching, partial/overpayment `REVIEW_REQUIRED` routing, `PaymentReferenceClaimService` global claim coordinator, manual verification (`MANUAL_FINANCE_APPROVAL` / `BANK_STATEMENT_RECONCILIATION` / `INDEPENDENT_PROVIDER_QUERY` / `MANUAL_REJECTION` with separation-of-duties enforcement), explicit `provider` override on `POST /v1/payments/stk-push` (`routingResolution: 'EXPLICIT' | 'PREFIX_HEURISTIC'`), fail-closed `StkAdapterRegistry`, and fail-closed `CallbackVerifierRegistry` (`DisabledProviderCallbackVerifier`). See [`CARRIER_STK_INTEGRATION_READINESS.md`](./CARRIER_STK_INTEGRATION_READINESS.md).
+6. **`subscription`**: Dynamic catalog (`CommercialProduct`, `SubscriptionPlan`, `PlanVersion`, `PlanPrice`, `PlanEntitlement`), fail-closed paid checkout requiring matching verified `stk_push_transactions` or `normalized_payments` (`402 PAYMENT_VERIFICATION_REQUIRED`), period/trial-bounded `EntitlementService`, and `PLATFORM_ADMIN_SECRET`-gated catalog administration (`/v1/admin/catalog/*`).
+7. **`messaging`**: Product B engine integrating strictly via SMSGate (`MANAGED_GATEWAY` / `EXTERNAL_RELAY`) and durable Android companion jobs (`outbound_sms_jobs` via `/v1/messaging/device-jobs/*`). Enforces AES-256-GCM gateway credentials (`messaging_accounts`), dual-key 24h SMSGate inbound webhook rotation (`POST /v1/messaging/webhooks/smsgate`), durable `message_idempotency_records` with `HTTP 429 -> UNCERTAIN` protection, TCRA curfew (`20:00–07:00 EAT` default), E.164 TZ normalization, and append-only `messaging_credit_ledger` accounting.
+8. **`developer` & `oauth`**: Scoped developer API keys (`bsk_live_...`), AES-256-GCM encrypted webhook endpoint HMAC secrets (`20261116010000_encrypt_webhook_endpoint_secrets`), transactional `outbox_events`, SSRF-safe webhook delivery, and RFC 7636 OAuth 2.0 authorization (`/v1/oauth/clients`, `/v1/oauth/authorize`, `/v1/oauth/token`, `/v1/oauth/revoke`) requiring `S256` PKCE, confidential client secret checks, and `bsk_at_` Bearer authentication (`authenticate()`).
 
 ---
 
-## 4. Database Architecture (PostgreSQL & Prisma)
+## 4. Database Architecture (PostgreSQL 16+ & Schema Invariants)
 
-The database schema is organized around multi-tenancy, immutable financial evidence, dynamic subscription versioning, and strict dual-ledger separation.
+The canonical schema in [`packages/db/prisma/schema.prisma`](../../packages/db/prisma/schema.prisma) defines **53 relational models** across **15 sequential SQL migrations** (`20261107000000` through `20261116010000`), executed by `packages/db/src/migrate.ts` over `Bun.SQL`.
 
-### Key Database Entities & Relationships:
-
-```
-[organizations] 1 ----< N [users_organizations] >---- 1 [users]
-       |
-       +-----< N [devices] ---> [device_telemetry]
-       |
-       +-----< N [raw_payment_evidence] (Immutable append-only)
-       |              |
-       |              v 1:1
-       +-----< N [normalized_payments] (Canonical record)
-       |              |
-       |              v N:1
-       +-----< N [invoices]
-       |              |
-       |              +-----< N [invoice_payments] (ACID settlement link)
-       |
-       +-----< 1 [organization_subscriptions] (Product A: Dynamic SaaS Subscription)
-       |              |
-       |              +-----> 1 [plan_versions] ---> 1 [subscription_plans] ---> [commercial_products]
-       |              |             |
-       |              |             +-----< N [plan_prices] (Immutable minor-unit pricing)
-       |              |             +-----< N [plan_entitlements] ---> [feature_definitions]
-       |              |
-       |              +-----< N [subscription_billing_invoices] (Price snapshots)
-       |              +-----< N [subscription_history]
-       |
-       +-----< 1 [messaging_accounts] (Product B: Gateway Credentials & Multi-SIM Settings)
-       |              |
-       |              +-----< N [messaging_credit_ledgers] (Atomic prepaid unit credits/debits)
-       |              +-----< N [sms_campaigns] ---> N [sms_messages]
-       |
-       +-----< N [outbox_events] (Transactional Outbox for Zapier REST Hooks & Webhooks)
-       +-----< N [zapier_hook_subscriptions] (Active REST Hook URLs)
-       +-----< N [api_keys] (Hashed SHA-256)
-```
+### Key Relational Domains:
+- **Identity & Tenancy:** `organizations`, `users`, `email_verification_tokens`, `users_organizations`, `organization_invitations`, `refresh_tokens`, `revoked_sessions`.
+- **Android Companion & Fleet Control:** `devices`, `pairing_tokens`, `device_pairing_challenges`, `device_telemetry`, `device_commands`.
+- **Product A Payment Intelligence & Claims:** `raw_payment_evidence` (append-only), `normalized_payments`, `payment_verifications`, `customers`, `invoices`, `invoice_items`, `invoice_payments`, `stk_push_transactions`, `payment_reference_claims`, `payment_reference_claim_events`, `payment_reference_claim_collisions`, `automation_rules`, `automation_logs`.
+- **Product A Subscriptions & Catalog:** `commercial_products`, `subscription_plans`, `plan_versions`, `plan_prices`, `feature_definitions`, `plan_entitlements`, `organization_subscriptions`, `subscription_history`, `subscription_billing_invoices`.
+- **Product B Cellular Messaging:** `messaging_accounts`, `messaging_credit_ledger`, `sender_ids`, `sms_campaigns`, `sms_campaign_recipients`, `sms_messages`, `sms_delivery_attempts`, `message_idempotency_records`, `outbound_sms_jobs`, `smsgate_signing_keys`, `smsgate_webhook_events`.
+- **Developer Platform, Outbox & Audit:** `api_keys`, `oauth_clients`, `oauth_authorization_codes`, `oauth_tokens`, `webhook_endpoints`, `webhook_deliveries`, `outbox_events`, `audit_logs`.
 
 ### Core Schema Invariants:
-1. **Tenant Keying:** Every tenant table includes `organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE RESTRICT run-time enforcement`.
-2. **Primary Keys:** `UUIDv7` or time-ordered UUIDs for distributed indexing performance and sequential B-tree ordering.
-3. **Evidence Immutability:** `raw_payment_evidence` contains no `updated_at` column; it cannot be modified once written.
-4. **Unique Deduplication Index:**
-   ```sql
-   CREATE UNIQUE INDEX idx_payments_dedup_hash 
-   ON normalized_payments (organization_id, deduplication_hash);
-   ```
-5. **Ledger Concurrency:** Updates to `messaging_credit_ledger` or `invoices` balance execute using PostgreSQL row-level locks:
-   ```sql
-   SELECT balance FROM invoices WHERE id = :invoiceId FOR UPDATE;
-   ```
+1. **Strict Tenant Keying & `ON DELETE RESTRICT`:** All tenant resources carry `organization_id` and prevent cascading financial history loss.
+2. **PostgreSQL Append-Only Triggers:** Database triggers (`prevent_immutable_record_mutation`, `trg_claim_events_immutable`, and `prevent_billing_invoice_snapshot_mutation`) block `UPDATE` and `DELETE` on `raw_payment_evidence`, `payment_verifications`, `messaging_credit_ledger`, `subscription_history`, `audit_logs`, `payment_reference_claim_events`, and historical `subscription_billing_invoices` price snapshots.
+3. **Unified Global Payment Reference Claims & Lock Hierarchy (P0.2):** Ingestion, manual verification, and STK callbacks acquire locks strictly in ascending order: `Level 1` advisory lock (`pg_advisory_xact_lock`) $\rightarrow$ `Level 2` `payment_reference_claims` $\rightarrow$ `Level 3` `stk_push_transactions` $\rightarrow$ `Level 4` `normalized_payments` $\rightarrow$ `Level 5` `invoices` $\rightarrow$ `Level 6` `payment_reference_claim_collisions`.
 
 ---
 
-## 5. Asynchronous Queue Architecture (BullMQ / Redis)
+## 5. Asynchronous Queue & Worker Architecture (`apps/worker`)
 
-Ingestion must never block on downstream dependencies. The queue structure separates duties into distinct queues with dedicated concurrency and retry configurations:
+Implemented in `packages/db/src/queue.ts` and `apps/worker/src/workers.ts` over Redis 7+ (`QUEUE_NAMES`):
 
-| Queue Name | Producer | Consumer | Concurrency | Backoff Strategy | Dead Letter Queue |
-|---|---|---|---|---|---|
-| `ingest.parse` | `PaymentModule.ingest` | `Worker.ParseProcessor` | High (20) | Exponential: 3 retries (1s, 5s, 15s) | `ingest.parse.dlq` |
-| `reconcile.match` | `ParseProcessor` | `Worker.MatchProcessor` | Medium (10) | Exponential: 5 retries (2s, 10s, 30s) | `reconcile.match.dlq` |
-| `automation.execute`| `MatchProcessor` | `Worker.AutoProcessor` | Controlled (5) | Exponential: 5 retries (5s, 30s, 120s) | `automation.execute.dlq` |
-| `webhook.deliver` | `AutoProcessor` | `Worker.WebhookProcessor` | High (25) | Exponential: 5 retries over 24h | `webhook.deliver.dlq` |
-| `sms.dispatch` | `MessagingModule` | `Worker.SmsProcessor` | Aggregator limits (10) | Linear: 3 retries | `sms.dispatch.dlq` |
+| Queue Name (`QUEUE_NAMES`) | Producer | Worker Handler / Role | Reliability Controls |
+|---|---|---|---|
+| `webhook-delivery` | `OutboxDispatcher` (`outbox_events` poller) | `processWebhookDeliveryJob` | Decrypts AES-256-GCM `webhook_endpoints.secret`, re-validates SSRF via `validateOutboundHttpUrl` + `redirect: 'error'`, signs `X-BriskSMS-Signature` |
+| `payment-processing` | API Ingestion / Outbox | `processPaymentJob` | Tenant-scoped payload validation (`assertTenantContext`) |
+| `sms-campaign` | Campaign API / Outbox | `processSmsCampaignJob` | Dispatches via SMSGate with decrypted gateway auth & releases credits on definitive failure |
+| `sms-delivery-retry` | SMS Retry Scheduler | `processSmsDeliveryRetryJob` | `SELECT ... FOR UPDATE` serialized terminal failure refunding |
+| `maintenance-cleanup` | `MaintenanceRunner` (1h interval) | `runMaintenanceCleanup` | Purges expired `pairing_tokens`, expired `revoked_sessions`, and aged `email_verification_tokens` |
+
+Additionally, `BriskWorkerRuntime` schedules `DispatchRecoveryRunner` to recover stale `PENDING` dispatches, timeout expired `DISPATCHING` leases safely to `UNCERTAIN`, and sweep expired `outbound_sms_jobs` leases (`expireDispatchLeases`).
 
 ---
 
-## 6. Android Relay Architecture
+## 6. Android Relay Architecture (`apps/android`)
 
-The Android app acts as a secure, low-power background gateway:
+Play-Store compliant **Mode 1** relay architecture (no `READ_SMS`/`RECEIVE_SMS` permissions in manifest):
 
 ```
-[Android OS Notification Shade] / [Incoming Carrier SMS]
+[Android Notification Shade: Official M-Pesa / Mixx / Airtel / HaloPesa / CRDB / NMB Apps & SMS]
+                     |
+                     v  (BriskNotificationListenerService + PaymentProviderRegistry whitelist)
+[ProviderNotificationParser & EvidenceEncryptor]
+  - Discards non-financial personal notifications immediately
+  - Encrypts raw payload with Keystore AES-256-GCM (`bsk_enc_v1:...`)
                      |
                      v
-  +------------------------------------------------------+
-  |         BriskSMS Android Ingestion Service           |
-  |                                                      |
-  |  Mode A (Standard / Play Store):                     |
-  |  - NotificationListenerService                       |
-  |  - Filters by approved package names                 |
-  |    (e.g., M-Pesa app, Bank apps, System Messages)   |
-  |                                                      |
-  |  Mode B (Direct Enterprise APK):                     |
-  |  - BroadcastReceiver (android.provider.Telephony)    |
-  |  - Filters by approved Sender shortcodes             |
-  +------------------------------------------------------+
+[Room SQLite Offline Queue (BriskDatabase / OfflineEvidenceEntity)]
                      |
-                     v
-  +------------------------------------------------------+
-  |            Local Security & Scrubbing                |
-  |  - Discards personal messages immediately            |
-  |  - Encrypts payload before local persistence         |
-  +------------------------------------------------------+
-                     |
-                     v
-  +------------------------------------------------------+
-  |            Local Offline Queue (Room DB)             |
-  |  - Durable local SQLite storage                      |
-  |  - Tracks `PENDING_SYNC`, `SYNCED`, `FAILED`         |
-  +------------------------------------------------------+
-                     |
-                     v (Network Available)
-  +------------------------------------------------------+
-  |            Ingestion Sync Engine                     |
-  |  - WorkManager / Foreground Service                  |
-  |  - Signs payload with Android Keystore Private Key   |
-  |  - POST /v1/ingest/notifications                     |
-  |  - Receives ACK, marks `SYNCED`                      |
-  +------------------------------------------------------+
+                     v  (WorkManager: EvidenceUploadWorker + TelemetryWorker)
+[BriskApiClient (OkHttp + Gson)]
+  - Authenticated via `bsk_dev_...` after EC P-256 Proof-of-Possession pairing
+  - Uploads to `POST /v1/ingestion/evidence` (observation only, never settlement)
+  - Polls `POST /v1/devices/:id/telemetry` for durable `device_commands`
+  - Executes Mode B SMS via `OutboundSmsJobCoordinator` (`/acquire` -> `/dispatching` -> `SmsManager` -> `/result`)
 ```
-
-### Key Android Reliability Pillars:
-- **Foreground Service:** Persistent notification with high priority ensures the Android Low Memory Killer (OOM) does not terminate the service.
-- **Battery Optimization Exemption:** Guided user flow directs the merchant to disable aggressive OEM battery optimization (Samsung, Xiaomi, Transsion/Tecno/Infinix).
-- **Keystore Signing:** Payloads are signed on-device; if an attacker intercepts the device token, they cannot forge payloads without the Keystore hardware key.
 
 ---
 
-## 7. Business Automation Engine (MikroTik & WHMCS)
+## 7. External Automation Boundary (MikroTik & WHMCS)
 
-### 7.1. MikroTik RouterOS Adapter
-- Supports both RouterOS v6 (legacy API port 8728/8729) and RouterOS v7 (modern REST API / SSH).
-- Safe command execution:
-  - PPPoE User Renewal:
-    ```
-    /ppp/secret/set [find name="user123"] profile="10Mbps_Plan" disabled=no
-    /ppp/active/remove [find name="user123"]
-    ```
-  - Hotspot Voucher Generation:
-    ```
-    /ip/hotspot/user/add name="pin4821" profile="1Day_Unlimited" limit-uptime=24h
-    ```
-- All operations are verified by reading back state before marking the job `FULFILLED`.
+Downstream business automations (MikroTik RouterOS PPPoE/Hotspot activation, WHMCS invoice updates, custom ERPs) integrate externally via:
+- Signed outbound webhooks (`payment.matched`, `payment.verified`, `invoice.paid`, `fulfillment.eligible`) dispatched by `OutboxDispatcher` and `processWebhookDeliveryJob` with `X-BriskSMS-Signature`, and
+- The official `@brisksms/zapier-app` OAuth 2.0 PKCE triggers and actions.
 
-### 7.2. WHMCS Adapter
-- Communicates with WHMCS API using API Authentication (`identifier` + `secret`).
-- Executes `addInvoicePayment`:
-  ```json
-  {
-    "action": "AddInvoicePayment",
-    "invoiceid": 10452,
-    "transid": "QA12BC34DE",
-    "gateway": "mpesa",
-    "amount": "50000.00",
-    "fees": "0.00",
-    "date": "2026-11-05 14:32:00"
-  }
-  ```
-- Ensures idempotency: Queries `getTransactions` with `transid` before applying payment to prevent duplicate credit in WHMCS.
+Direct native RouterOS SSH/API and WHMCS PHP worker adapters inside `apps/worker` are deferred backlog items.
 
 ---
 
-## 8. Deployment Architecture & Cost Efficiency
-
-BriskSMS is engineered for minimal infrastructure overhead during early commercial operation while scaling horizontally as volume expands:
+## 8. Deployment Topology & Redis Transport Boundary
 
 ```
-                                [Cloudflare Edge]
-                       (DNS, SSL, DDoS, CDN, Edge WAF)
+                                [Cloudflare / TLS 1.3 Reverse Proxy]
+                      (Sanitizes X-Forwarded-For, injects CSP & HSTS)
                                       |
                       +---------------+---------------+
                       |                               |
                       v                               v
-             [api.brisksms.co.tz]             [app.brisksms.co.tz]
-             (Backend API Service)            (Angular SPA on Cloudflare Pages)
+             [api.brisksms.com]             [console.brisksms.com]
+             (apps/api :3000)                 (apps/web :4200)
                       |
-                      v
-             [Application Server]
-             (Dedicated VPS / Hetzner or AWS EC2)
-             - Docker Compose / Kamal Deployment
-             - Container 1: `api` (NestJS REST API)
-             - Container 2: `worker` (Queue processor)
-             - Container 3: `redis` (BullMQ broker & cache)
-                      |
-                      v
-             [Managed PostgreSQL Database]
-             (Primary DB with automated daily snapshots & PITR)
+                      +---------------+---------------+
+                                      |
+                      v                               v
+             [apps/worker]                 [Redis 7+ (Private VPC)]
+                                           (No internal TLS in RESP client)
+                                      |
+                                      v
+                        [Managed PostgreSQL 16+ (SSL/PITR)]
 ```
-
-### Production Environment Isolation:
-- `production`: High availability, automated WAL archiving, strict error logging.
-- `staging`: Mirrors production configuration; used for CI validation and integration testing.
-- `development`: Local Docker containers (`docker-compose.yml`) for instant offline development.
-

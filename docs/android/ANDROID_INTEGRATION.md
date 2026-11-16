@@ -28,10 +28,11 @@ These capabilities have separate services, Room databases/tables, queues, permis
 ### 2.1 Hardware-Backed Device Identity (Asymmetric EC P-256)
 - **Engine:** `tz.co.brisksms.security.KeystoreManager`
 - **Key Storage:** Android Keystore with StrongBox Keymaster hardware security module (fallback to hardware TEE).
-- **Asymmetric Curve:** Elliptic Curve NIST P-256 (`secp256r1`).
-- **Signing Algorithm:** `SHA256withECDSA`.
-- **Private Key Isolation:** The private key never leaves secure silicon and cannot be exported.
-- **Registration:** Base64-encoded public key (`getPublicKeyBase64()`) is transmitted to `POST /v1/devices/pair` during device enrollment.
+- **Asymmetric Curve:** Elliptic Curve NIST P-256 (`secp256r1`, `ECGenParameterSpec("secp256r1")`).
+- **Signing Algorithm:** `SHA256withECDSA` (`SHA256_ECDSA` / `EC_P256`).
+- **Private Key Isolation:** The private key never leaves secure silicon and cannot be exported (`PRIVATE_KEY_SUBMISSION_FORBIDDEN` if a client ever submits private-key PEM material).
+- **Public Key Format & Fingerprint:** Canonical X.509 SubjectPublicKeyInfo (SPKI) PEM (`getPublicKeyPem()`) and lowercase hex SHA-256 of canonical 91-byte SPKI DER (`getPublicKeyFingerprintHex()`).
+- **Two-Step Proof-of-Possession Registration:** Android executes `DevicePairingCoordinator` + `DevicePairingProtocol` against `POST /v1/devices/pairing-challenge` followed by signing the canonical binary transcript and completing `POST /v1/devices/pair`. Direct public-key-only registration without a valid server challenge signature is rejected (`PROOF_OF_POSSESSION_REQUIRED`).
 
 ### 2.2 Modern Keystore AES-256-GCM Secure Storage
 - **Engine:** `tz.co.brisksms.core.storage.KeystoreSecureStorage`
@@ -193,27 +194,33 @@ SMSGate delivers delivery reports and status updates via HTTP POST webhooks with
 ### 4.4 Foreground Service & Radio Dispatch Engine
 - **Service:** `tz.co.brisksms.messaging.service.SmsGateRelayService`
 - **Foreground Type:** `connectedDevice` (`ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE`).
-- **Dispatcher:** `tz.co.brisksms.messaging.dispatcher.SmsDispatcher`
-- Manages multi-part and single-part SMS dispatch via Android `SmsManager`.
-- Attaches unique `PendingIntent` callbacks for sent and delivery receipts:
+- **Coordinator & Offline Result Store:** `tz.co.brisksms.messaging.OutboundSmsJobCoordinator` & `tz.co.brisksms.messaging.PendingSmsJobResultStore`
+- **Dispatcher:** `tz.co.brisksms.messaging.dispatcher.SmsDispatcher` (Room `BriskDatabase` v3 `SmsDispatchEntity` with `jobId` & `leaseToken`)
+- Executes durable Model B job acquisition (`POST /v1/messaging/device-jobs/acquire`), validates destination/SIM hardware capability (without recipient prefix lock-in), persists the local idempotency record, and commits `POST /v1/messaging/device-jobs/:jobId/dispatching` **before** calling `SmsManager`.
+- `SmsDispatcher` preserves `DISPATCHING` until `ACTION_SMS_SENT` fires (never fabricating `"cell_..."` provider IDs or prematurely marking `SUBMITTED`/`DELIVERED`).
+- Attaches unique `PendingIntent` callbacks for sent and delivery receipts, submitting/persisting reports via Keystore AES-256-GCM (`pendingSmsJobResultsJson`) so outcomes survive process death and flush without re-sending SMS:
   - `ACTION_SMS_SENT`: Carrier radio ACK/NACK verification (`SUBMITTED` or `FAILED`).
   - `ACTION_SMS_DELIVERED`: Handset delivery receipt (`DELIVERED`).
 - Internal Pacing Delay: Configurable 1,500ms safety delay between consecutive dispatches to prevent mobile carrier radio throttling.
-- Idempotency: Deduplication check prevents duplicate radio transmissions. Unconfirmed outcomes (`UNKNOWN`) are never blindly retried.
+- Idempotency: Deduplication checks (`jobId`, `idempotencyKey`, and pending result queue) prevent duplicate radio transmissions across `DISPATCHING`, `SUBMITTED`, `DELIVERED`, and `UNKNOWN`.
 
 ---
 
-## 5. Device Telemetry & Health Monitoring
+## 5. Device Telemetry & Durable Fleet Command Acquisition
 
 - **Worker:** `tz.co.brisksms.worker.TelemetryWorker`
-- **Schedule:** Periodic WorkManager job executed every 15 minutes.
-- **Endpoint:** `POST /v1/devices/:id/telemetry`
+- **Schedule:** Periodic WorkManager job executed every 15 minutes (plus manual UI triggers).
+- **Endpoints:**
+  - `POST /v1/devices/:id/telemetry`: Reports telemetry and optional pending `commandAcknowledgements[]`; atomically claims eligible commands (`PENDING` or expired-lease `DELIVERED`) via `FOR UPDATE SKIP LOCKED` and returns them with `leaseToken`.
+  - `POST /v1/devices/:id/commands/:commandId/ack`: Immediately acknowledges execution outcome (`ACKNOWLEDGED` or `FAILED`, plus `leaseToken` / `failureReason`). If this immediate ACK fails transiently, `KeystoreSecureStorage.pendingCommandAcksJson` persists it encrypted for inline delivery on the next telemetry poll (and `DeviceCommandProcessor` prevents duplicate local execution while ACK confirmation is pending).
+  - `POST /v1/devices/:id/command`, `GET /v1/devices/:id/commands`, `POST /v1/devices/:id/commands/:commandId/cancel`: Owner/Admin fleet command management with payload validation (`PAUSE_RELAY`, `RESUME_RELAY`, `SWITCH_SIM`, `WIPE_AND_REVOKE`), org-scoped `Idempotency-Key`, and explicit cancellation/history.
 - **Telemetry Payload:**
   - `batteryPercentage`: Current battery charge (0–100%).
   - `isCharging`: AC or USB charging indicator.
   - `networkType`: `WIFI`, `CELLULAR`, or `NONE`.
   - `pendingOfflineCount`: Sum of unsynced payment evidence and pending SMS dispatches.
-- Battery protection: UI warns operator if battery drops below 20% and device is unplugged.
+  - `commandAcknowledgements` (optional): Deferred `ACKNOWLEDGED`/`FAILED` command outcomes when an immediate `/ack` call failed due to connectivity loss.
+- **Revocation & Battery Protection:** If `403 DEVICE_REVOKED` is returned during telemetry, `BriskApiClient` clears local credentials/paired state and `TelemetryWorker` returns `Result.failure()` (halting retries). UI warns operator if battery drops below 20% and device is unplugged.
 
 ---
 
@@ -278,13 +285,17 @@ Adheres to the BriskSMS design system (Stitch warm palette, geometric typography
    }
    ```
 
-### 7.2 Android Device Enrollment
-1. Operator opens BriskSMS Relay companion.
-2. Pastes QR payload or manual pairing code.
-3. Companion reads or generates hardware EC P-256 key pair in Android Keystore.
-4. Companion calls `POST /v1/devices/pair`.
-5. Backend verifies token, binds device public key, registers hardware metadata, and issues device Bearer token (`bsk_dev_...`).
-6. Companion securely stores token in Keystore AES-256-GCM storage and launches background workers.
+### 7.2 Android Device Enrollment (Challenge-Response Proof-of-Possession)
+1. Operator opens BriskSMS Relay companion (`PairingScreen`) and scans or pastes the QR payload (`token`, `org`, `endpoint`, `exp`).
+2. Companion ensures or generates a hardware EC P-256 (`secp256r1`) key pair in Android Keystore (`KeystoreManager.ensureDeviceKeyPair()`), exports canonical X.509 SPKI PEM (`getPublicKeyPem()`), and computes its SHA-256 DER fingerprint (`getPublicKeyFingerprintHex()`).
+3. **Step 1 (`POST /v1/devices/pairing-challenge`):** Companion submits `enrollmentToken`, `publicKeyPem`, optional `organizationId`, `keyAlgorithm: "EC_P256"`, and `signatureAlgorithm: "SHA256_ECDSA"`.
+   - Backend validates the token (`FOR UPDATE`), curve/key encoding (`EC_P256`), key uniqueness (`PUBLIC_KEY_ALREADY_REGISTERED`), and org quota, then issues a single-use challenge (`challengeId`, `enrollmentId`, 256-bit `challenge` nonce, `publicKeyFingerprint`, `expiresAt`) persisted in `device_pairing_challenges` (`PENDING`, TTL `PAIRING_CHALLENGE_TTL_SECONDS`, default `120s`, capped by pairing token expiry).
+4. **Canonical Signing (`DevicePairingProtocol.buildPairingChallengeTranscript`):** Companion verifies the challenge metadata (`protocolVersion == "BRISKSMS-DEVICE-PAIRING-POP-V1"`, matching `organizationId`, matching `publicKeyFingerprint`, non-expired `expiresAt`), constructs the length-prefixed binary transcript (`uint32be(byteLength) || utf8(field)` over the 10 ordered fields: `protocolVersion`, `challengeId`, `enrollmentId`, `organizationId`, `sha256Hex(enrollmentToken)`, `publicKeyFingerprint`, `keyAlgorithm`, `signatureAlgorithm`, `challengeNonce`, `expiresAtIso`), and signs it with the Keystore EC P-256 private key (`SHA256withECDSA`).
+5. **Step 2 (`POST /v1/devices/pair`):** Companion submits `enrollmentToken`, `challengeId`, `enrollmentId`, `organizationId`, `publicKeyPem`, `keyAlgorithm`, `signatureAlgorithm`, `challengeSignature`, and device metadata.
+   - Backend acquires locks in strict order (`pairing_tokens -> device_pairing_challenges -> devices`), verifies token/challenge state, binding, expiry, key fingerprint, ASN.1 DER ECDSA signature, and quota, rejects silent key replacement (`DEVICE_KEY_REPLACEMENT_FORBIDDEN`, `PUBLIC_KEY_ALREADY_REGISTERED`), atomically marks the challenge `CONSUMED` and token used, and registers the device with its normalized PEM and unique `publicKeyFingerprint`.
+   - Failed challenge verification transitions `device_pairing_challenges` to `REJECTED` or `EXPIRED` with an audit log without creating a device.
+   - **Key Error Codes:** `PROOF_OF_POSSESSION_REQUIRED`, `CHALLENGE_EXPIRED`, `CHALLENGE_ALREADY_CONSUMED`, `CHALLENGE_BINDING_MISMATCH`, `PUBLIC_KEY_MISMATCH`, `INVALID_CHALLENGE_SIGNATURE`, `PUBLIC_KEY_ALREADY_REGISTERED`, `DEVICE_KEY_REPLACEMENT_FORBIDDEN`, `UNSUPPORTED_PUBLIC_KEY`, `UNSUPPORTED_CRYPTO_ALGORITHM`, `INVALID_PUBLIC_KEY`, `PRIVATE_KEY_SUBMISSION_FORBIDDEN`.
+6. **Commit Local State Only After Server 200 OK:** Companion stores `bsk_dev_...` and device metadata in Keystore AES-256-GCM storage (`KeystoreSecureStorage`) only after HTTP 200 OK, and deletes both secure storage and the Keystore key alias on disconnect (`SettingsScreen`).
 
 
 ---
@@ -386,6 +397,8 @@ Located in `apps/android/app/src/test/java/tz/co/brisksms/`:
 - `SmsGateProtocolTest`: Validates official SMSGate 3rdparty v1 schema formatting, lifecycle state mapping (`sms:sent`, `sms:delivered`, `sms:failed`), and ambiguous retry prevention.
 - `SmsDispatcherLogicTest`: Validates state machine separation between radio submission (`SUBMITTED`) and handset delivery (`DELIVERED`), idempotency keys, and multipart message thresholds.
 - `SimManagerLogicTest`: Validates Tanzanian telco normalization, dual-SIM slot mapping, and subscription fallback.
+- `OutboundSmsJobCoordinatorTest`: Validates outbound SMS job payload gating, SIM selection decoupled from recipient phone prefixes, duplicate-dispatch prevention, `/dispatching` pre-radio gate enforcement, and pending result reconciliation.
+- `DeviceCommandQueueTest` & `DevicePairingProofOfPossessionTest`: Validates fleet command allowlists, ACK deduplication, EC P-256 transcript signing, and PoP key binding.
 - `ProductIsolationTest`: Invariant checks verifying complete database, queue, and entitlement separation between Product A and Product B.
 
 ---

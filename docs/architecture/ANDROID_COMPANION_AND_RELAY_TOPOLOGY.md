@@ -106,28 +106,41 @@ flowchart TD
 
 ---
 
-## 4. Device Management System: Telemetry Command Bus
+## 4. Device Management System: Durable Telemetry Command Bus
 
-Rather than maintaining fragile persistent WebSocket connections across fluctuating cellular connections, BriskSMS utilizes an **Asynchronous Telemetry Command Bus**:
+Rather than maintaining fragile persistent WebSocket connections across fluctuating cellular connections, BriskSMS utilizes a **PostgreSQL-Backed Asynchronous Telemetry Command Bus** (`device_commands`, migration `20261115000000_durable_device_commands`):
 
 ```
-[Merchant Console] ──► POST /v1/devices/:id/command ──► [API In-Memory / Redis Queue]
-                                                                │
-                                                                │ Piggybacked in
-                                                                │ Telemetry ACK
-                                                                ▼
-[Android Companion] ◄── POST /v1/devices/:id/telemetry ◄───────┘
-  (TelemetryWorker: Battery, Network, Signal)
+[Merchant Console] ──► POST /v1/devices/:id/command ──► [PostgreSQL: device_commands]
+                                                               │
+                            Piggybacked in                     │ Atomic FOR UPDATE SKIP LOCKED
+                            Telemetry Response (DELIVERED)     ▼
+[Android Companion] ◄── POST /v1/devices/:id/telemetry ────────┘
+  (TelemetryWorker)  ──► POST /v1/devices/:id/commands/:commandId/ack (or inline commandAcknowledgements)
 ```
 
 ### Supported Remote Fleet Commands:
 
-| Command | Action on Android Handset | Use Case |
-|---|---|---|
-| `PAUSE_RELAY` | Halts `SmsGateRelayService` loop and sets `isBulkMessagingEnabled = false`. | Prevents SIM overheating or respects merchant quiet hours. |
-| `RESUME_RELAY` | Restarts foreground service and resumes queue processing. | Re-enables messaging after pausing. |
-| `SWITCH_SIM` | Sets `preferredSimSlot = payload.simSlot` in `KeystoreSecureStorage`. | Dynamically balances carrier billing plans remotely. |
-| `WIPE_AND_REVOKE` | Wipes local SQLite database, revokes device tokens, and deletes Android Keystore ECDSA private key. | Emergency security response if device is lost or stolen. |
+Only the 4 end-to-end implemented command types are permitted (`PAUSE_RELAY`, `RESUME_RELAY`, `SWITCH_SIM`, `WIPE_AND_REVOKE`); undocumented commands (`PING`, `SYNC`, `RESTART_SERVICE`, etc.) fail closed with HTTP `400 INVALID_COMMAND`:
+
+| Command | Payload Contract | Action on Android Handset | Security & Retry Semantics |
+|---|---|---|---|
+| `PAUSE_RELAY` | `{}` (empty/omitted) | Halts `SmsGateRelayService` loop and sets `isBulkMessagingEnabled = false`. | At-least-once lease delivery (`maxDeliveryAttempts = 5`). |
+| `RESUME_RELAY` | `{}` (empty/omitted) | Restarts foreground service and resumes queue processing. | At-least-once lease delivery (`maxDeliveryAttempts = 5`). |
+| `SWITCH_SIM` | `{ "simSlot": 1 \| 2 }` | Validates `simSlot in 1..2` and sets `preferredSimSlot` in `KeystoreSecureStorage` (invalid slots fail closed with `FAILED` ACK). | At-least-once lease delivery (`maxDeliveryAttempts = 5`). |
+| `WIPE_AND_REVOKE` | Optional `{ "reason": "..." }` | Wipes local SQLite database, revokes device tokens, and deletes Android Keystore ECDSA private key; `403 DEVICE_REVOKED` interceptor also wipes credentials immediately. | Atomically cancels prior open commands & revokes device server-side (`REVOKED`), `maxDeliveryAttempts = 1` (zero automatic destructive retries). |
+
+### Lifecycle, Leasing, Idempotency & Authorization Invariants:
+- **States:** `PENDING` -> `DELIVERED` (leased via `leaseToken` & `leaseExpiresAt`, default `60s`) -> `ACKNOWLEDGED` | `FAILED` | `EXPIRED` | `CANCELLED`.
+- **Safe Multi-Replica Claiming:** `POST /v1/devices/:id/telemetry` acquires locks in strict monotonic order (`devices` `FOR UPDATE` -> `device_commands` `FOR UPDATE SKIP LOCKED`) so concurrent polls across multiple API replicas never claim the same active command twice, while expired leases safely allow redelivery (until `expiresAt` or `maxDeliveryAttempts` exhaustion -> `FAILED`).
+- **Distinction Between Delivery and Execution:** Returning a command in `POST /v1/devices/:id/telemetry` only moves it to `DELIVERED`. Terminal completion requires explicit device acknowledgement via `POST /v1/devices/:id/commands/:commandId/ack` (with fallback `commandAcknowledgements` retry on next telemetry poll). Duplicate matching ACKs are idempotent (`idempotentReplay: true`); contradictory ACKs (`409 COMMAND_TERMINAL_CONFLICT`), undelivered ACKs (`409 COMMAND_NOT_DELIVERED`), stale leases (`409 STALE_COMMAND_LEASE`), cancelled (`409 COMMAND_CANCELLED`), and expired (`409 COMMAND_EXPIRED`) cannot reverse state.
+- **Queue Idempotency & RBAC:** `POST /v1/devices/:id/command` and `POST /v1/devices/:id/commands/:commandId/cancel` require Org `OWNER`/`ADMIN` membership and enforce `(organization_id, idempotency_key)` uniqueness with SHA-256 request fingerprinting (`409 IDEMPOTENCY_KEY_REUSE_CONFLICT` on parameter mismatch). Historical rows are preserved durably in PostgreSQL.
+- **Model B Outbound SMSGate Job Acquisition (`outbound_sms_jobs`):** Implemented via migration `20261116000000_android_outbound_sms_jobs` and `OutboundSmsJobService`:
+  - Companion devices claim leased jobs via `POST /v1/messaging/device-jobs/acquire` (`devices FOR UPDATE` -> `outbound_sms_jobs FOR UPDATE SKIP LOCKED`) filtered by active ready SIM slots (`1`/`2`).
+  - Before invoking Android `SmsManager`, `SmsGateRelayService` commits dispatch intent via `POST /v1/messaging/device-jobs/:jobId/dispatching` (`CLAIMED` -> `DISPATCHING`) and checks `OutboundSmsJobCoordinator.canInvokeSmsManager()`.
+  - `ACTION_SMS_SENT` reports `SUBMITTED` or `FAILED` via `POST /v1/messaging/device-jobs/:jobId/result`; `ACTION_SMS_DELIVERED` separately reports `DELIVERED`. Pending result reports survive process death in Keystore AES-256-GCM storage (`PendingSmsJobResultStore`) and flush automatically in `SmsGateRelayService` and `TelemetryWorker`.
+  - Expired `DISPATCHING` leases transition fail-closed to `UNCERTAIN` (never auto-requeued or refunded) via both worker sweep (`expireDispatchLeases`) and inline acquire sweeps, while pre-radio failures/expirations/cancellations issue exactly one credit refund.
+- **Known Limitations:** Command and outbound job history retention relies on PostgreSQL indexes without automated archival pruning yet.
 
 ---
 

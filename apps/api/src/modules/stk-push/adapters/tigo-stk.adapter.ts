@@ -1,23 +1,22 @@
 import {
   PaymentProvider,
   StkPushCallbackPayload,
-  formatTzs,
   toMinorUnits,
 } from '@brisksms/shared';
-import { StkInitiateParams, StkInitiateResult, StkPushAdapter } from './stk-adapter.interface.js';
+import {
+  buildFailClosedDispatchResult,
+  StkInitiateParams,
+  StkInitiateResult,
+  StkPushAdapter,
+} from './stk-adapter.interface.js';
 
 export class TigoStkAdapter implements StkPushAdapter {
   public readonly provider = PaymentProvider.MIXX;
+  public readonly isConfigured = false;
 
-  async initiatePush(params: StkInitiateParams): Promise<StkInitiateResult> {
-    const formattedAmount = formatTzs(params.amountCents);
-    const customerPrompt = `Tafadhali weka PIN yako ya Mixx (Tigo Pesa) kwenye simu yako kuthibitisha malipo ya ${formattedAmount}.`;
-
-    return {
-      success: true,
-      providerCheckoutId: `tigo_${params.checkoutId}`,
-      customerPrompt,
-    };
+  async initiatePush(_params: StkInitiateParams): Promise<StkInitiateResult> {
+    // No official Mixx by Yas (Tigo Pesa) B2B STK transport is configured.
+    return buildFailClosedDispatchResult(this.provider, 'UNCONFIGURED');
   }
 
   parseCallback(payload: any): StkPushCallbackPayload {

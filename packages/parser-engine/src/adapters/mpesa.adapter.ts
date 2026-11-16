@@ -6,16 +6,23 @@ export class MpesaAdapter extends BaseProviderAdapter {
   readonly provider = PaymentProvider.MPESA;
 
   canParse(senderAddress: string, body: string): boolean {
+    if (this.isPersonalPhoneSender(senderAddress)) {
+      return false;
+    }
     const address = senderAddress.toUpperCase();
     if (address.includes('MPESA') || address.includes('M-PESA') || address === 'VODACOM') {
       return true;
     }
-    // Pattern heuristic: Starts with typical M-Pesa code pattern (e.g. 10 alphanumeric chars)
-    return /^[A-Z0-9]{10}\s+(Imethibitishwa|Confirmed)\./i.test(body.trim());
+    return /^[A-Z0-9]{8,12}\s+(?:Imethibitishwa|Confirmed)\.\s*(?:Umepokea|You have received)/i.test(
+      body.trim(),
+    );
   }
 
   parse(body: string, defaultDate: Date = new Date()): ParsedPaymentResult | null {
     const text = this.cleanText(body);
+    if (!this.isIncomingCreditMessage(text)) {
+      return null;
+    }
 
     // Swahili Pattern:
     // QA12BC34DE Imethibitishwa. Umepokea Tsh50,000.00 kutoka kwa JOHN DOE 255754123456 tarehe 05/11/2026 saa 2:30 PM...
@@ -27,8 +34,8 @@ export class MpesaAdapter extends BaseProviderAdapter {
     }
     const reference = refMatch[1].toUpperCase();
 
-    // Extract Amount (e.g., Tsh50,000.00 or Tsh 50,000 or TZS 50,000)
-    const amountMatch = text.match(/(?:Tsh|TZS)\s*([\d,]+(?:\.\d{2})?)/i);
+    // Extract Amount (e.g., Tsh50,000.00, Tsh50,000.5, or Tsh 50,000)
+    const amountMatch = text.match(/(?:Tsh|TZS)\s*(\d[\d,]*(?:\.\d{1,2})?)/i);
     if (!amountMatch || !amountMatch[1]) {
       return null;
     }
@@ -74,7 +81,7 @@ export class MpesaAdapter extends BaseProviderAdapter {
       senderName,
       recipientAccount: null,
       customerMemo,
-      providerTimestamp: defaultDate,
+      providerTimestamp: this.extractTimestamp(text, defaultDate),
       rawText: body,
     };
   }

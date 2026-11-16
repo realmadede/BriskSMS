@@ -51,17 +51,71 @@ object PaymentProviderRegistry {
     private val AUTHORIZED_PACKAGES_SET: Set<String> = REGISTERED_APPS.map { it.packageName }.toSet()
 
     val FINANCIAL_SENDER_SHORTCODES = listOf(
-        "M-PESA", "MPESA", "MIXX", "TIGO PESA", "AIRTELMONEY", "HALOPESA", "CRDB", "NMB"
+        "M-PESA", "MPESA", "VODACOM", "MIXX", "TIGO PESA", "TIGOPESA", "TIGO",
+        "AIRTELMONEY", "AIRTEL", "HALOPESA", "HALOTEL", "CRDB", "NMB"
+    )
+
+    private val BLOCKED_PERSONAL_APPS = setOf(
+        "com.whatsapp",
+        "com.whatsapp.w4b",
+        "org.telegram.messenger",
+        "org.telegram.messenger.web",
+        "com.facebook.katana",
+        "com.facebook.orca",
+        "com.instagram.android",
+        "com.snapchat.android",
+        "com.twitter.android",
+        "com.google.android.gm",
+        "com.android.chrome",
+        "com.Slack"
+    )
+
+    private val PERSONAL_PHONE_PATTERN = Regex("^\\+?\\d[\\d\\s\\-().]{5,}$")
+    private val OUTGOING_TRANSFER_PATTERN = Regex(
+        "\\b(Umetuma|Umefanya malipo|Umelipa|Umetoa|Imetumwa|You have sent|You paid|Debit of|Withdrawn)\\b",
+        RegexOption.IGNORE_CASE
+    )
+    private val INCOMING_CREDIT_PATTERN = Regex(
+        "\\b(Umepokea|Umelipwa|You have received|have received|Credit of|Imethibitishwa|Confirmed)\\b",
+        RegexOption.IGNORE_CASE
     )
 
     fun isAuthorizedPackage(packageName: String): Boolean {
         return AUTHORIZED_PACKAGES_SET.contains(packageName)
     }
 
+    fun isBlockedPersonalPackage(packageName: String): Boolean {
+        return BLOCKED_PERSONAL_APPS.contains(packageName)
+    }
+
+    fun isPersonalPhoneSender(sender: String): Boolean {
+        val trimmed = sender.trim()
+        if (trimmed.isEmpty()) return true
+        return PERSONAL_PHONE_PATTERN.matches(trimmed)
+    }
+
     fun isFinancialShortcode(title: String, body: String): Boolean {
-        return FINANCIAL_SENDER_SHORTCODES.any { code ->
-            title.contains(code, ignoreCase = true) || body.contains(code, ignoreCase = true)
+        val cleanTitle = title.trim()
+        if (cleanTitle.isEmpty() || isPersonalPhoneSender(cleanTitle)) {
+            return false
         }
+        val matchesSender = FINANCIAL_SENDER_SHORTCODES.any { code ->
+            cleanTitle.equals(code, ignoreCase = true) || cleanTitle.contains(code, ignoreCase = true)
+        }
+        if (!matchesSender) {
+            return false
+        }
+        return !OUTGOING_TRANSFER_PATTERN.containsMatchIn(body)
+    }
+
+    fun isEligibleNotificationSource(packageName: String, title: String, body: String): Boolean {
+        if (isBlockedPersonalPackage(packageName)) {
+            return false
+        }
+        if (isAuthorizedPackage(packageName)) {
+            return !OUTGOING_TRANSFER_PATTERN.containsMatchIn(body)
+        }
+        return isFinancialShortcode(title, body) && INCOMING_CREDIT_PATTERN.containsMatchIn(body)
     }
 
     fun getAppInfo(packageName: String): RegisteredPaymentApp? {

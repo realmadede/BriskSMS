@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import {
   GatewayMode,
+  GatewayCredentials,
   CreditLedgerEntryType,
   SmsStatus,
   FeatureKey,
@@ -10,6 +11,10 @@ import {
   NormalizedDeliveryEvent,
   InsufficientCreditsError,
   BriskError,
+  encryptSecret,
+  decryptSecret,
+  isEncryptedSecret,
+  validateOutboundHttpUrl,
 } from '@brisksms/shared';
 import { sql, withTransaction, SqlExecutor } from '@brisksms/db';
 import {
@@ -165,7 +170,19 @@ export class MessagingService {
     const gatewayMode = dto.gatewayMode;
     let gatewayBaseUrl = account.gatewayBaseUrl;
     if (dto.gatewayBaseUrl !== undefined) {
-      gatewayBaseUrl = dto.gatewayBaseUrl;
+      try {
+        validateOutboundHttpUrl(dto.gatewayBaseUrl, {
+          allowPrivateEnvVar: 'ALLOW_PRIVATE_GATEWAY_NETWORKS',
+          allowHttpInProd: true,
+          label: 'Gateway URL',
+        });
+      } catch (err: unknown) {
+        throw new BriskError(
+          'MESSAGING_ERROR',
+          err instanceof Error ? err.message : 'Invalid gateway URL destination',
+        );
+      }
+      gatewayBaseUrl = dto.gatewayBaseUrl.trim();
     } else if (dto.gatewayMode === GatewayMode.MANAGED_GATEWAY && !account.gatewayBaseUrl) {
       gatewayBaseUrl = 'https://gateway.brisksms.com/api/3rdparty/v1';
     } else if (dto.gatewayMode === GatewayMode.EXTERNAL_RELAY && !account.gatewayBaseUrl) {
@@ -174,9 +191,9 @@ export class MessagingService {
 
     let authStored: string | null = account.encryptedApiToken;
     if (dto.auth) {
-      authStored = JSON.stringify(dto.auth);
+      authStored = encryptSecret(JSON.stringify(dto.auth));
     } else if (dto.apiToken !== undefined) {
-      authStored = dto.apiToken;
+      authStored = dto.apiToken ? encryptSecret(dto.apiToken) : null;
     }
 
     const defaultSimSlot = dto.defaultSimSlot !== undefined ? dto.defaultSimSlot : account.defaultSimSlot;
@@ -328,10 +345,10 @@ export class MessagingService {
 
       await tx`
         INSERT INTO messaging_credit_ledger (
-          id, organization_id, entry_type, amount_credits, balance_after, reference_id, created_at
+          id, organization_id, entry_type, amount_credits, balance_after, reserved_after, reference_id, created_at
         ) VALUES (
           ${randomUUID()}, ${organizationId}, ${CreditLedgerEntryType.RESERVATION},
-          ${amountCredits}, ${newBalance}, ${referenceId ?? null}, ${now}
+          ${amountCredits}, ${newBalance}, ${newReserved}, ${referenceId ?? null}, ${now}
         )
       `;
 
@@ -380,10 +397,10 @@ export class MessagingService {
 
       await tx`
         INSERT INTO messaging_credit_ledger (
-          id, organization_id, entry_type, amount_credits, balance_after, reference_id, created_at
+          id, organization_id, entry_type, amount_credits, balance_after, reserved_after, reference_id, created_at
         ) VALUES (
           ${randomUUID()}, ${organizationId}, ${CreditLedgerEntryType.RELEASE},
-          ${amountCredits}, ${newBalance}, ${referenceId ?? null}, ${now}
+          ${amountCredits}, ${newBalance}, ${newReserved}, ${referenceId ?? null}, ${now}
         )
       `;
 
@@ -628,10 +645,10 @@ export class MessagingService {
 
       await tx`
         INSERT INTO messaging_credit_ledger (
-          id, organization_id, entry_type, amount_credits, balance_after, reference_id, created_at
+          id, organization_id, entry_type, amount_credits, balance_after, reserved_after, reference_id, created_at
         ) VALUES (
           ${randomUUID()}, ${organizationId}, ${CreditLedgerEntryType.RESERVATION},
-          ${totalCost}, ${newBalance}, ${`campaign_${campaignId}`}, ${now}
+          ${totalCost}, ${newBalance}, ${newReserved}, ${`campaign_${campaignId}`}, ${now}
         )
       `;
 
@@ -895,13 +912,29 @@ export class MessagingService {
     const claimed = await this.claimDispatch(record.id);
     if (!claimed) return null;
 
+    let rawToken = isEncryptedSecret(account.encryptedApiToken)
+      ? decryptSecret(account.encryptedApiToken)
+      : account.encryptedApiToken;
+    let parsedAuth: GatewayCredentials['auth'] | string = rawToken;
+    if (typeof rawToken === 'string' && rawToken.trim().startsWith('{')) {
+      try {
+        const obj = JSON.parse(rawToken);
+        if (obj && (obj.type === 'BASIC' || obj.type === 'BEARER')) {
+          parsedAuth = obj;
+        }
+      } catch {
+        // Keep raw token string
+      }
+    }
+
     let result: MessageDispatchResult;
     try {
       result = await this.provider.sendMessage(
         {
           mode: account.gatewayMode,
           baseUrl: account.gatewayBaseUrl || 'https://gateway.brisksms.com/api/v1',
-          apiToken: account.encryptedApiToken,
+          apiToken: typeof rawToken === 'string' ? rawToken : String(rawToken),
+          auth: typeof parsedAuth === 'object' ? parsedAuth : undefined,
           defaultSimSlot: account.defaultSimSlot,
         },
         {
