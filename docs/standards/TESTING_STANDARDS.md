@@ -24,8 +24,8 @@
 
 ## 2. Unit Testing Standards
 
-1. **Parser Test Corpus (`packages/parser-engine/test/engine.test.ts` & Android `ProviderNotificationParserTest.kt`):**
-   - Validate anonymized provider notifications across Vodacom M-Pesa, Mixx by Yas, Airtel Money, HaloPesa, and CRDB Bank.
+1. **Parser Test Corpus (`packages/parser-engine/test/engine.test.ts` & Android `PaymentProviderRegistryTest.kt`):**
+   - Validate anonymized provider notifications across Vodacom M-Pesa, Mixx by Yas, Airtel Money, HaloPesa, and CRDB Bank on the server `ParserEngine`, plus Android source-eligibility filtering.
    - Cover standard transactions, Lipa/Paybill memos, single-decimal amounts, personal-phone spoofing rejection, outgoing transfer rejection, malformed strings, and stable deduplication hashing.
 2. **Financial & Security Primitives:**
    - Cover `toMinorUnits` exact decimal parsing, Tanzanian phone normalization (`061`/`077` included), AES-256-GCM encryption/decryption, SSRF URL blocking (`validateOutboundHttpUrl`), and Android Proof-of-Possession transcripts (`DevicePairingProofOfPossessionTest.kt`).

@@ -121,11 +121,11 @@ BriskSMS/
 │       │   ├── data/local/              # Room SQLite DB (`BriskDatabase`, `EvidenceDao`, entities)
 │       │   ├── security/                # KeystoreManager (EC P-256), DevicePairingCoordinator/Protocol
 │       │   ├── service/                 # BriskNotificationListenerService (Mode 1 Play-compliant)
-│       │   ├── payment/                 # ProviderNotificationParser, EvidenceEncryptor, provider whitelist
+│       │   ├── payment/                 # EvidenceEncryptor, provider whitelist (`PaymentProviderRegistry`)
 │       │   ├── messaging/               # SmsDispatcher, SimManager, SmsGateRelayService, OutboundSmsJobCoordinator
 │       │   ├── ui/                      # Jetpack Compose screens + Glisse theme tokens
 │       │   └── worker/                  # WorkManager upload/telemetry workers, DeviceCommandProcessor, BootCompletedReceiver
-│       └── app/src/test/                # 11 JVM unit test suites (52 @Test methods)
+│       └── app/src/test/                # 10 JVM unit test suites (41 @Test methods)
 │
 └── packages/
     ├── shared/                          # DTOs, enums (UserRole, TransactionState, ApiKeyScope),
@@ -198,7 +198,7 @@ Play-Store compliant **Mode 1** relay architecture (no `READ_SMS`/`RECEIVE_SMS` 
 [Android Notification Shade: Official M-Pesa / Mixx / Airtel / HaloPesa / CRDB / NMB Apps & SMS]
                      |
                      v  (BriskNotificationListenerService + PaymentProviderRegistry whitelist)
-[ProviderNotificationParser & EvidenceEncryptor]
+[PaymentProviderRegistry & EvidenceEncryptor]
   - Discards non-financial personal notifications immediately
   - Encrypts raw payload with Keystore AES-256-GCM (`bsk_enc_v1:...`)
                      |

@@ -127,9 +127,9 @@ Phase 8: External Carrier Onboarding, Live Staging, Penetration Testing & Produc
 - **Implemented in `apps/android/`:**
   - Hardware-backed EC P-256 `KeystoreManager` + Keystore AES-256-GCM `KeystoreSecureStorage` and `EvidenceEncryptor`.
   - Room SQLite offline queues (`BriskDatabase`, `OfflineEvidenceEntity`, `SmsDispatchEntity`) + `PendingSmsJobResultStore`.
-  - Play-Store compliant Mode 1 `BriskNotificationListenerService` with strict package whitelist (`PaymentProviderRegistry`) and `ProviderNotificationParser`.
+  - Play-Store compliant Mode 1 `BriskNotificationListenerService` with strict package whitelist (`PaymentProviderRegistry`) and hardware Keystore AES-256-GCM encryption (`EvidenceEncryptor`); carrier regex parsing remains exclusively server-side in `packages/parser-engine`.
   - Foreground relay `SmsGateRelayService`, `SimManager` (400/day SIM cap failover + pacing), `OutboundSmsJobCoordinator`, `BootCompletedReceiver`, `EvidenceUploadWorker`, `TelemetryWorker`, `DeviceCommandProcessor`, and Jetpack Compose screens (`PairingScreen` with ML Kit QR scanner, `OverviewScreen`, `DashboardScreen`, `PaymentIntelligenceScreen`, `BulkMessagingScreen`, `DeviceHealthScreen`, `SettingsScreen`).
-  - Verified with **11 JVM unit test classes (52 `@Test` methods)**, Kotlin debug compilation, and `assembleDebug` APK generation under Gradle `8.14.3` + Temurin JDK `17`.
+  - Verified with **10 JVM unit test classes (41 `@Test` methods)**, Kotlin debug compilation, `assembleDebug`, and R8 Full Mode `assembleRelease` APK generation under Gradle `8.14.3` + Temurin JDK `17`.
 - **Remaining / Deferred:**
   - Android instrumented on-device tests (e.g., Airplane Mode offline resilience test on hardware) and physical Tanzanian SIM radio/battery-exemption validation.
   - Mode 2 Enterprise Direct APK (`RECEIVE_SMS` `BroadcastReceiver`) — intentionally not included in the Play-Store compliant base build.

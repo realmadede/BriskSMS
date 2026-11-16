@@ -1,8 +1,27 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("kotlin-kapt")
 }
+
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+val keystoreProperties = Properties().apply {
+    if (keystorePropertiesFile.exists()) {
+        keystorePropertiesFile.inputStream().use(::load)
+    }
+}
+
+val releaseStoreFilePath = keystoreProperties.getProperty("storeFile") ?: System.getenv("BRISKSMS_KEYSTORE_PATH")
+val releaseStorePassword = keystoreProperties.getProperty("storePassword") ?: System.getenv("BRISKSMS_KEYSTORE_PASSWORD")
+val releaseKeyAlias = keystoreProperties.getProperty("keyAlias") ?: System.getenv("BRISKSMS_KEY_ALIAS")
+val releaseKeyPassword = keystoreProperties.getProperty("keyPassword") ?: System.getenv("BRISKSMS_KEY_PASSWORD")
+val hasReleaseSigning = !releaseStoreFilePath.isNullOrBlank() &&
+    !releaseStorePassword.isNullOrBlank() &&
+    !releaseKeyAlias.isNullOrBlank() &&
+    !releaseKeyPassword.isNullOrBlank() &&
+    file(releaseStoreFilePath).exists()
 
 android {
     namespace = "tz.co.brisksms"
@@ -21,9 +40,24 @@ android {
         }
     }
 
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(releaseStoreFilePath!!)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
+            isShrinkResources = true
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

@@ -39,7 +39,7 @@ flowchart TD
         GSMModem["GSM Radio Baseband"]
         ProviderApp["M-Pesa / Mixx Official App"]
         Listener["BriskNotificationListenerService<br/>(Play Store Sanctioned)"]
-        Parser["ProviderNotificationParser<br/>(Regex + Normalization)"]
+        Filter["PaymentProviderRegistry + EvidenceEncryptor<br/>(Source Whitelist + AES-256-GCM)"]
         Storage[("Room SQLite Encrypted DB<br/>(AES-256-GCM)")]
         Worker["WorkManager Forwarding Engine"]
     end

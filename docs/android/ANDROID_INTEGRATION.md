@@ -79,11 +79,10 @@ These capabilities have separate services, Room databases/tables, queues, permis
     - `com.nmb.mobile`, `com.nmb.direct`
 - **Zero Personal Message Leakage:** Personal SMS, chats (WhatsApp, Telegram), and personal banking notifications outside the whitelist are immediately dropped in memory.
 
-### 3.2 Client-Side Provider Normalization
-- **Engine:** `tz.co.brisksms.payment.parser.ProviderNotificationParser`
-- Parses transaction reference, sender phone number, sender name, and currency amounts in Tanzanian Shilling cents (`amountCents`).
-- Normalizes phone numbers to standard E.164 (`+255...`).
-- Zero automated guesswork: if regex pattern match is ambiguous, parser returns `null` or defers to server-side parser engine.
+### 3.2 Purpose-Limited Relay & Authoritative Server Parsing
+- **Filter:** `tz.co.brisksms.payment.provider.PaymentProviderRegistry`
+- Filters strictly for authorized Tanzanian financial app packages and carrier shortcodes while rejecting outgoing transfer notifications and personal chats/SMS in memory.
+- **Zero Client-Side Regex Exposure:** Authoritative carrier regex extraction and E.164/amount normalization occur exclusively on the backend in `packages/parser-engine`, so proprietary carrier parsing patterns are never shipped inside the APK.
 
 ### 3.3 Local Evidence Encryption
 - **Engine:** `tz.co.brisksms.payment.crypto.EvidenceEncryptor`
@@ -391,8 +390,7 @@ Covers:
 
 ### 11.2 Android Unit Tests
 Located in `apps/android/app/src/test/java/tz/co/brisksms/`:
-- `ProviderNotificationParserTest`: Comprehensive tests for Vodacom M-Pesa, Mixx by Yas, Airtel Money, CRDB Bank, and personal message filtering.
-- `PaymentProviderRegistryTest`: Validates verified Google Play Store packages vs provisional aliases and shortcode filtering.
+- `PaymentProviderRegistryTest`: Validates verified Google Play Store packages vs provisional aliases, incoming credit filtering, and shortcode/personal-sender filtering.
 - `EvidenceEncryptionLogicTest`: Validates authenticated AES-256-GCM encryption, decryption, 12-byte IV uniqueness, and authentication-tag failure on tampered payloads.
 - `SmsGateProtocolTest`: Validates official SMSGate 3rdparty v1 schema formatting, lifecycle state mapping (`sms:sent`, `sms:delivered`, `sms:failed`), and ambiguous retry prevention.
 - `SmsDispatcherLogicTest`: Validates state machine separation between radio submission (`SUBMITTED`) and handset delivery (`DELIVERED`), idempotency keys, and multipart message thresholds.

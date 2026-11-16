@@ -87,9 +87,12 @@ id_ed25519*
 # Android Build & Local Configuration
 apps/android/.gradle/
 apps/android/build/
+apps/android/app/build/
 .gradle/
 *.iml
 local.properties
+keystore.properties
+mapping.txt
 captures/
 .externalNativeBuild
 .cxx
