@@ -167,14 +167,20 @@ class SmsGateRelayService : Service() {
         }
 
         val notification = buildGatewayNotification()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Unable to promote SmsGateRelayService to foreground: ${e.message}", e)
+            stopSelf()
+            return
         }
 
         if (relayJob?.isActive != true) {
@@ -412,7 +418,7 @@ class SmsGateRelayService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("BriskSMS Cellular Gateway")
             .setContentText("$carrierSummary | Mode: $modeLabel")
-            .setSmallIcon(android.R.drawable.stat_notify_chat)
+            .setSmallIcon(tz.co.brisksms.R.drawable.ic_brisk_notification)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()

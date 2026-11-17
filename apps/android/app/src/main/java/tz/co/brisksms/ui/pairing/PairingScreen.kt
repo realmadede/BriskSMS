@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -47,7 +48,12 @@ object PairingUrlValidator {
     fun normalizeAndValidateHttpsBaseUrl(rawUrl: String): String {
         val trimmed = rawUrl.trim().trimEnd('/').removeSuffix("/v1")
         val uri = java.net.URI.create(trimmed)
-        if (!"https".equals(uri.scheme, ignoreCase = true) || uri.host.isNullOrBlank()) {
+        val host = uri.host?.lowercase() ?: ""
+        val isHttps = "https".equals(uri.scheme, ignoreCase = true)
+        val isLocalDebugLoopback = tz.co.brisksms.BuildConfig.DEBUG &&
+            "http".equals(uri.scheme, ignoreCase = true) &&
+            (host == "127.0.0.1" || host == "localhost" || host == "10.0.2.2")
+        if ((!isHttps && !isLocalDebugLoopback) || host.isBlank()) {
             throw IllegalArgumentException("Server endpoint must use a valid HTTPS URL (cleartext HTTP is prohibited).")
         }
         return trimmed
@@ -175,7 +181,7 @@ fun PairingScreen(
                         deviceModel = Build.MODEL,
                         manufacturer = Build.MANUFACTURER,
                         androidVersion = Build.VERSION.RELEASE,
-                        appVersion = "1.0.0"
+                        appVersion = tz.co.brisksms.BuildConfig.VERSION_NAME
                     )
                 }
 
@@ -216,6 +222,9 @@ fun PairingScreen(
 
     // Full-screen camera viewfinder if active
     if (isScanningActive) {
+        BackHandler(enabled = true) {
+            isScanningActive = false
+        }
         QrCameraScanner(
             onQrScanned = { scannedPayload ->
                 isScanningActive = false
@@ -233,7 +242,9 @@ fun PairingScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(BriskColors.CanvasBaseLight)
+            .background(BriskColors.canvasBase())
+            .systemBarsPadding()
+            .imePadding()
             .padding(24.dp)
             .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally,

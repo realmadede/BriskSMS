@@ -1,4 +1,5 @@
 import net from 'node:net';
+import tls from 'node:tls';
 import { existsSync } from 'node:fs';
 
 export class RedisUnavailableError extends Error {
@@ -20,6 +21,7 @@ export interface ResolvedRedisConfig {
   port?: number;
   password?: string;
   db?: number;
+  tls?: boolean;
 }
 
 export function resolveRedisConfig(customUrl?: string): ResolvedRedisConfig {
@@ -43,6 +45,7 @@ export function resolveRedisConfig(customUrl?: string): ResolvedRedisConfig {
 
   const defaultUnixSocket = '/tmp/brisksms-redis/redis.sock';
   if (
+    !customUrl &&
     (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1') &&
     process.env.FORCE_TCP_REDIS !== 'true' &&
     existsSync(defaultUnixSocket)
@@ -54,8 +57,11 @@ export function resolveRedisConfig(customUrl?: string): ResolvedRedisConfig {
     mode: 'tcp',
     host: parsed.hostname || 'localhost',
     port: parsed.port ? parseInt(parsed.port, 10) : 6379,
-    password: parsed.password ? decodeURIComponent(parsed.password) : undefined,
+    password: parsed.password
+      ? decodeURIComponent(parsed.password)
+      : process.env.REDIS_PASSWORD || undefined,
     db: parsed.pathname && parsed.pathname !== '/' ? parseInt(parsed.pathname.slice(1), 10) : 0,
+    tls: parsed.protocol === 'rediss:',
   };
 }
 
@@ -171,7 +177,9 @@ export class BriskRedisClient {
       const sock =
         cfg.mode === 'unix'
           ? net.createConnection({ path: cfg.socketPath! })
-          : net.createConnection({ host: cfg.host!, port: cfg.port! });
+          : cfg.tls
+            ? tls.connect({ host: cfg.host!, port: cfg.port!, servername: cfg.host! })
+            : net.createConnection({ host: cfg.host!, port: cfg.port! });
 
       const onError = (err: Error) => {
         sock.destroy();
@@ -256,9 +264,18 @@ export class BriskRedisClient {
     ...args: Array<string | number>
   ): Promise<T> {
     return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new RedisUnavailableError(`Redis command timed out: ${String(args[0] || '')}`));
+      }, 10_000);
       this.pendingQueue.push({
-        resolve: (val) => resolve(val as unknown as T),
-        reject,
+        resolve: (val) => {
+          clearTimeout(timer);
+          resolve(val as unknown as T);
+        },
+        reject: (err) => {
+          clearTimeout(timer);
+          reject(err);
+        },
       });
       sock.write(encodeRespCommand(args));
     });
@@ -266,13 +283,7 @@ export class BriskRedisClient {
 
   async sendCommand<T = RespValue>(...args: Array<string | number>): Promise<T> {
     const sock = await this.getSocket();
-    return new Promise<T>((resolve, reject) => {
-      this.pendingQueue.push({
-        resolve: (val) => resolve(val as unknown as T),
-        reject,
-      });
-      sock.write(encodeRespCommand(args));
-    });
+    return this.sendCommandOnSocket<T>(sock, ...args);
   }
 
   async ping(): Promise<string> {

@@ -979,7 +979,7 @@ describe('PaymentReferenceClaimService — Unified Global Claim Boundary', () =>
             DELETE FROM "organizations" WHERE "id" = ${orgA}
           `;
         },
-        /violates foreign key constraint/i,
+        /violates (?:RESTRICT setting of )?foreign key constraint/i,
       );
     });
   });
@@ -1642,13 +1642,13 @@ describe('PaymentReferenceClaimService — Unified Global Claim Boundary', () =>
       // Cannot delete normalized_payments referenced by claim
       await assert.rejects(
         () => sql`DELETE FROM "normalized_payments" WHERE "id" = ${payA}`,
-        /violates foreign key constraint/i,
+        /violates (?:RESTRICT setting of )?foreign key constraint/i,
       );
 
       // Cannot delete payment_reference_claims protected by RESTRICT on claim_events
       await assert.rejects(
         () => sql`DELETE FROM "payment_reference_claims" WHERE "id" = ${acq.claimId}`,
-        /violates foreign key constraint/i,
+        /violates (?:RESTRICT setting of )?foreign key constraint/i,
       );
 
       // Move to DISPUTED -> release -> verify supplementary blocked on RELEASED

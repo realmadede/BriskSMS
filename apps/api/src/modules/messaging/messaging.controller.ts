@@ -14,10 +14,12 @@ import { outboundSmsJobService } from './outbound-sms-job.service.js';
 import {
   authenticate,
   authenticateDevice,
+  assertHumanSessionAuth,
   assertOAuthScope,
   resolveAuthorizedTenantOrgId,
 } from '../../core/guards.js';
 import { ApiKeyService } from '../developer/api-key.service.js';
+import { authService } from '../auth/auth.service.js';
 import { dbStore } from '../../core/store.js';
 
 const smsgateProvider = new SmsGateProvider();
@@ -328,16 +330,20 @@ export function registerMessagingRoutes(router: Router): void {
       requiredApiKeyScopes: [ApiKeyScope.SMS_SEND],
     });
 
-    if (!body.to || !body.content) {
-      throw new HttpException(400, 'VALIDATION_ERROR', 'to (recipient phone) and content (message text) are required');
+    await authService.checkRateLimit(`msg_send_${orgId}`, 120, 60_000);
+
+    const recipientTo = body.to ?? body.recipientPhone ?? body.recipient;
+    const messageContent = body.content ?? body.message;
+    if (!recipientTo || !messageContent) {
+      throw new HttpException(400, 'VALIDATION_ERROR', 'to (or recipientPhone) and content (or message) are required');
     }
 
     const idempotencyKey = extractMessagingIdempotencyKey(req, body);
 
     if (body.deviceId || body.deliveryChannel === 'ANDROID_COMPANION') {
       const enqueued = await outboundSmsJobService.enqueueJob(orgId, {
-        to: String(body.to),
-        content: String(body.content),
+        to: String(recipientTo),
+        content: String(messageContent),
         simSlot: body.simSlot !== undefined ? Number(body.simSlot) : undefined,
         deviceId: body.deviceId ? String(body.deviceId) : undefined,
         isPromotional: Boolean(body.isPromotional),
@@ -359,8 +365,8 @@ export function registerMessagingRoutes(router: Router): void {
     }
 
     const messageRecord = await messagingService.sendSingleMessage(orgId, {
-      to: String(body.to),
-      content: String(body.content),
+      to: String(recipientTo),
+      content: String(messageContent),
       simSlot: body.simSlot ? Number(body.simSlot) : 1,
       idempotencyKey,
     });
@@ -380,6 +386,7 @@ export function registerMessagingRoutes(router: Router): void {
       requiredApiKeyScopes: [ApiKeyScope.SMS_SEND],
       allowedUserRoles: [UserRole.OWNER, UserRole.ADMIN, UserRole.DEVELOPER],
     });
+    await authService.checkRateLimit(`msg_devjob_${organizationId}`, 120, 60_000);
     const idempotencyKey = extractMessagingIdempotencyKey(req, body);
 
     if (!body.to || !body.content) {
@@ -545,6 +552,8 @@ export function registerMessagingRoutes(router: Router): void {
       throw new HttpException(403, 'FORBIDDEN', 'You are not a member of this organization');
     }
 
+    await authService.checkRateLimit(`msg_campaign_${orgId}`, 30, 60_000);
+
     if ((!body.name && !body.title) || (!body.templateText && !body.messageTemplate) || !body.recipients || !Array.isArray(body.recipients)) {
       throw new HttpException(400, 'VALIDATION_ERROR', 'name, templateText, and recipients array are required');
     }
@@ -566,6 +575,62 @@ export function registerMessagingRoutes(router: Router): void {
     };
   });
 
+  // 3a. List Bulk SMS Campaigns
+  router.get('/v1/messaging/campaigns', async (req: RouteRequest): Promise<ApiResponse> => {
+    const { organizationId } = await resolveMessagingAuthContext(req, {
+      suppliedOrgId: req.query.organizationId,
+      requiredApiKeyScopes: [ApiKeyScope.SMS_READ, ApiKeyScope.SMS_SEND],
+    });
+    const campaigns = await messagingService.listCampaigns(organizationId);
+    return {
+      success: true,
+      data: { campaigns },
+    };
+  });
+
+  // 3b. Inspect Specific Bulk SMS Campaign
+  router.get('/v1/messaging/campaigns/:id', async (req: RouteRequest): Promise<ApiResponse> => {
+    const { organizationId } = await resolveMessagingAuthContext(req, {
+      suppliedOrgId: req.query.organizationId,
+      requiredApiKeyScopes: [ApiKeyScope.SMS_READ, ApiKeyScope.SMS_SEND],
+    });
+    const details = await messagingService.getCampaignById(organizationId, req.params.id || '');
+    return {
+      success: true,
+      data: details,
+    };
+  });
+
+  // 3c. Enqueue/Trigger Campaign Dispatch
+  router.post('/v1/messaging/campaigns/:id/dispatch', async (req: RouteRequest): Promise<ApiResponse> => {
+    const body = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, any>;
+    const { organizationId } = await resolveMessagingAuthContext(req, {
+      suppliedOrgId: body.organizationId || req.query.organizationId,
+      requiredApiKeyScopes: [ApiKeyScope.SMS_SEND],
+      allowedUserRoles: [UserRole.OWNER, UserRole.ADMIN, UserRole.DEVELOPER],
+    });
+    const result = await messagingService.enqueueCampaignDispatch(organizationId, req.params.id || '');
+    return {
+      success: true,
+      data: result,
+    };
+  });
+
+  // 3d. Cancel Scheduled/Draft Campaign and Release Reserved Credits
+  router.post('/v1/messaging/campaigns/:id/cancel', async (req: RouteRequest): Promise<ApiResponse> => {
+    const body = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, any>;
+    const { organizationId } = await resolveMessagingAuthContext(req, {
+      suppliedOrgId: body.organizationId || req.query.organizationId,
+      requiredApiKeyScopes: [ApiKeyScope.SMS_SEND],
+      allowedUserRoles: [UserRole.OWNER, UserRole.ADMIN, UserRole.DEVELOPER],
+    });
+    const campaign = await messagingService.cancelCampaign(organizationId, req.params.id || '');
+    return {
+      success: true,
+      data: { campaign },
+    };
+  });
+
   // 4. Query Credit Ledger History
   router.get('/v1/messaging/ledger', async (req: RouteRequest): Promise<ApiResponse> => {
     await authenticate(req);
@@ -581,6 +646,93 @@ export function registerMessagingRoutes(router: Router): void {
     return {
       success: true,
       data: { entries },
+    };
+  });
+
+  // 5. Update SMSGate Gateway Mode & Endpoint Configuration
+  router.put('/v1/messaging/gateway-config', async (req: RouteRequest): Promise<ApiResponse> => {
+    await authenticate(req);
+    assertHumanSessionAuth(req, 'updating gateway configuration');
+    const userId = req.context.userId!;
+    const body = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, any>;
+    const orgId = resolveAuthorizedTenantOrgId(req, body.organizationId);
+    const membership = await dbStore.getMembership(orgId, userId);
+    if (!membership || ![UserRole.OWNER, UserRole.ADMIN, UserRole.DEVELOPER].includes(membership.role)) {
+      throw new HttpException(403, 'INSUFFICIENT_PERMISSIONS', 'Only Owners, Admins, and Developers can update gateway configuration');
+    }
+
+    const updated = await messagingService.updateGatewayConfig(orgId, {
+      gatewayMode: body.gatewayMode,
+      gatewayBaseUrl: body.gatewayBaseUrl,
+      apiToken: body.apiToken,
+      defaultSimSlot: body.defaultSimSlot !== undefined ? Number(body.defaultSimSlot) : undefined,
+    });
+    return {
+      success: true,
+      data: { account: updated },
+    };
+  });
+
+  // 6. Provision or Rotate Device SMSGate Webhook Signing Key
+  router.post('/v1/messaging/signing-keys/device', async (req: RouteRequest): Promise<ApiResponse> => {
+    await authenticate(req);
+    assertHumanSessionAuth(req, 'provisioning device SMSGate signing keys');
+    const userId = req.context.userId!;
+    const body = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, any>;
+    const orgId = resolveAuthorizedTenantOrgId(req, body.organizationId);
+    const membership = await dbStore.getMembership(orgId, userId);
+    if (!membership || ![UserRole.OWNER, UserRole.ADMIN, UserRole.DEVELOPER].includes(membership.role)) {
+      throw new HttpException(403, 'INSUFFICIENT_PERMISSIONS', 'Only Owners, Admins, and Developers can manage SMSGate signing keys');
+    }
+
+    const deviceId = typeof body.deviceId === 'string' ? body.deviceId.trim() : '';
+    const secret = typeof body.secret === 'string' ? body.secret.trim() : '';
+    const rotate = Boolean(body.rotate);
+    if (!deviceId || !secret || secret.length < 16) {
+      throw new HttpException(400, 'VALIDATION_ERROR', 'deviceId and secret (at least 16 chars) are required');
+    }
+
+    if (rotate) {
+      await smsGateKeyService.rotateDeviceSigningKey(orgId, deviceId, secret, userId);
+    } else {
+      await smsGateKeyService.setDeviceSigningKey(orgId, deviceId, secret, userId);
+    }
+
+    return {
+      success: true,
+      statusCode: 201,
+      data: { organizationId: orgId, deviceId, provisioned: true, rotated: rotate },
+    };
+  });
+
+  // 7. Provision or Rotate Gateway SMSGate Webhook Signing Key
+  router.post('/v1/messaging/signing-keys/gateway', async (req: RouteRequest): Promise<ApiResponse> => {
+    await authenticate(req);
+    assertHumanSessionAuth(req, 'provisioning gateway SMSGate signing keys');
+    const userId = req.context.userId!;
+    const body = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, any>;
+    const orgId = resolveAuthorizedTenantOrgId(req, body.organizationId);
+    const membership = await dbStore.getMembership(orgId, userId);
+    if (!membership || ![UserRole.OWNER, UserRole.ADMIN, UserRole.DEVELOPER].includes(membership.role)) {
+      throw new HttpException(403, 'INSUFFICIENT_PERMISSIONS', 'Only Owners, Admins, and Developers can manage SMSGate signing keys');
+    }
+
+    const secret = typeof body.secret === 'string' ? body.secret.trim() : '';
+    const rotate = Boolean(body.rotate);
+    if (!secret || secret.length < 16) {
+      throw new HttpException(400, 'VALIDATION_ERROR', 'secret (at least 16 chars) is required');
+    }
+
+    if (rotate) {
+      await smsGateKeyService.rotateGatewaySigningKey(orgId, secret, userId);
+    } else {
+      await smsGateKeyService.setGatewaySigningKey(orgId, secret, userId);
+    }
+
+    return {
+      success: true,
+      statusCode: 201,
+      data: { organizationId: orgId, gatewayDefault: true, provisioned: true, rotated: rotate },
     };
   });
 }

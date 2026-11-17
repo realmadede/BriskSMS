@@ -150,7 +150,7 @@ fun SettingsScreen(
                 ) {
                     Text(text = "Companion Version", fontSize = 13.sp, color = BriskColors.TextSecondaryLight)
                     Text(
-                        text = "1.0.0",
+                        text = tz.co.brisksms.BuildConfig.VERSION_NAME,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = BriskColors.TextPrimaryLight
@@ -244,6 +244,62 @@ fun SettingsScreen(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(text = "Battery Optimization Exemption", fontSize = 12.sp)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Support, Privacy & Terms of Service
+        Text(
+            text = "Support & Legal",
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            color = BriskColors.textPrimary(),
+            modifier = Modifier.padding(bottom = 6.dp)
+        )
+
+        Card(
+            shape = BriskShapes.large,
+            colors = CardDefaults.cardColors(containerColor = BriskColors.cardContainer()),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                OutlinedButton(
+                    onClick = {
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://brisksms.co.tz/#privacy"))
+                        runCatching { context.startActivity(intent) }
+                    },
+                    shape = BriskShapes.medium,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(text = "Privacy Policy (PDPA Tanzania)", fontSize = 12.sp)
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedButton(
+                    onClick = {
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://brisksms.co.tz/#terms"))
+                        runCatching { context.startActivity(intent) }
+                    },
+                    shape = BriskShapes.medium,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(text = "Terms of Service & TCRA Rules", fontSize = 12.sp)
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedButton(
+                    onClick = {
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("mailto:enterprise@brisksms.co.tz"))
+                        runCatching { context.startActivity(intent) }
+                    },
+                    shape = BriskShapes.medium,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(text = "Contact Enterprise Support", fontSize = 12.sp)
                 }
             }
         }

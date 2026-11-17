@@ -1,6 +1,6 @@
 import { RouteRequest, HttpException } from './http.js';
 import { hashToken, verifyJwt } from './crypto.js';
-import { ApiKeyScope, DeviceStatus, UserRole } from '@brisksms/shared';
+import { ApiKeyScope, DeviceStatus } from '@brisksms/shared';
 import { sql, redisClient } from '@brisksms/db';
 import { dbStore, DeviceRecord, mapDeviceRow } from './store.js';
 import { OAuthService } from '../modules/oauth/oauth.service.js';
@@ -19,14 +19,11 @@ export const tokenBlacklist = new Set<string>();
 const syncedBlacklists = new WeakSet<Set<string>>();
 const activeSyncPromises = new WeakMap<Set<string>, Promise<number>>();
 
-export let isRevocationSyncReady = false;
-
 export function isRevocationReady(targetBlacklist: Set<string> = tokenBlacklist): boolean {
   return syncedBlacklists.has(targetBlacklist);
 }
 
 export function setRevocationSyncReady(ready: boolean): void {
-  isRevocationSyncReady = ready;
   if (ready) {
     syncedBlacklists.add(tokenBlacklist);
   } else {
@@ -54,9 +51,6 @@ export async function syncTokenBlacklistFromDb(targetBlacklist: Set<string> = to
     // Redis best-effort during database sync
   }
   syncedBlacklists.add(targetBlacklist);
-  if (targetBlacklist === tokenBlacklist) {
-    isRevocationSyncReady = true;
-  }
   return rows.length;
 }
 
@@ -274,26 +268,6 @@ export async function authenticate(req: RouteRequest): Promise<void> {
   // Enforce CSRF protection for cookie-authenticated browser requests
   if (authType === 'cookie') {
     validateCsrf(req);
-  }
-}
-
-/**
- * Enforces that user is authenticated and has required role
- */
-export async function authorizeRole(req: RouteRequest, allowedRoles: UserRole[]): Promise<void> {
-  await authenticate(req);
-
-  const userRole = req.context.role as UserRole | undefined;
-  if (!userRole) {
-    throw new HttpException(403, 'FORBIDDEN', 'No role assigned in organization context');
-  }
-
-  if (!allowedRoles.includes(userRole)) {
-    throw new HttpException(
-      403,
-      'INSUFFICIENT_PERMISSIONS',
-      `Action requires one of the following roles: ${allowedRoles.join(', ')}`,
-    );
   }
 }
 

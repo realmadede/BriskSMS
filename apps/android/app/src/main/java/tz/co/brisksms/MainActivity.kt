@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
@@ -67,11 +68,15 @@ class MainActivity : ComponentActivity() {
                     }
                 )
             } else {
+                BackHandler(enabled = currentTab != NavigationTab.OVERVIEW) {
+                    currentTab = NavigationTab.OVERVIEW
+                }
+
                 Scaffold(
                     bottomBar = {
                         NavigationBar(
-                            containerColor = BriskColors.SurfaceSolidLight,
-                            contentColor = BriskColors.TextPrimaryLight,
+                            containerColor = BriskColors.surfaceSolid(),
+                            contentColor = BriskColors.textPrimary(),
                             tonalElevation = 6.dp
                         ) {
                             NavigationTab.values().forEach { tab ->
@@ -90,7 +95,7 @@ class MainActivity : ComponentActivity() {
                                                     text = tab.badge,
                                                     fontSize = 10.sp,
                                                     fontWeight = FontWeight.Bold,
-                                                    color = if (selected) Color.White else BriskColors.TextTertiaryLight
+                                                    color = if (selected) Color.White else BriskColors.textTertiary()
                                                 )
                                             }
                                         }
@@ -100,7 +105,7 @@ class MainActivity : ComponentActivity() {
                                             text = tab.label,
                                             fontSize = 11.sp,
                                             fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                                            color = if (selected) BriskColors.TextPrimaryLight else BriskColors.TextSecondaryLight
+                                            color = if (selected) BriskColors.textPrimary() else BriskColors.textSecondary()
                                         )
                                     },
                                     colors = NavigationBarItemDefaults.colors(
@@ -168,6 +173,13 @@ class MainActivity : ComponentActivity() {
             "BrisksmsTelemetry",
             ExistingPeriodicWorkPolicy.KEEP,
             telemetryRequest
+        )
+
+        val uploadRequest = androidx.work.OneTimeWorkRequestBuilder<tz.co.brisksms.worker.EvidenceUploadWorker>().build()
+        WorkManager.getInstance(applicationContext).enqueueUniqueWork(
+            "BrisksmsEvidenceUpload",
+            androidx.work.ExistingWorkPolicy.KEEP,
+            uploadRequest
         )
 
         if (secureStorage.isBulkMessagingEnabled) {

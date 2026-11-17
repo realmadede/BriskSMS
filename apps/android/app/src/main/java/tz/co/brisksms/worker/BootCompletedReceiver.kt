@@ -34,6 +34,13 @@ class BootCompletedReceiver : BroadcastReceiver() {
             telemetryRequest
         )
 
+        val uploadRequest = androidx.work.OneTimeWorkRequestBuilder<EvidenceUploadWorker>().build()
+        WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
+            "BrisksmsEvidenceUpload",
+            androidx.work.ExistingWorkPolicy.KEEP,
+            uploadRequest
+        )
+
         if (secureStorage.isBulkMessagingEnabled) {
             val serviceIntent = Intent(context.applicationContext, SmsGateRelayService::class.java).apply {
                 action = SmsGateRelayService.ACTION_START

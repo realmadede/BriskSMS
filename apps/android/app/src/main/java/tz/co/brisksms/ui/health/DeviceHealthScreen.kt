@@ -308,10 +308,15 @@ fun DeviceHealthScreen() {
                         apiClient.sendTelemetry(req)
                     }
                     if (res.isSuccess) {
+                        runCatching {
+                            val wm = androidx.work.WorkManager.getInstance(context)
+                            wm.enqueue(androidx.work.OneTimeWorkRequestBuilder<tz.co.brisksms.worker.TelemetryWorker>().build())
+                            wm.enqueue(androidx.work.OneTimeWorkRequestBuilder<tz.co.brisksms.worker.EvidenceUploadWorker>().build())
+                        }
                         val fmt = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
                         lastSyncTime = fmt.format(Date())
                         isReportError = false
-                        reportFeedback = "Telemetry successfully delivered to backend"
+                        reportFeedback = "Telemetry & background sync workers triggered"
                     } else {
                         isReportError = true
                         reportFeedback = "Upload error: ${res.exceptionOrNull()?.message}"

@@ -302,7 +302,14 @@ export async function validateResolvedOutboundUrl(
     }
   } catch (err: unknown) {
     const code = (err as { code?: string })?.code;
-    if (code === 'ENOTFOUND' || code === 'EAI_AGAIN' || code === 'ENODATA') {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (
+      code === 'ENOTFOUND' ||
+      code === 'EAI_AGAIN' ||
+      code === 'ENODATA' ||
+      code === 'ETIMEOUT' ||
+      msg.includes('ETIMEOUT')
+    ) {
       return parsed;
     }
     throw err;

@@ -91,6 +91,11 @@ export function resolveDbConnectionConfig(customDatabaseUrl?: string): ResolvedD
   const password = decodeURIComponent(parsed.password || process.env.PGPASSWORD || '');
   const port = parsed.port ? parseInt(parsed.port, 10) : 5432;
   const hostParam = parsed.searchParams.get('host') || process.env.PGHOST;
+  const sslMode = parsed.searchParams.get('sslmode') || parsed.searchParams.get('ssl') || process.env.PGSSLMODE;
+  const tlsEnabled = Boolean(
+    sslMode && ['require', 'verify-ca', 'verify-full', 'true', '1'].includes(sslMode.toLowerCase()),
+  );
+  const poolMax = Math.max(1, parseInt(process.env.PG_POOL_MAX || '15', 10) || 15);
 
   // Explicit Unix socket path via ?host=/path or PGHOST=/path
   if (hostParam && hostParam.startsWith('/')) {
@@ -105,7 +110,7 @@ export function resolveDbConnectionConfig(customDatabaseUrl?: string): ResolvedD
         username,
         password: password || undefined,
         database,
-        max: 15,
+        max: poolMax,
         idleTimeout: 30,
       },
     };
@@ -126,7 +131,7 @@ export function resolveDbConnectionConfig(customDatabaseUrl?: string): ResolvedD
         username,
         password: password || undefined,
         database,
-        max: 15,
+        max: poolMax,
         idleTimeout: 30,
       },
     };
@@ -141,8 +146,9 @@ export function resolveDbConnectionConfig(customDatabaseUrl?: string): ResolvedD
       username,
       password: password || undefined,
       database,
-      max: 15,
+      max: poolMax,
       idleTimeout: 30,
+      ...(tlsEnabled ? { tls: true } : {}),
     },
   };
 }

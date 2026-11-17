@@ -141,6 +141,43 @@ export async function getAppliedMigrations(): Promise<MigrationRecord[]> {
 }
 
 /**
+ * Safely reconciles `_prisma_migrations` checksums on non-production development databases
+ * without editing historical migration SQL files.
+ */
+export async function repairMigrationChecksums(): Promise<{ repaired: string[] }> {
+  assertNotProduction('repairMigrationChecksums');
+  await ensureMigrationsTable();
+
+  const migrationsDir = getMigrationsDir();
+  const entries = readdirSync(migrationsDir, { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d) => d.name)
+    .sort();
+
+  const existingRows = await getAppliedMigrations();
+  const appliedMap = new Map(existingRows.map((r) => [r.migration_name, r]));
+  const repaired: string[] = [];
+
+  for (const folderName of entries) {
+    const sqlPath = join(migrationsDir, folderName, 'migration.sql');
+    if (!existsSync(sqlPath)) continue;
+    const sqlContent = readFileSync(sqlPath, 'utf-8');
+    const expectedChecksum = createHash('sha256').update(sqlContent, 'utf-8').digest('hex');
+    const existing = appliedMap.get(folderName);
+    if (existing && existing.checksum !== expectedChecksum) {
+      await sql`
+        UPDATE "_prisma_migrations"
+        SET "checksum" = ${expectedChecksum}
+        WHERE "migration_name" = ${folderName}
+      `;
+      repaired.push(folderName);
+    }
+  }
+
+  return { repaired };
+}
+
+/**
  * Asserts that a destructive reset operation is NEVER executed in production.
  */
 function assertNotProduction(operationName: string): void {

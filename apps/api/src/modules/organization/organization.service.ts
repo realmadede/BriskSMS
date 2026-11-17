@@ -3,6 +3,7 @@ import { UserRole } from '@brisksms/shared';
 import { HttpException } from '../../core/http.js';
 import { entitlementService } from '../subscription/entitlement.service.js';
 import { generateSecureToken, hashToken } from '../../core/crypto.js';
+import { emailService } from '../auth/services/email.service.js';
 import { withTransaction } from '@brisksms/db';
 import { randomUUID } from 'node:crypto';
 
@@ -81,7 +82,13 @@ export class OrganizationService {
     orgId: string,
     actorUserId: string,
     dto: InviteMemberDto,
-  ): Promise<{ membership: UserOrganizationRecord; user: { id: string; email: string; fullName: string } }> {
+  ): Promise<{
+    membership: UserOrganizationRecord;
+    user: { id: string; email: string; fullName: string };
+    invitationStatus: 'PENDING' | 'ACCEPTED';
+    invitationEmailSent: boolean;
+    invitationToken?: string;
+  }> {
     if (!dto.email || !dto.role) {
       throw new HttpException(400, 'INVALID_PAYLOAD', 'Email and role are required');
     }
@@ -95,10 +102,18 @@ export class OrganizationService {
       throw new HttpException(400, 'INVALID_ROLE', 'Cannot invite a member with role OWNER');
     }
 
-    return withTransaction(async (tx) => {
+    const rawInviteToken = generateSecureToken('bsk_inv', 24);
+    const inviteTokenHash = hashToken(rawInviteToken);
+
+    const txRes = await withTransaction(async (tx) => {
       const actorMem = await dbStore.getMembership(orgId, actorUserId, tx);
       if (!actorMem || ![UserRole.OWNER, UserRole.ADMIN].includes(actorMem.role)) {
         throw new HttpException(403, 'INSUFFICIENT_PERMISSIONS', 'Only Owners and Admins can invite team members');
+      }
+
+      const org = await dbStore.findOrgById(orgId, tx);
+      if (!org || !org.isActive) {
+        throw new HttpException(404, 'ORG_NOT_FOUND', 'Organization not found or inactive');
       }
 
       await entitlementService.enforceMemberQuota(orgId, tx);
@@ -120,9 +135,11 @@ export class OrganizationService {
         throw new HttpException(409, 'ALREADY_MEMBER', 'This user is already a member of this organization');
       }
 
-      // Record invitation in organization_invitations table
-      const inviteTokenHash = hashToken(generateSecureToken('bsk_inv', 24));
+      const hasCredentials = Boolean(user.passwordHash || user.googleId);
+      const invitationStatus: 'PENDING' | 'ACCEPTED' = hasCredentials ? 'ACCEPTED' : 'PENDING';
+      const acceptedAt = hasCredentials ? new Date() : null;
       const expiresAt = new Date(Date.now() + 7 * 86400 * 1000);
+
       await tx`
         INSERT INTO "organization_invitations" (
           "id", "organization_id", "email", "role", "invited_by_id",
@@ -130,7 +147,7 @@ export class OrganizationService {
         )
         VALUES (
           ${randomUUID()}, ${orgId}, ${user.email}, ${dto.role}::"UserRole", ${actorUserId},
-          ${inviteTokenHash}, 'ACCEPTED', ${expiresAt}, NOW()
+          ${inviteTokenHash}, ${invitationStatus}, ${expiresAt}, ${acceptedAt}
         )
       `;
 
@@ -146,6 +163,8 @@ export class OrganizationService {
 
       return {
         membership,
+        orgName: org.name,
+        invitationStatus,
         user: {
           id: user.id,
           email: user.email,
@@ -153,6 +172,28 @@ export class OrganizationService {
         },
       };
     });
+
+    let invitationEmailSent = false;
+    try {
+      const emailRes = await emailService.sendOrganizationInviteEmail(
+        txRes.user.email,
+        txRes.user.fullName,
+        txRes.orgName,
+        dto.role,
+        rawInviteToken,
+      );
+      invitationEmailSent = emailRes.success;
+    } catch (err) {
+      console.error('[OrganizationService] Invitation email delivery error:', err);
+    }
+
+    return {
+      membership: txRes.membership,
+      user: txRes.user,
+      invitationStatus: txRes.invitationStatus,
+      invitationEmailSent,
+      ...(process.env.NODE_ENV !== 'production' ? { invitationToken: rawInviteToken } : {}),
+    };
   }
 
   async listMembers(orgId: string, userId: string): Promise<{ id: string; email: string; fullName: string; role: UserRole }[]> {

@@ -99,8 +99,18 @@ export class StructuredLogger {
       StructuredLogger.recentLogs.shift();
     }
 
-    if (process.env.BRISKSMS_SILENT_LOGS !== 'true' && level === 'ERROR') {
-      process.stderr.write(JSON.stringify(entry) + '\n');
+    if (process.env.BRISKSMS_SILENT_LOGS !== 'true') {
+      if (level === 'ERROR') {
+        process.stderr.write(JSON.stringify(entry) + '\n');
+      } else if (
+        (level === 'INFO' || level === 'WARN') &&
+        process.env.NODE_ENV !== 'test' &&
+        (process.env.NODE_ENV === 'production' ||
+          process.env.NODE_ENV === 'staging' ||
+          process.env.BRISKSMS_STDOUT_LOGS === 'true')
+      ) {
+        process.stdout.write(JSON.stringify(entry) + '\n');
+      }
     }
 
     return entry;

@@ -13,9 +13,8 @@
     "migrate": "bun run src/cli.ts migrate",
     "seed": "bun run src/cli.ts seed",
     "reset:dev": "bun run src/cli.ts reset-dev",
-    "status": "bun run src/cli.ts status",
-    "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate deploy"
+    "repair:checksums": "bun run src/cli.ts repair-checksums",
+    "status": "bun run src/cli.ts status"
   },
   "dependencies": {
     "@brisksms/shared": "*"

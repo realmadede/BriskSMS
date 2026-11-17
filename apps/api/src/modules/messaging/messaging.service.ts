@@ -16,7 +16,7 @@ import {
   isEncryptedSecret,
   validateOutboundHttpUrl,
 } from '@brisksms/shared';
-import { sql, withTransaction, SqlExecutor } from '@brisksms/db';
+import { sql, withTransaction, SqlExecutor, BullQueue, QUEUE_NAMES } from '@brisksms/db';
 import {
   MessagingAccountRecord,
   MessagingCreditLedgerRecord,
@@ -711,6 +711,208 @@ export class MessagingService {
       };
 
       return { campaign, recipients };
+    }).then(async (txRes) => {
+      const isImmediate = !dto.scheduledAt || dto.scheduledAt.getTime() <= Date.now();
+      if (isImmediate) {
+        try {
+          const campaignQueue = new BullQueue<{ campaignId: string; organizationId: string }>(
+            QUEUE_NAMES.SMS_CAMPAIGN,
+          );
+          await campaignQueue.add('dispatch-campaign', {
+            campaignId: txRes.campaign.id,
+            organizationId,
+          });
+        } catch {
+          // Best-effort queue enqueue; MaintenanceRunner or manual dispatch endpoint will pick up unqueued campaigns
+        }
+      }
+      return txRes;
+    });
+  }
+
+  async listCampaigns(organizationId: string): Promise<SmsCampaignRecord[]> {
+    const rows = await sql<Record<string, any>>`
+      SELECT *
+      FROM sms_campaigns
+      WHERE organization_id = ${organizationId}
+      ORDER BY created_at DESC
+      LIMIT 100
+    `;
+    return rows.map((cRow) => ({
+      id: cRow.id,
+      organizationId: cRow.organization_id,
+      senderIdId: cRow.sender_id_id ?? null,
+      name: cRow.name,
+      messageTemplate: cRow.message_template,
+      status: cRow.status,
+      recipientCount: Number(cRow.recipient_count),
+      scheduledAt: cRow.scheduled_at ? new Date(cRow.scheduled_at) : null,
+      completedAt: cRow.completed_at ? new Date(cRow.completed_at) : null,
+      createdAt: new Date(cRow.created_at),
+      updatedAt: new Date(cRow.updated_at),
+    }));
+  }
+
+  async getCampaignById(
+    organizationId: string,
+    campaignId: string,
+  ): Promise<{ campaign: SmsCampaignRecord; recipients: SmsCampaignRecipientRecord[] }> {
+    const cRows = await sql<Record<string, any>>`
+      SELECT *
+      FROM sms_campaigns
+      WHERE id = ${campaignId} AND organization_id = ${organizationId}
+      LIMIT 1
+    `;
+    if (cRows.length === 0) {
+      throw new HttpException(404, 'CAMPAIGN_NOT_FOUND', `Campaign '${campaignId}' not found`);
+    }
+    const cRow = cRows[0]!;
+    const rRows = await sql<Record<string, any>>`
+      SELECT *
+      FROM sms_campaign_recipients
+      WHERE campaign_id = ${campaignId} AND organization_id = ${organizationId}
+      ORDER BY created_at ASC
+    `;
+    return {
+      campaign: {
+        id: cRow.id,
+        organizationId: cRow.organization_id,
+        senderIdId: cRow.sender_id_id ?? null,
+        name: cRow.name,
+        messageTemplate: cRow.message_template,
+        status: cRow.status,
+        recipientCount: Number(cRow.recipient_count),
+        scheduledAt: cRow.scheduled_at ? new Date(cRow.scheduled_at) : null,
+        completedAt: cRow.completed_at ? new Date(cRow.completed_at) : null,
+        createdAt: new Date(cRow.created_at),
+        updatedAt: new Date(cRow.updated_at),
+      },
+      recipients: rRows.map((r) => ({
+        id: r.id,
+        organizationId: r.organization_id,
+        campaignId: r.campaign_id,
+        recipientPhone: r.recipient_phone,
+        variables: r.variables ?? undefined,
+        interpolatedText: r.interpolated_text,
+        status: r.status as SmsStatus,
+        messageId: r.message_id ?? null,
+        createdAt: new Date(r.created_at),
+        updatedAt: new Date(r.updated_at),
+      })),
+    };
+  }
+
+  async enqueueCampaignDispatch(
+    organizationId: string,
+    campaignId: string,
+  ): Promise<{ queued: boolean; campaign: SmsCampaignRecord }> {
+    const { campaign } = await this.getCampaignById(organizationId, campaignId);
+    if (campaign.status !== 'DRAFT' && campaign.status !== 'SCHEDULED') {
+      throw new HttpException(
+        409,
+        'CAMPAIGN_ALREADY_PROCESSED',
+        `Campaign '${campaignId}' cannot be dispatched from status '${campaign.status}'`,
+      );
+    }
+    const campaignQueue = new BullQueue<{ campaignId: string; organizationId: string }>(
+      QUEUE_NAMES.SMS_CAMPAIGN,
+    );
+    await campaignQueue.add('dispatch-campaign', {
+      campaignId: campaign.id,
+      organizationId,
+    });
+    return { queued: true, campaign };
+  }
+
+  async cancelCampaign(organizationId: string, campaignId: string): Promise<SmsCampaignRecord> {
+    await this.getOrCreateAccount(organizationId);
+    return withTransaction(async (tx) => {
+      const cRows = await tx<Record<string, any>>`
+        SELECT *
+        FROM sms_campaigns
+        WHERE id = ${campaignId} AND organization_id = ${organizationId}
+        FOR UPDATE
+      `;
+      if (cRows.length === 0) {
+        throw new HttpException(404, 'CAMPAIGN_NOT_FOUND', `Campaign '${campaignId}' not found`);
+      }
+      const cRow = cRows[0]!;
+      if (cRow.status !== 'DRAFT' && cRow.status !== 'SCHEDULED') {
+        throw new HttpException(
+          409,
+          'CAMPAIGN_NOT_CANCELABLE',
+          `Campaign '${campaignId}' cannot be canceled in status '${cRow.status}'`,
+        );
+      }
+
+      const queuedRecipients = await tx<Record<string, any>>`
+        SELECT id
+        FROM sms_campaign_recipients
+        WHERE campaign_id = ${campaignId}
+          AND organization_id = ${organizationId}
+          AND status = ${SmsStatus.QUEUED}::"SmsStatus"
+        FOR UPDATE
+      `;
+
+      const creditsToRelease = queuedRecipients.length;
+      const now = new Date();
+      if (creditsToRelease > 0) {
+        const accRows = await tx<Record<string, any>>`
+          SELECT * FROM messaging_accounts WHERE organization_id = ${organizationId} FOR UPDATE
+        `;
+        const lockedAcc = this.mapAccountRow(accRows[0]!);
+        const releaseAmount = Math.min(lockedAcc.reservedCredits, creditsToRelease);
+        const newReserved = Math.max(0, lockedAcc.reservedCredits - releaseAmount);
+        const newBalance = lockedAcc.creditBalance + releaseAmount;
+
+        await tx`
+          UPDATE messaging_accounts
+          SET credit_balance = ${newBalance},
+              reserved_credits = ${newReserved},
+              updated_at = ${now}
+          WHERE id = ${lockedAcc.id}
+        `;
+
+        await tx`
+          INSERT INTO messaging_credit_ledger (
+            id, organization_id, entry_type, amount_credits, balance_after, reserved_after, reference_id, created_at
+          ) VALUES (
+            ${randomUUID()}, ${organizationId}, ${CreditLedgerEntryType.RELEASE},
+            ${releaseAmount}, ${newBalance}, ${newReserved}, ${`campaign_cancel_${campaignId}`}, ${now}
+          )
+        `;
+      }
+
+      await tx`
+        UPDATE sms_campaign_recipients
+        SET status = ${SmsStatus.FAILED}::"SmsStatus",
+            updated_at = ${now}
+        WHERE campaign_id = ${campaignId}
+          AND organization_id = ${organizationId}
+          AND status = ${SmsStatus.QUEUED}::"SmsStatus"
+      `;
+
+      const updatedRows = await tx<Record<string, any>>`
+        UPDATE sms_campaigns
+        SET status = 'CANCELLED'::"CampaignStatus",
+            updated_at = ${now}
+        WHERE id = ${campaignId} AND organization_id = ${organizationId}
+        RETURNING *
+      `;
+      const u = updatedRows[0]!;
+      return {
+        id: u.id,
+        organizationId: u.organization_id,
+        senderIdId: u.sender_id_id ?? null,
+        name: u.name,
+        messageTemplate: u.message_template,
+        status: u.status,
+        recipientCount: Number(u.recipient_count),
+        scheduledAt: u.scheduled_at ? new Date(u.scheduled_at) : null,
+        completedAt: u.completed_at ? new Date(u.completed_at) : null,
+        createdAt: new Date(u.created_at),
+        updatedAt: new Date(u.updated_at),
+      };
     });
   }
 

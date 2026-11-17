@@ -113,7 +113,7 @@ class BriskApiClient(private val secureStorage: KeystoreSecureStorage) : Pairing
     companion object {
         private const val TAG = "BriskApiClient"
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
-        private const val USER_AGENT = "BriskSMS-Android/1.0.0"
+        private val USER_AGENT = "BriskSMS-Android/${tz.co.brisksms.BuildConfig.VERSION_NAME}"
 
         private fun JsonObject.optStringOrNull(memberName: String): String? {
             val elem = get(memberName)
@@ -198,13 +198,17 @@ class BriskApiClient(private val secureStorage: KeystoreSecureStorage) : Pairing
 
         val response = chain.proceed(requestBuilder.build())
 
-        // Handle device revocation globally and clear stale device credentials
-        if (response.code == 403) {
+        // Handle device revocation or invalid device token globally and clear stale device credentials
+        if (response.code == 403 || response.code == 401) {
             try {
                 val peekBody = response.peekBody(2048).string()
                 if (peekBody.contains("DEVICE_REVOKED")) {
                     Log.w(TAG, "Device revocation detected from backend. Clearing revoked credential.")
                     secureStorage.clearRevokedIdentity()
+                } else if (response.code == 401 && peekBody.contains("INVALID_DEVICE_TOKEN")) {
+                    Log.w(TAG, "Invalid device token rejected by backend. Clearing paired session.")
+                    secureStorage.isPaired = false
+                    secureStorage.deviceToken = null
                 }
             } catch (e: Exception) {
                 // Ignore peek exceptions

@@ -37,6 +37,13 @@ interface GoogleNonceRecord {
   clientIp?: string;
 }
 
+export type SafeUserRecord = Omit<UserRecord, 'passwordHash' | 'twoFactorSecret'>;
+
+export function sanitizeUser(user: UserRecord): SafeUserRecord {
+  const { passwordHash: _passwordHash, twoFactorSecret: _twoFactorSecret, ...userSafe } = user;
+  return userSafe;
+}
+
 export class AuthService {
   private googleVerifier: GoogleTokenVerifier = googleTokenVerifier;
   private emailService: EmailService = emailService;
@@ -91,6 +98,7 @@ export class AuthService {
     const expiresAt = Date.now() + ttlSec * 1000;
     const isProdOrStaging = process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'staging';
 
+    let storedInRedis = false;
     try {
       if (!isSimulatedRedisOutage()) {
         await redisClient.set(
@@ -98,6 +106,7 @@ export class AuthService {
           JSON.stringify({ ip: clientIp, createdAt: Date.now() }),
           ttlSec,
         );
+        storedInRedis = true;
       }
     } catch (err) {
       if (isProdOrStaging) {
@@ -105,8 +114,11 @@ export class AuthService {
       }
     }
 
-    // Always register in memory fallback for dev/test resilience
-    this.googleNonceStore.set(nonceHash, { expiresAt, clientIp });
+    // Only use bounded in-memory fallback outside production/staging (or when Redis was not written)
+    if (!isProdOrStaging || !storedInRedis) {
+      this.pruneGoogleNonceStore();
+      this.googleNonceStore.set(nonceHash, { expiresAt, clientIp });
+    }
 
     return {
       nonce: rawNonce,
@@ -115,14 +127,28 @@ export class AuthService {
     };
   }
 
+  private pruneGoogleNonceStore(): void {
+    const now = Date.now();
+    for (const [k, rec] of this.googleNonceStore.entries()) {
+      if (rec.expiresAt <= now) {
+        this.googleNonceStore.delete(k);
+      }
+    }
+    while (this.googleNonceStore.size >= 5000) {
+      const oldestKey = this.googleNonceStore.keys().next().value;
+      if (!oldestKey) break;
+      this.googleNonceStore.delete(oldestKey);
+    }
+  }
+
   async consumeGoogleNonce(nonceHash: string): Promise<boolean> {
     const isProdOrStaging = process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'staging';
 
     try {
       if (!isSimulatedRedisOutage()) {
         const deleted = await redisClient.del(`auth:google_nonce:${nonceHash}`);
+        this.googleNonceStore.delete(nonceHash);
         if (deleted > 0) {
-          this.googleNonceStore.delete(nonceHash);
           return true;
         }
         return false;
@@ -133,6 +159,7 @@ export class AuthService {
       }
     }
 
+    this.pruneGoogleNonceStore();
     const record = this.googleNonceStore.get(nonceHash);
     if (!record) return false;
     if (record.expiresAt <= Date.now()) {
@@ -164,6 +191,13 @@ export class AuthService {
     }
 
     const now = Date.now();
+    if (this.rateLimitBuckets.size > 1000) {
+      for (const [k, b] of this.rateLimitBuckets.entries()) {
+        if (b.resetAt <= now) {
+          this.rateLimitBuckets.delete(k);
+        }
+      }
+    }
     const bucket = this.rateLimitBuckets.get(key);
 
     if (!bucket || bucket.resetAt <= now) {
@@ -180,10 +214,11 @@ export class AuthService {
   }
 
   async register(dto: RegisterDto): Promise<{
-    user: Omit<UserRecord, 'passwordHash'>;
+    user: SafeUserRecord;
     organizationId?: string;
     tokens: AuthTokens;
     verificationEmailSent: boolean;
+    verificationDeliveryError?: string;
   }> {
     if (!dto.email || !dto.password || !dto.fullName) {
       throw new HttpException(400, 'INVALID_PAYLOAD', 'Email, password, and fullName are required');
@@ -278,7 +313,7 @@ export class AuthService {
         tx,
       );
 
-      const { passwordHash: _, ...userSafe } = user;
+      const userSafe = sanitizeUser(user);
       return {
         userSafe,
         userEmail: user.email,
@@ -295,6 +330,7 @@ export class AuthService {
 
     // 3. Dispatch verification email via Resend AFTER transaction is safely committed
     let verificationEmailSent = false;
+    let verificationDeliveryError: string | undefined;
     try {
       const dispatchRes = await this.emailService.sendVerificationEmail(
         txResult.userEmail,
@@ -302,7 +338,11 @@ export class AuthService {
         txResult.rawVerificationToken,
       );
       verificationEmailSent = dispatchRes.success;
-    } catch (emailErr) {
+      if (!dispatchRes.success && dispatchRes.error) {
+        verificationDeliveryError = dispatchRes.error;
+      }
+    } catch (emailErr: any) {
+      verificationDeliveryError = emailErr instanceof Error ? emailErr.message : String(emailErr);
       console.error('[AuthService] Verification email delivery error:', emailErr);
     }
 
@@ -311,11 +351,12 @@ export class AuthService {
       organizationId: txResult.organizationId,
       tokens: txResult.tokens,
       verificationEmailSent,
+      ...(verificationDeliveryError ? { verificationDeliveryError } : {}),
     };
   }
 
   async login(dto: LoginDto): Promise<{
-    user: Omit<UserRecord, 'passwordHash'>;
+    user: SafeUserRecord;
     organizations: { id: string; name: string; role: string }[];
     tokens: AuthTokens;
   }> {
@@ -345,6 +386,14 @@ export class AuthService {
       throw new HttpException(403, 'ACCOUNT_DEACTIVATED', 'Your account has been deactivated. Please contact support.');
     }
 
+    if (process.env.REQUIRE_EMAIL_VERIFICATION === 'true' && !user.isEmailVerified) {
+      throw new HttpException(
+        403,
+        'EMAIL_VERIFICATION_REQUIRED',
+        'Please verify your email address before signing in.',
+      );
+    }
+
     const userOrgs = await dbStore.getUserOrganizations(user.id);
     const primaryOrg = userOrgs[0];
 
@@ -370,7 +419,7 @@ export class AuthService {
       VALUES (${refreshHash}, ${user.id}, ${familyId}, ${jti}, ${expiresAt})
     `;
 
-    const { passwordHash: _, ...userSafe } = user;
+    const userSafe = sanitizeUser(user);
     return {
       user: userSafe,
       organizations: userOrgs.map((o) => ({ id: o.org.id, name: o.org.name, role: o.role })),
@@ -387,7 +436,7 @@ export class AuthService {
     clientIp?: string,
     expectedNonceHash?: string,
   ): Promise<{
-    user: Omit<UserRecord, 'passwordHash'>;
+    user: SafeUserRecord;
     organizationId?: string;
     organizations: { id: string; name: string; role: string }[];
     tokens: AuthTokens;
@@ -529,7 +578,7 @@ export class AuthService {
             VALUES (${refreshHash}, ${user.id}, ${familyId}, ${jti}, ${expiresAt})
           `;
 
-          const { passwordHash: _, ...userSafe } = user;
+          const userSafe = sanitizeUser(user);
           return {
             user: userSafe,
             organizationId: primaryOrg?.org.id,
@@ -558,7 +607,7 @@ export class AuthService {
     }
 
     const tokenTrimmed = token.trim();
-    if (tokenTrimmed.length < 16) {
+    if (tokenTrimmed.length < 16 || tokenTrimmed.startsWith('bsk_pr_')) {
       throw new HttpException(400, 'INVALID_VERIFICATION_TOKEN', 'Verification token is invalid or malformed');
     }
 
@@ -599,7 +648,10 @@ export class AuthService {
       await tx`
         UPDATE "email_verification_tokens"
         SET "expires_at" = NOW()
-        WHERE "user_id" = ${record.user_id} AND "used_at" IS NULL AND "expires_at" > NOW()
+        WHERE "user_id" = ${record.user_id}
+          AND "used_at" IS NULL
+          AND "expires_at" > NOW()
+          AND "token_hash" NOT LIKE 'pr:%'
       `;
 
       return {
@@ -609,7 +661,10 @@ export class AuthService {
     });
   }
 
-  async resendVerificationEmail(email: string, clientIp?: string): Promise<{ success: boolean; message: string }> {
+  async resendVerificationEmail(
+    email: string,
+    clientIp?: string,
+  ): Promise<{ success: boolean; message: string; verificationEmailSent?: boolean; verificationDeliveryError?: string }> {
     if (!email || typeof email !== 'string') {
       throw new HttpException(400, 'INVALID_PAYLOAD', 'Email address is required');
     }
@@ -659,13 +714,354 @@ export class AuthService {
     });
 
     // Dispatch email AFTER transaction commits
+    let verificationEmailSent = false;
+    let verificationDeliveryError: string | undefined;
     try {
-      await this.emailService.sendVerificationEmail(user.email, user.fullName, rawVerificationToken);
-    } catch (err) {
+      const deliveryRes = await this.emailService.sendVerificationEmail(user.email, user.fullName, rawVerificationToken);
+      verificationEmailSent = deliveryRes.success;
+      if (!deliveryRes.success && deliveryRes.error) {
+        verificationDeliveryError = deliveryRes.error;
+      }
+    } catch (err: any) {
+      verificationDeliveryError = err instanceof Error ? err.message : String(err);
       console.error('[AuthService] Resend verification email failed:', err);
     }
 
-    return { success: true, message: genericMsg };
+    return {
+      success: true,
+      message: genericMsg,
+      verificationEmailSent,
+      ...(verificationDeliveryError ? { verificationDeliveryError } : {}),
+    };
+  }
+
+  async forgotPassword(
+    email: string,
+    clientIp?: string,
+  ): Promise<{ success: boolean; message: string; resetToken?: string; resetEmailSent?: boolean }> {
+    if (!email || typeof email !== 'string') {
+      throw new HttpException(400, 'INVALID_PAYLOAD', 'Email address is required');
+    }
+
+    const emailNorm = email.trim().toLowerCase();
+    const genericMsg = 'If an active account exists with that email address, a password reset link has been sent.';
+
+    if (clientIp) {
+      await this.checkRateLimit(`forgot_ip_${clientIp}`, 10, 15 * 60 * 1000);
+    }
+    const recipientHash = createHash('sha256').update(`forgot_recipient:${emailNorm}`).digest('hex').slice(0, 32);
+    await this.checkRateLimit(`forgot_target_${recipientHash}`, 3, 15 * 60 * 1000);
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(emailNorm)) {
+      return { success: true, message: genericMsg };
+    }
+
+    const user = await dbStore.findUserByEmail(emailNorm);
+    if (!user || !user.isActive) {
+      return { success: true, message: genericMsg };
+    }
+
+    const rawResetToken = generateSecureToken('bsk_pr', 32);
+    const tokenHash = hashToken(`password_reset:${rawResetToken}`);
+    const expiryMinutes = parseInt(process.env.PASSWORD_RESET_EXPIRY_MINUTES || '60', 10);
+    const expiresAt = new Date(Date.now() + expiryMinutes * 60 * 1000);
+
+    await withTransaction(async (tx) => {
+      await dbStore.createEmailVerificationToken(
+        {
+          userId: user.id,
+          tokenHash,
+          expiresAt,
+        },
+        tx,
+      );
+    });
+
+    let resetEmailSent = false;
+    try {
+      const res = await this.emailService.sendPasswordResetEmail(user.email, user.fullName, rawResetToken);
+      resetEmailSent = res.success;
+    } catch (err) {
+      console.error('[AuthService] Password reset email delivery error:', err);
+    }
+
+    return {
+      success: true,
+      message: genericMsg,
+      resetEmailSent,
+      ...(process.env.NODE_ENV !== 'production' ? { resetToken: rawResetToken } : {}),
+    };
+  }
+
+  async resetPassword(
+    token: string,
+    newPassword: string,
+    localBlacklist: Set<string> = tokenBlacklist,
+  ): Promise<{ userId: string; passwordReset: boolean }> {
+    if (!token || typeof token !== 'string' || !newPassword || typeof newPassword !== 'string') {
+      throw new HttpException(400, 'INVALID_PAYLOAD', 'Reset token and new password are required');
+    }
+    const tokenTrimmed = token.trim();
+    if (!tokenTrimmed.startsWith('bsk_pr_') || tokenTrimmed.length < 16) {
+      throw new HttpException(400, 'INVALID_RESET_TOKEN', 'Password reset token is invalid or malformed');
+    }
+    if (newPassword.length < 8) {
+      throw new HttpException(400, 'WEAK_PASSWORD', 'Password must be at least 8 characters long');
+    }
+    if (newPassword.length > 256) {
+      throw new HttpException(400, 'INVALID_PAYLOAD', 'Password must not exceed 256 characters');
+    }
+
+    const tokenHash = hashToken(`password_reset:${tokenTrimmed}`);
+    const newPasswordHash = hashPassword(newPassword);
+
+    const userId = await withTransaction(async (tx) => {
+      const rows = await tx`
+        SELECT * FROM "email_verification_tokens"
+        WHERE "token_hash" = ${tokenHash}
+        FOR UPDATE
+      `;
+      const record = rows[0];
+      if (!record || record.used_at !== null || new Date(record.expires_at) <= new Date()) {
+        throw new HttpException(
+          400,
+          'INVALID_RESET_TOKEN',
+          'Password reset token is invalid, expired, or already used',
+        );
+      }
+
+      await tx`
+        UPDATE "email_verification_tokens"
+        SET "used_at" = NOW()
+        WHERE "id" = ${record.id}
+      `;
+
+      await tx`
+        UPDATE "users"
+        SET
+          "password_hash" = ${newPasswordHash},
+          "is_email_verified" = true,
+          "updated_at" = NOW()
+        WHERE "id" = ${record.user_id}
+      `;
+
+      return String(record.user_id);
+    });
+
+    // Revoke all active refresh token families for this user
+    const families = await sql<{ family_id: string }>`
+      SELECT DISTINCT "family_id" FROM "refresh_tokens"
+      WHERE "user_id" = ${userId} AND "revoked_at" IS NULL
+    `;
+    for (const f of families) {
+      if (f.family_id) {
+        await this.revokeFamily(f.family_id, localBlacklist);
+      }
+    }
+
+    return { userId, passwordReset: true };
+  }
+
+  async acceptInvitation(dto: {
+    token: string;
+    password?: string;
+    fullName?: string;
+  }): Promise<{
+    user: SafeUserRecord;
+    organizationId: string;
+    role: string;
+    organizations: { id: string; name: string; role: string }[];
+    tokens: AuthTokens;
+  }> {
+    if (!dto?.token || typeof dto.token !== 'string') {
+      throw new HttpException(400, 'INVALID_PAYLOAD', 'Invitation token is required');
+    }
+    const tokenTrimmed = dto.token.trim();
+    if (!tokenTrimmed.startsWith('bsk_inv_') || tokenTrimmed.length < 16) {
+      throw new HttpException(400, 'INVALID_INVITATION_TOKEN', 'Invitation token is invalid or malformed');
+    }
+
+    const inviteTokenHash = hashToken(tokenTrimmed);
+
+    return withTransaction(async (tx) => {
+      const invRows = await tx`
+        SELECT * FROM "organization_invitations"
+        WHERE "token_hash" = ${inviteTokenHash}
+        FOR UPDATE
+      `;
+      const inv = invRows[0];
+      if (!inv || new Date(inv.expires_at) <= new Date()) {
+        throw new HttpException(
+          400,
+          'INVALID_INVITATION_TOKEN',
+          'Invitation token is invalid or has expired',
+        );
+      }
+
+      const user = await dbStore.findUserByEmail(String(inv.email), tx);
+      if (!user || !user.isActive) {
+        throw new HttpException(404, 'USER_NOT_FOUND', 'Invited user account not found or deactivated');
+      }
+
+      if (inv.status === 'ACCEPTED' && inv.accepted_at !== null && (user.passwordHash || user.googleId)) {
+        throw new HttpException(400, 'INVITATION_ALREADY_ACCEPTED', 'This invitation has already been accepted');
+      }
+
+      const requiresPasswordSetup = !user.passwordHash && !user.googleId;
+      if (requiresPasswordSetup && (!dto.password || typeof dto.password !== 'string')) {
+        throw new HttpException(
+          400,
+          'PASSWORD_REQUIRED',
+          'Please provide a password to complete your account setup',
+        );
+      }
+
+      if (dto.password) {
+        if (dto.password.length < 8) {
+          throw new HttpException(400, 'WEAK_PASSWORD', 'Password must be at least 8 characters long');
+        }
+        if (dto.password.length > 256) {
+          throw new HttpException(400, 'INVALID_PAYLOAD', 'Password must not exceed 256 characters');
+        }
+        const newPasswordHash = hashPassword(dto.password);
+        const updatedFullName = dto.fullName?.trim() || user.fullName;
+        await tx`
+          UPDATE "users"
+          SET
+            "password_hash" = ${newPasswordHash},
+            "full_name" = ${updatedFullName},
+            "is_email_verified" = true,
+            "updated_at" = NOW()
+          WHERE "id" = ${user.id}
+        `;
+        user.passwordHash = newPasswordHash;
+        user.fullName = updatedFullName;
+        user.isEmailVerified = true;
+      } else {
+        await tx`
+          UPDATE "users"
+          SET "is_email_verified" = true, "updated_at" = NOW()
+          WHERE "id" = ${user.id}
+        `;
+        user.isEmailVerified = true;
+      }
+
+      await tx`
+        UPDATE "organization_invitations"
+        SET "status" = 'ACCEPTED', "accepted_at" = NOW(), "updated_at" = NOW()
+        WHERE "id" = ${inv.id}
+      `;
+
+      const existingMem = await dbStore.getMembership(String(inv.organization_id), user.id, tx);
+      if (!existingMem) {
+        await dbStore.addMember(
+          {
+            organizationId: String(inv.organization_id),
+            userId: user.id,
+            role: inv.role,
+            actorId: String(inv.invited_by_id),
+          },
+          tx,
+        );
+      }
+
+      const userOrgs = await dbStore.getUserOrganizations(user.id, tx);
+      const jti = randomUUID();
+      const accessToken = signJwt(
+        {
+          sub: user.id,
+          email: user.email,
+          organizationId: String(inv.organization_id),
+          role: String(inv.role),
+          jti,
+        },
+        900,
+      );
+
+      const rawRefreshToken = generateSecureToken('bsk_ref');
+      const refreshHash = hashToken(rawRefreshToken);
+      const familyId = randomUUID();
+      const expiresAt = new Date(Date.now() + 30 * 86400 * 1000);
+
+      await tx`
+        INSERT INTO "refresh_tokens" ("token_hash", "user_id", "family_id", "jti", "expires_at")
+        VALUES (${refreshHash}, ${user.id}, ${familyId}, ${jti}, ${expiresAt})
+      `;
+
+      return {
+        user: sanitizeUser(user),
+        organizationId: String(inv.organization_id),
+        role: String(inv.role),
+        organizations: userOrgs.map((o) => ({ id: o.org.id, name: o.org.name, role: o.role })),
+        tokens: {
+          accessToken,
+          refreshToken: rawRefreshToken,
+          expiresIn: 900,
+        },
+      };
+    });
+  }
+
+  async switchOrganization(
+    userId: string,
+    targetOrgId: string,
+  ): Promise<{
+    user: SafeUserRecord;
+    organizationId: string;
+    role: string;
+    organizations: { id: string; name: string; role: string }[];
+    tokens: AuthTokens;
+  }> {
+    const user = await dbStore.findUserById(userId);
+    if (!user || !user.isActive) {
+      throw new HttpException(401, 'USER_INACTIVE', 'User account is not active');
+    }
+
+    const membership = await dbStore.getMembership(targetOrgId, userId);
+    if (!membership) {
+      throw new HttpException(403, 'FORBIDDEN', 'You are not a member of the requested organization');
+    }
+
+    const org = await dbStore.findOrgById(targetOrgId);
+    if (!org || !org.isActive) {
+      throw new HttpException(404, 'ORG_NOT_FOUND', 'Organization not found or inactive');
+    }
+
+    const userOrgs = await dbStore.getUserOrganizations(user.id);
+    const jti = randomUUID();
+    const accessToken = signJwt(
+      {
+        sub: user.id,
+        email: user.email,
+        organizationId: targetOrgId,
+        role: membership.role,
+        jti,
+      },
+      900,
+    );
+
+    const rawRefreshToken = generateSecureToken('bsk_ref');
+    const refreshHash = hashToken(rawRefreshToken);
+    const familyId = randomUUID();
+    const expiresAt = new Date(Date.now() + 30 * 86400 * 1000);
+
+    await sql`
+      INSERT INTO "refresh_tokens" ("token_hash", "user_id", "family_id", "jti", "expires_at")
+      VALUES (${refreshHash}, ${user.id}, ${familyId}, ${jti}, ${expiresAt})
+    `;
+
+    return {
+      user: sanitizeUser(user),
+      organizationId: targetOrgId,
+      role: membership.role,
+      organizations: userOrgs.map((o) => ({ id: o.org.id, name: o.org.name, role: o.role })),
+      tokens: {
+        accessToken,
+        refreshToken: rawRefreshToken,
+        expiresIn: 900,
+      },
+    };
   }
 
   async revokeFamily(familyId: string, localBlacklist: Set<string> = tokenBlacklist): Promise<string[]> {
@@ -831,7 +1227,7 @@ export class AuthService {
   }
 
   async getMe(userId: string): Promise<{
-    user: Omit<UserRecord, 'passwordHash'>;
+    user: SafeUserRecord;
     organizations: { id: string; name: string; role: string; planTier: string }[];
   }> {
     const user = await dbStore.findUserById(userId);
@@ -839,7 +1235,7 @@ export class AuthService {
       throw new HttpException(404, 'USER_NOT_FOUND', 'User not found');
     }
     const userOrgs = await dbStore.getUserOrganizations(user.id);
-    const { passwordHash: _, ...userSafe } = user;
+    const userSafe = sanitizeUser(user);
     return {
       user: userSafe,
       organizations: userOrgs.map((o) => ({

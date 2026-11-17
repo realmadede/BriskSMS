@@ -29,7 +29,6 @@ export const SESSION_COOKIE_MAX_AGE = 900; // 15 minutes (matches JWT access tok
 export const REFRESH_COOKIE_MAX_AGE = 30 * 86400; // 30 days
 export const CSRF_COOKIE_MAX_AGE = 86400; // 24 hours
 export const GOOGLE_NONCE_LIFETIME_SECONDS = 300; // Fixed 5-minute OpenID Connect nonce lifetime
-export const GOOGLE_NONCE_COOKIE_MAX_AGE = GOOGLE_NONCE_LIFETIME_SECONDS; // Deprecated alias for backwards compatibility
 
 /**
  * Returns effective Google OpenID Connect nonce TTL, validating against unsafe or out-of-bounds values.

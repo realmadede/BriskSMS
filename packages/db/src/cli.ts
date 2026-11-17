@@ -1,5 +1,5 @@
 import { closeDbPool, checkDatabaseHealth } from './client.js';
-import { migrateDeploy, getAppliedMigrations, resetDevDatabase } from './migrate.js';
+import { migrateDeploy, getAppliedMigrations, resetDevDatabase, repairMigrationChecksums } from './migrate.js';
 import { seedCommercialCatalog } from './seed.js';
 
 async function main() {
@@ -21,6 +21,11 @@ async function main() {
       case 'reset-dev': {
         const res = await resetDevDatabase();
         console.log(JSON.stringify({ status: 'OK', reset: true, ...res }, null, 2));
+        break;
+      }
+      case 'repair-checksums': {
+        const res = await repairMigrationChecksums();
+        console.log(JSON.stringify({ status: 'OK', ...res }, null, 2));
         break;
       }
       case 'status': {

@@ -761,7 +761,8 @@
               <div class="card-title">Real-Time Payment Evidence Feed</div>
               <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.2rem;">Deterministic multi-tier matching against issued invoices</div>
             </div>
-            <div>
+            <div style="display: flex; gap: 0.5rem;">
+              <button class="btn btn-outline" onclick="createInvoiceModal()">+ Issue Invoice</button>
               <button class="btn btn-outline" onclick="openPairingModal()">+ Pair Android Device</button>
             </div>
           </div>
@@ -906,6 +907,9 @@
                     <button type="button" class="btn btn-outline" style="padding: 0.25rem 0.65rem; font-size: 0.725rem;" onclick="downloadCsvTemplate()" title="Download sample CSV file formatted with standard columns">
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                       .CSV Template
+                    </button>
+                    <button type="button" class="btn btn-outline" style="padding: 0.25rem 0.65rem; font-size: 0.725rem;" onclick="clearCsvUpload()" title="Clear uploaded spreadsheet and return to single-recipient dispatch">
+                      Clear CSV
                     </button>
                     <button type="button" class="btn btn-outline" style="padding: 0.25rem 0.65rem; font-size: 0.725rem;" onclick="downloadXlsxTemplate()" title="Download sample Excel XLSX spreadsheet">
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -1171,7 +1175,7 @@
         <div class="qr-container">
           <div class="qr-svg-wrap scan-beam-wrapper">
             <div class="scan-beam-line"></div>
-            <svg width="160" height="160" viewBox="0 0 29 29" shape-rendering="crispEdges">
+            <svg id="pairingQrSvg" width="160" height="160" viewBox="0 0 29 29" shape-rendering="crispEdges">
               <rect width="29" height="29" fill="#FFFFFF"/>
               <!-- Top-Left Finder Pattern -->
               <rect x="2" y="2" width="7" height="7" fill="#0B0A09"/>
@@ -1316,8 +1320,23 @@
           <option value="">Loading subscription catalog...</option>
         </select>
       </div>
+      <div class="form-group">
+        <label class="form-label">Switch Active Workspace</label>
+        <div style="display: flex; gap: 0.5rem;">
+          <select class="form-select" id="modalOrgSwitchSelect" onchange="switchActiveWorkspace(this.value)" style="flex: 1;"></select>
+          <button class="btn btn-outline" type="button" onclick="createWorkspaceModal()">+ New</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+          <label class="form-label" style="margin-bottom: 0;">Team Members</label>
+          <button class="btn btn-outline" type="button" style="padding: 0.2rem 0.6rem; font-size: 0.75rem;" onclick="inviteTeamMemberModal()">+ Invite Member</button>
+        </div>
+        <div id="orgMembersList" style="background: var(--bg-canvas); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 0.6rem; font-size: 0.8rem; max-height: 120px; overflow-y: auto;">Loading team members...</div>
+      </div>
       <div style="display: flex; gap: 0.75rem; justify-content: flex-end; margin-top: 1.5rem;">
         <button class="btn btn-outline" onclick="closeOrgProfileModal()">Close</button>
+        <button class="btn btn-outline" onclick="upgradeOrgSubscriptionModal()">Checkout Plan</button>
         <button class="btn btn-primary" onclick="saveOrgProfile()">Refresh Profile</button>
       </div>
     </div>
@@ -1347,7 +1366,10 @@
           <input type="email" class="form-input" id="signInEmail" placeholder="admin@business.co.tz">
         </div>
         <div class="form-group">
-          <label class="form-label">Password</label>
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <label class="form-label">Password</label>
+            <a href="javascript:void(0)" onclick="promptForgotPassword()" style="font-size: 0.75rem; color: var(--accent, #D97706); text-decoration: none; font-weight: 600;">Forgot password?</a>
+          </div>
           <input type="password" class="form-input" id="signInPassword" placeholder="••••••••">
         </div>
         <button class="btn btn-primary" style="width: 100%; justify-content: center; margin-top: 0.5rem;" onclick="submitEmailPasswordLogin()">Sign In with Email</button>
@@ -1497,7 +1519,8 @@
     }
 
     // Secure Cookie-Based Session & CSRF Architecture
-    const API_BASE = window.location.port === '4200' ? 'http://localhost:3000' : window.location.origin;
+    const metaApiBase = document.querySelector('meta[name="brisksms-api-base"]')?.getAttribute('content')?.trim();
+    const API_BASE = (window.BRISKSMS_API_BASE_URL || metaApiBase || (window.location.port === '4200' ? 'http://localhost:3000' : window.location.origin)).replace(/\/+$/, '');
     let currentSession = null;
     let memoryCsrfToken = null;
 
@@ -1740,8 +1763,277 @@
       }
       document.getElementById('modalOrgNameInput').value = org.name || '';
       document.getElementById('modalOrgTinInput').value = org.tin || '';
+      const switchSelect = document.getElementById('modalOrgSwitchSelect');
+      if (switchSelect && Array.isArray(currentSession?.organizations)) {
+        switchSelect.innerHTML = currentSession.organizations.map(o =>
+          `<option value="${escapeHtml(o.id)}" ${o.id === org.id ? 'selected' : ''}>${escapeHtml(o.name)} (${escapeHtml(o.role)})</option>`
+        ).join('');
+      }
       document.getElementById('orgProfileModal').classList.add('active');
       loadSubscriptionsCatalog();
+      loadOrgMembers();
+    }
+
+    async function loadOrgMembers() {
+      const org = getActiveOrg();
+      const listEl = document.getElementById('orgMembersList');
+      if (!org || !listEl) return;
+      try {
+        const members = await apiFetch(`/v1/organizations/${encodeURIComponent(org.id)}/members`);
+        const arr = Array.isArray(members) ? members : [];
+        if (arr.length === 0) {
+          listEl.textContent = 'No members found.';
+          return;
+        }
+        listEl.innerHTML = arr.map(m => `
+          <div style="display: flex; justify-content: space-between; padding: 0.25rem 0; border-bottom: 1px solid var(--border-subtle);">
+            <span>${escapeHtml(m.fullName)} (${escapeHtml(m.email)})</span>
+            <span style="font-weight: 700; font-size: 0.725rem;">${escapeHtml(m.role)}</span>
+          </div>
+        `).join('');
+      } catch (err) {
+        listEl.textContent = err.message || 'Unable to load team members.';
+      }
+    }
+
+    async function switchActiveWorkspace(targetOrgId) {
+      if (!targetOrgId || targetOrgId === getActiveOrg()?.id) return;
+      try {
+        await apiFetch('/v1/auth/switch-organization', {
+          method: 'POST',
+          body: JSON.stringify({ organizationId: targetOrgId })
+        });
+        localStorage.setItem('brisksms_active_org_id', targetOrgId);
+        await bootstrapMerchantSession();
+        updateOrgDisplay();
+        openOrgProfileModal();
+        showToast('Switched active workspace.', 'success');
+        await Promise.allSettled([
+          loadReconciliationFeed(),
+          loadReviewQueue(),
+          loadDeviceFleet(),
+          loadMessagingData(),
+          loadDeveloperIntegrations(),
+          updateKpis()
+        ]);
+      } catch (err) {
+        showToast(err.message || 'Could not switch workspace.', 'error');
+      }
+    }
+
+    async function createWorkspaceModal() {
+      const name = await showBriskDialog({
+        title: 'Create New Workspace',
+        message: 'Enter the business or branch workspace name:',
+        input: true,
+        inputLabel: 'Workspace Name:',
+        placeholder: 'e.g. Arusha Branch Ltd',
+        confirmText: 'Create Workspace'
+      });
+      if (!name || typeof name !== 'string' || !name.trim()) return;
+      try {
+        const res = await apiFetch('/v1/organizations', {
+          method: 'POST',
+          body: JSON.stringify({ name: name.trim(), countryCode: 'TZA' })
+        });
+        const newOrgId = res?.organization?.id || res?.id;
+        if (newOrgId) {
+          await switchActiveWorkspace(newOrgId);
+        } else {
+          await saveOrgProfile();
+        }
+        showToast('New workspace created.', 'success');
+      } catch (err) {
+        showToast(err.message || 'Workspace creation failed.', 'warning');
+      }
+    }
+
+    async function inviteTeamMemberModal() {
+      const org = getActiveOrg();
+      if (!org) return;
+      const email = await showBriskDialog({
+        title: 'Invite Team Member',
+        message: 'Enter the team member email address (invited as FINANCE role by default, or email|ROLE):',
+        input: true,
+        inputLabel: 'Email (or email|ADMIN / FINANCE / DEVELOPER / CASHIER):',
+        placeholder: 'accountant@business.co.tz|FINANCE',
+        confirmText: 'Send Invitation'
+      });
+      if (!email || typeof email !== 'string' || !email.trim()) return;
+      const [rawEmail, rawRole] = email.split('|').map(s => s.trim());
+      const role = ['ADMIN', 'FINANCE', 'DEVELOPER', 'CASHIER'].includes((rawRole || '').toUpperCase())
+        ? rawRole.toUpperCase()
+        : 'FINANCE';
+      try {
+        await apiFetch(`/v1/organizations/${encodeURIComponent(org.id)}/invitations`, {
+          method: 'POST',
+          body: JSON.stringify({ email: rawEmail, role })
+        });
+        showToast(`Invitation sent to ${rawEmail} (${role}).`, 'success');
+        await loadOrgMembers();
+      } catch (err) {
+        showToast(err.message || 'Failed to invite member.', 'warning');
+      }
+    }
+
+    async function upgradeOrgSubscriptionModal() {
+      const org = getActiveOrg();
+      const planSelect = document.getElementById('modalOrgPlanSelect');
+      const planCode = planSelect ? planSelect.value : '';
+      if (!org || !planCode) {
+        showToast('Select a subscription plan first.', 'warning');
+        return;
+      }
+      const paymentRef = await showBriskDialog({
+        title: `Checkout Plan: ${planCode}`,
+        message: 'Enter a verified payment reference (or leave blank if starting a trial / free tier):',
+        input: true,
+        inputLabel: 'Payment Reference (optional for Trial/Free):',
+        placeholder: 'e.g. QWE9876543',
+        confirmText: 'Complete Checkout'
+      });
+      if (paymentRef === false) return;
+      try {
+        await apiFetch(`/v1/organizations/${encodeURIComponent(org.id)}/subscription/checkout`, {
+          method: 'POST',
+          body: JSON.stringify({
+            planCode,
+            currency: 'TZS',
+            billingInterval: 'MONTHLY',
+            paymentMethodRef: typeof paymentRef === 'string' && paymentRef.trim() ? paymentRef.trim() : undefined
+          })
+        });
+        showToast(`Subscription updated to ${planCode}.`, 'success');
+        await saveOrgProfile();
+      } catch (err) {
+        showToast(err.message || 'Subscription checkout failed.', 'warning');
+      }
+    }
+
+    function clearCsvUpload() {
+      window.parsedContactsList = [];
+      parsedContactsCount = 0;
+      const csvInput = document.getElementById('csvUpload');
+      if (csvInput) csvInput.value = '';
+      const previewList = document.getElementById('previewList');
+      if (previewList) {
+        previewList.textContent = 'Cleared spreadsheet contacts. Enter a single phone number or upload a new file.';
+      }
+      renderLivePreview();
+      showToast('Cleared uploaded CSV contacts.', 'info');
+    }
+
+    async function createInvoiceModal() {
+      if (!currentSession?.org?.id) {
+        showToast('Please sign in to issue an invoice.', 'info');
+        openAuthModal('signin');
+        return;
+      }
+      const spec = await showBriskDialog({
+        title: 'Issue Customer Invoice',
+        message: 'Enter Invoice Reference, Amount (TZS), and Customer Name separated by | (pipe):',
+        input: true,
+        inputLabel: 'Format: REFERENCE|AMOUNT_TZS|CUSTOMER_NAME|PHONE',
+        defaultValue: `INV-${Math.floor(1000 + Math.random() * 9000)}|25000|Customer|0754123456`,
+        confirmText: 'Issue Invoice'
+      });
+      if (!spec || typeof spec !== 'string') return;
+      const parts = spec.split('|').map(s => s.trim());
+      const referenceNumber = parts[0];
+      const amountMajor = Number(parts[1] || 0);
+      const customerName = parts[2] || 'Customer';
+      const customerPhone = parts[3] ? (normalizeTzPhoneClient(parts[3]) || parts[3]) : undefined;
+      if (!referenceNumber || !Number.isFinite(amountMajor) || amountMajor <= 0) {
+        showToast('Valid reference number and positive TZS amount are required.', 'warning');
+        return;
+      }
+      try {
+        await apiFetch('/v1/reconciliation/invoices', {
+          method: 'POST',
+          body: JSON.stringify({
+            organizationId: currentSession.org.id,
+            referenceNumber,
+            amountCents: String(Math.round(amountMajor * 100)),
+            currency: 'TZS',
+            customerName,
+            customerPhone
+          })
+        });
+        showToast(`Invoice ${referenceNumber} issued for TZS ${amountMajor.toLocaleString()}.`, 'success');
+        await loadReconciliationFeed();
+      } catch (err) {
+        showToast(err.message || 'Failed to issue invoice.', 'warning');
+      }
+    }
+
+    async function revokeApiKeyAction(keyId) {
+      if (!currentSession?.org?.id || !keyId) return;
+      try {
+        await apiFetch(`/v1/developer/api-keys/${encodeURIComponent(keyId)}?organizationId=${encodeURIComponent(currentSession.org.id)}`, {
+          method: 'DELETE'
+        });
+        showToast('API key revoked.', 'success');
+        await loadDeveloperIntegrations();
+      } catch (err) {
+        showToast(err.message || 'Failed to revoke API key.', 'warning');
+      }
+    }
+
+    async function rotateApiKeyAction(keyId) {
+      if (!currentSession?.org?.id || !keyId) return;
+      try {
+        const result = await apiFetch(`/v1/developer/api-keys/${encodeURIComponent(keyId)}/rotate`, {
+          method: 'POST',
+          body: JSON.stringify({ organizationId: currentSession.org.id })
+        });
+        await showBriskDialog({
+          title: 'API Key Rotated',
+          message: 'Your previous key has been revoked. Copy the new secret key now:',
+          copyText: result.plainTextSecret,
+          confirmText: 'Done / Copied',
+          hideCancel: true
+        });
+        await loadDeveloperIntegrations();
+      } catch (err) {
+        showToast(err.message || 'Failed to rotate API key.', 'warning');
+      }
+    }
+
+    async function deleteWebhookAction(endpointId) {
+      if (!currentSession?.org?.id || !endpointId) return;
+      try {
+        await apiFetch(`/v1/developer/webhooks/${encodeURIComponent(endpointId)}?organizationId=${encodeURIComponent(currentSession.org.id)}`, {
+          method: 'DELETE'
+        });
+        showToast('Webhook endpoint deleted.', 'success');
+        await loadDeveloperIntegrations();
+      } catch (err) {
+        showToast(err.message || 'Failed to delete webhook.', 'warning');
+      }
+    }
+
+    async function promptForgotPassword() {
+      const defaultEmail = document.getElementById('signInEmail')?.value?.trim() || '';
+      const email = await showBriskDialog({
+        title: 'Reset Your Password',
+        message: 'Enter your registered email address to receive a single-use password reset link:',
+        input: true,
+        inputLabel: 'Email Address:',
+        defaultValue: defaultEmail,
+        placeholder: 'admin@business.co.tz',
+        confirmText: 'Send Reset Link'
+      });
+      if (!email || typeof email !== 'string' || !email.trim()) return;
+      try {
+        await ensureCsrfToken();
+        await apiFetch('/v1/auth/forgot-password', {
+          method: 'POST',
+          body: JSON.stringify({ email: email.trim() })
+        });
+        showToast('If an active account exists, a password reset link has been sent.', 'success');
+      } catch (err) {
+        showToast(err.message || 'Unable to process password reset request.', 'error');
+      }
     }
 
     function closeOrgProfileModal() {
@@ -2497,6 +2789,36 @@
     let pairingTimerInterval = null;
     let baselineDeviceIds = new Set();
 
+    function renderDynamicPairingQrSvg(payloadText) {
+      const svg = document.getElementById('pairingQrSvg');
+      if (!svg) return;
+      const bytes = Array.from(String(payloadText || 'BRISKSMS')).map(ch => ch.charCodeAt(0));
+      const rects = [
+        '<rect width="29" height="29" fill="#FFFFFF"/>',
+        '<rect x="2" y="2" width="7" height="7" fill="#0B0A09"/><rect x="3" y="3" width="5" height="5" fill="#FFFFFF"/><rect x="4" y="4" width="3" height="3" fill="#0B0A09"/>',
+        '<rect x="20" y="2" width="7" height="7" fill="#0B0A09"/><rect x="21" y="3" width="5" height="5" fill="#FFFFFF"/><rect x="22" y="4" width="3" height="3" fill="#0B0A09"/>',
+        '<rect x="2" y="20" width="7" height="7" fill="#0B0A09"/><rect x="3" y="21" width="5" height="5" fill="#FFFFFF"/><rect x="4" y="22" width="3" height="3" fill="#0B0A09"/>',
+        '<rect x="18" y="18" width="5" height="5" fill="#0B0A09"/><rect x="19" y="19" width="3" height="3" fill="#FFFFFF"/><rect x="20" y="20" width="1" height="1" fill="#0B0A09"/>'
+      ];
+      let bitIdx = 0;
+      for (let y = 2; y <= 26; y++) {
+        for (let x = 2; x <= 26; x++) {
+          const inTopLeft = x <= 9 && y <= 9;
+          const inTopRight = x >= 19 && y <= 9;
+          const inBottomLeft = x <= 9 && y >= 19;
+          const inAlign = x >= 18 && x <= 22 && y >= 18 && y <= 22;
+          if (inTopLeft || inTopRight || inBottomLeft || inAlign) continue;
+          const byteVal = bytes[Math.floor(bitIdx / 8) % bytes.length] || 0;
+          const bit = ((byteVal >> (bitIdx % 8)) ^ ((x * 7 + y * 13) & 1)) & 1;
+          bitIdx++;
+          if (bit === 1) {
+            rects.push(`<rect x="${x}" y="${y}" width="1" height="1" fill="#0B0A09"/>`);
+          }
+        }
+      }
+      svg.innerHTML = rects.join('');
+    }
+
     async function openPairingModal() {
       if (!currentSession?.org?.id) {
         showToast('Please sign in to pair an Android relay device.', 'info');
@@ -2514,6 +2836,15 @@
           body: JSON.stringify({ organizationId: currentSession.org.id })
         });
         const rawToken = tokenData?.pairingToken || tokenData?.token;
+        const expiresAtMs = tokenData?.expiresAt ? Date.parse(tokenData.expiresAt) : Date.now() + 300_000;
+        const qrPayload = JSON.stringify({
+          token: rawToken,
+          org: currentSession.org.id,
+          endpoint: API_BASE,
+          exp: expiresAtMs
+        });
+        renderDynamicPairingQrSvg(qrPayload);
+
         const displayEl = document.getElementById('modalTokenDisplay');
         if (displayEl) {
           displayEl.textContent = rawToken || 'Token unavailable';
@@ -2592,9 +2923,12 @@
             keyContainer.style.textAlign = 'left';
             keyContainer.innerHTML = apiKeys.map(k => `
               <div style="border-bottom: 1px solid var(--border-subtle); padding: 0.5rem 0; margin-bottom: 0.35rem;">
-                <div style="display: flex; justify-content: space-between; font-weight: 700; font-size: 0.85rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center; font-weight: 700; font-size: 0.85rem;">
                   <span>${escapeHtml(k.name)}</span>
-                  <span style="font-size: 0.75rem; color: ${k.revokedAt ? '#DC2626' : 'var(--status-matched)'};">${k.revokedAt ? 'Revoked' : 'Active'}</span>
+                  <div style="display: flex; align-items: center; gap: 0.4rem;">
+                    <span style="font-size: 0.75rem; color: ${k.revokedAt ? '#DC2626' : 'var(--status-matched)'};">${k.revokedAt ? 'Revoked' : 'Active'}</span>
+                    ${!k.revokedAt ? `<button class="btn btn-outline" style="padding: 0.15rem 0.45rem; font-size: 0.7rem;" onclick="rotateApiKeyAction('${escapeHtml(k.id)}')">Rotate</button><button class="btn btn-outline" style="padding: 0.15rem 0.45rem; font-size: 0.7rem; color: #DC2626;" onclick="revokeApiKeyAction('${escapeHtml(k.id)}')">Revoke</button>` : ''}
+                  </div>
                 </div>
                 <div style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">
                   ${escapeHtml(k.keyPrefix)}... &bull; Scopes: [${escapeHtml((k.scopes || []).join(', '))}]
@@ -2615,9 +2949,12 @@
             hookContainer.style.textAlign = 'left';
             hookContainer.innerHTML = endpoints.map(e => `
               <div style="border-bottom: 1px solid var(--border-subtle); padding: 0.5rem 0; margin-bottom: 0.35rem;">
-                <div style="display: flex; justify-content: space-between; font-weight: 700; font-size: 0.85rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center; font-weight: 700; font-size: 0.85rem;">
                   <span>${escapeHtml(e.targetUrl || e.url)}</span>
-                  <span style="font-size: 0.75rem; color: var(--status-matched);">Listening</span>
+                  <div style="display: flex; align-items: center; gap: 0.4rem;">
+                    <span style="font-size: 0.75rem; color: var(--status-matched);">Listening</span>
+                    <button class="btn btn-outline" style="padding: 0.15rem 0.45rem; font-size: 0.7rem; color: #DC2626;" onclick="deleteWebhookAction('${escapeHtml(e.id)}')">Delete</button>
+                  </div>
                 </div>
                 <div style="font-size: 0.75rem; color: var(--text-sub); margin-top: 0.25rem;">
                   Events: <code>${escapeHtml((e.subscribedEvents || []).join(', '))}</code>
@@ -2798,11 +3135,16 @@
             showToast('Upload a contacts CSV file or enter a recipient phone number first.', 'warning');
             return;
           }
+          const normalizedSinglePhone = normalizeTzPhoneClient(singlePhone);
+          if (!normalizedSinglePhone) {
+            showToast('Please enter a valid Tanzania mobile number (e.g. 0754123456 or +255754123456).', 'warning');
+            return;
+          }
           const result = await apiFetch('/v1/messaging/send', {
             method: 'POST',
             body: JSON.stringify({
               organizationId: currentSession.org.id,
-              to: singlePhone,
+              to: normalizedSinglePhone,
               content: content,
               simSlot: Number(sim)
             })
@@ -3020,8 +3362,11 @@
 
         // 2. Initialize Google Identity Services if loaded in browser
         if (window.google?.accounts?.id) {
+          if (!window.GOOGLE_CLIENT_ID) {
+            throw new Error('GOOGLE_CLIENT_ID is not configured for this console deployment.');
+          }
           window.google.accounts.id.initialize({
-            client_id: window.GOOGLE_CLIENT_ID || '829471928374-brisksms.apps.googleusercontent.com',
+            client_id: window.GOOGLE_CLIENT_ID,
             nonce: serverNonce,
             callback: async (response) => {
               try {
@@ -3100,6 +3445,55 @@
       // 2. Immediately strip sensitive token from URL bar and browser history
       if (window.history && window.history.replaceState) {
         window.history.replaceState(null, '', window.location.pathname);
+      }
+
+      if (token.startsWith('bsk_pr_')) {
+        const newPassword = await showBriskDialog({
+          title: 'Set New Password',
+          message: 'Enter your new account password (minimum 8 characters):',
+          input: true,
+          inputLabel: 'New Password:',
+          placeholder: '••••••••',
+          confirmText: 'Reset Password'
+        });
+        if (!newPassword || typeof newPassword !== 'string') return;
+        try {
+          await ensureCsrfToken();
+          await apiFetch('/v1/auth/reset-password', {
+            method: 'POST',
+            body: JSON.stringify({ token, newPassword })
+          });
+          showToast('Password reset successfully. Please sign in.', 'success');
+          openAuthModal('signin');
+        } catch (err) {
+          showToast(err.message || 'Password reset link is invalid or expired.', 'error');
+        }
+        return;
+      }
+
+      if (token.startsWith('bsk_inv_')) {
+        const password = await showBriskDialog({
+          title: 'Accept Workspace Invitation',
+          message: 'Choose a password (min 8 chars) to activate your account and join the workspace:',
+          input: true,
+          inputLabel: 'Account Password:',
+          placeholder: '••••••••',
+          confirmText: 'Accept & Join'
+        });
+        if (!password || typeof password !== 'string') return;
+        try {
+          await ensureCsrfToken();
+          await apiFetch('/v1/auth/accept-invitation', {
+            method: 'POST',
+            body: JSON.stringify({ token, password })
+          });
+          await bootstrapMerchantSession();
+          updateOrgDisplay();
+          showToast('Invitation accepted! Welcome to the workspace.', 'success');
+        } catch (err) {
+          showToast(err.message || 'Invitation link is invalid or expired.', 'error');
+        }
+        return;
       }
 
       const modal = document.getElementById('emailVerificationModal');

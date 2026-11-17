@@ -1214,7 +1214,7 @@
     <section class="hero-section" id="hero">
       <div class="container">
         <div class="hero-bezel-card" id="heroCard">
-          
+
           <!-- Grounded Sphere 1 -->
           <div class="sphere-1-shadow" id="sphereShadow1"></div>
           <div class="sphere-layer sphere-1-wrap" id="sphere1">
@@ -2387,12 +2387,17 @@ var campaign = await httpClient.PostAsJsonAsync("https://api.brisksms.com/v1/mes
         response: `{
   "success": true,
   "data": {
-    "campaignId": "cmp_8829401",
-    "name": "Order Dispatch Broadcast",
-    "queued": 2,
-    "sent": 0,
-    "failed": 0,
-    "creditsReserved": 2
+    "campaign": {
+      "id": "cmp_8829401",
+      "organizationId": "org_c9401ab88",
+      "name": "Order Dispatch Broadcast",
+      "status": "DRAFT",
+      "recipientCount": 2
+    },
+    "recipients": [
+      { "id": "rec_01", "recipientPhone": "+255754000111", "status": "QUEUED" },
+      { "id": "rec_02", "recipientPhone": "+255713999222", "status": "QUEUED" }
+    ]
   }
 }`
       },

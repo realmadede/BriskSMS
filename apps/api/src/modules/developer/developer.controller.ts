@@ -9,8 +9,9 @@ import { ApiKeyService } from './api-key.service.js';
 import { WebhookService } from './webhook.service.js';
 import { DeveloperActionService } from './developer-action.service.js';
 import { dbStore } from '../../core/store.js';
-import { ApiKeyScope, BriskError, UserRole } from '@brisksms/shared';
-import { DatabaseUnavailableError } from '@brisksms/db';
+import { ApiKeyScope, BriskError, OutboxStatus, UserRole } from '@brisksms/shared';
+import { BullQueue, DatabaseUnavailableError, QUEUE_NAMES, sql } from '@brisksms/db';
+import { authService } from '../auth/auth.service.js';
 import { MessagingService } from '../messaging/messaging.service.js';
 
 const apiKeyService = new ApiKeyService();
@@ -95,6 +96,31 @@ export function registerDeveloperRoutes(router: Router): void {
     };
   });
 
+  // 3b. Rotate API Key
+  router.post('/v1/developer/api-keys/:id/rotate', async (req: RouteRequest): Promise<ApiResponse> => {
+    await authenticate(req);
+    assertHumanSessionAuth(req, 'API key rotation');
+    const userId = req.context.userId!;
+    const keyId = req.params.id || '';
+    const body = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, any>;
+    const orgId = resolveAuthorizedTenantOrgId(req, body.organizationId || req.query.organizationId);
+    await assertDeveloperAccess(orgId, userId);
+
+    try {
+      const result = await apiKeyService.rotateApiKey(orgId, keyId);
+      return {
+        success: true,
+        data: result,
+      };
+    } catch (err: any) {
+      const msg = err?.message || 'Failed to rotate API key';
+      if (msg.includes('not found')) {
+        throw new HttpException(404, 'NOT_FOUND', msg);
+      }
+      throw new HttpException(409, 'ROTATION_CONFLICT', msg);
+    }
+  });
+
   // 4. List Registered Webhooks
   router.get('/v1/developer/webhooks', async (req: RouteRequest): Promise<ApiResponse> => {
     await authenticate(req);
@@ -118,6 +144,7 @@ export function registerDeveloperRoutes(router: Router): void {
     const body = req.body as Record<string, any>;
     const orgId = resolveAuthorizedTenantOrgId(req, body.organizationId);
     await assertDeveloperAccess(orgId, userId);
+    await authService.checkRateLimit(`dev_webhook_${orgId}`, 30, 60_000);
 
     if (!body.url || !body.subscribedEvents || !Array.isArray(body.subscribedEvents)) {
       throw new HttpException(400, 'VALIDATION_ERROR', 'url and subscribedEvents array are required');
@@ -222,6 +249,7 @@ export function registerDeveloperRoutes(router: Router): void {
 
     // Scoped API Key authentication (e.g. bsk_live_...)
     if (token.startsWith('bsk_live_')) {
+      await authService.checkRateLimit(`dev_msg_key_${token.slice(0, 18)}`, 120, 60_000);
       try {
         const result = await developerActionService.handleSendMessageAction(token, {
           recipientPhone,
@@ -270,6 +298,7 @@ export function registerDeveloperRoutes(router: Router): void {
       throw new HttpException(400, 'VALIDATION_ERROR', 'organizationId is required');
     }
     await assertDeveloperAccess(orgId, userId);
+    await authService.checkRateLimit(`dev_msg_org_${orgId}`, 120, 60_000);
 
     const msg = await messagingService.sendSingleMessage(orgId, {
       to: recipientPhone,
@@ -292,4 +321,136 @@ export function registerDeveloperRoutes(router: Router): void {
 
   router.post('/v1/developer/messages/send', handleSendMessage);
   router.post('/v1/messages/send', handleSendMessage);
+
+  // 8. Organization Audit Logs
+  router.get('/v1/developer/audit-logs', async (req: RouteRequest): Promise<ApiResponse> => {
+    await authenticate(req);
+    assertHumanSessionAuth(req, 'reading organization audit logs');
+    const userId = req.context.userId!;
+    const orgId = resolveAuthorizedTenantOrgId(req, req.query.organizationId);
+    await assertDeveloperAccess(orgId, userId);
+
+    const rows = await sql`
+      SELECT *
+      FROM "audit_logs"
+      WHERE "organization_id" = ${orgId}
+      ORDER BY "created_at" DESC
+      LIMIT 100
+    `;
+    const auditLogs = rows.map((r: any) => ({
+      id: String(r.id),
+      organizationId: String(r.organization_id),
+      actorId: String(r.actor_id),
+      actorType: String(r.actor_type),
+      action: String(r.action),
+      resourceType: String(r.resource_type),
+      resourceId: String(r.resource_id),
+      previousState: r.previous_state ?? null,
+      newState: r.new_state ?? null,
+      metadata: r.metadata ?? null,
+      createdAt: new Date(r.created_at).toISOString(),
+    }));
+    return {
+      success: true,
+      data: { auditLogs },
+    };
+  });
+
+  // 9. Webhook Delivery History & Outbox Inspection
+  router.get('/v1/developer/webhook-deliveries', async (req: RouteRequest): Promise<ApiResponse> => {
+    await authenticate(req);
+    assertOAuthScope(req, [ApiKeyScope.WEBHOOKS_MANAGE]);
+    const userId = req.context.userId!;
+    const orgId = resolveAuthorizedTenantOrgId(req, req.query.organizationId);
+    await assertDeveloperAccess(orgId, userId);
+
+    const deliveryRows = await sql`
+      SELECT d.*, e."url" AS "endpoint_url"
+      FROM "webhook_deliveries" d
+      INNER JOIN "webhook_endpoints" e ON e."id" = d."webhook_endpoint_id"
+      WHERE e."organization_id" = ${orgId}
+      ORDER BY d."created_at" DESC
+      LIMIT 100
+    `;
+    const outboxRows = await sql`
+      SELECT *
+      FROM "outbox_events"
+      WHERE "organization_id" = ${orgId}
+      ORDER BY "created_at" DESC
+      LIMIT 100
+    `;
+    return {
+      success: true,
+      data: {
+        deliveries: deliveryRows.map((d: any) => ({
+          id: String(d.id),
+          webhookEndpointId: String(d.webhook_endpoint_id),
+          endpointUrl: String(d.endpoint_url),
+          outboxEventId: d.outbox_event_id ? String(d.outbox_event_id) : null,
+          eventType: String(d.event_type),
+          responseStatusCode: d.response_status_code !== null ? Number(d.response_status_code) : null,
+          isSuccess: Boolean(d.is_success),
+          attemptNumber: Number(d.attempt_number),
+          createdAt: new Date(d.created_at).toISOString(),
+        })),
+        outboxEvents: outboxRows.map((o: any) => ({
+          id: String(o.id),
+          organizationId: String(o.organization_id),
+          eventType: String(o.event_type),
+          status: String(o.status),
+          isDelivered: Boolean(o.is_delivered),
+          attemptCount: Number(o.attempt_count),
+          maxAttempts: Number(o.max_attempts),
+          lastError: o.last_error ? String(o.last_error) : null,
+          createdAt: new Date(o.created_at).toISOString(),
+        })),
+      },
+    };
+  });
+
+  // 10. Replay Dead-Lettered or Failed Outbox Event
+  router.post('/v1/developer/outbox/:id/replay', async (req: RouteRequest): Promise<ApiResponse> => {
+    await authenticate(req);
+    assertHumanSessionAuth(req, 'replaying outbox events');
+    const userId = req.context.userId!;
+    const outboxId = req.params.id || '';
+    const body = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, any>;
+    const orgId = resolveAuthorizedTenantOrgId(req, body.organizationId || req.query.organizationId);
+    await assertDeveloperAccess(orgId, userId);
+
+    const rows = await sql`
+      UPDATE "outbox_events"
+      SET
+        "status" = ${OutboxStatus.PENDING}::"OutboxStatus",
+        "is_delivered" = false,
+        "attempt_count" = 0,
+        "next_attempt_at" = NOW(),
+        "locked_at" = NULL,
+        "locked_by" = NULL,
+        "last_error" = NULL
+      WHERE "id" = ${outboxId} AND "organization_id" = ${orgId}
+      RETURNING "id", "organization_id", "status"
+    `;
+    if (rows.length === 0) {
+      throw new HttpException(404, 'NOT_FOUND', `Outbox event '${outboxId}' not found for this organization`);
+    }
+
+    try {
+      const whQueue = new BullQueue<{ outboxEventId: string; organizationId: string }>(
+        QUEUE_NAMES.WEBHOOK_DELIVERY,
+      );
+      await whQueue.add('replay-webhook', { outboxEventId: outboxId, organizationId: orgId });
+    } catch {
+      // OutboxRelayRunner will pick up PENDING event automatically if Redis is offline
+    }
+
+    return {
+      success: true,
+      data: {
+        replayed: true,
+        outboxEventId: outboxId,
+        status: OutboxStatus.PENDING,
+      },
+    };
+  });
 }

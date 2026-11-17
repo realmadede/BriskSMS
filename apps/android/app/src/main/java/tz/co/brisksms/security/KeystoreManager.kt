@@ -79,10 +79,16 @@ class KeystoreManager {
      */
     fun isHardwareBacked(): Boolean {
         return try {
-            val entry = keyStore.getEntry(KEY_ALIAS, null) as? KeyStore.PrivateKeyEntry ?: return false
-            val factory = KeyFactory.getInstance(entry.privateKey.algorithm, ANDROID_KEYSTORE)
-            val keyInfo = factory.getKeySpec(entry.privateKey, KeyInfo::class.java)
-            keyInfo.isInsideSecureHardware
+            val (_, privateKey) = getOrCreateDeviceKeyPair()
+            val factory = KeyFactory.getInstance(privateKey.algorithm, ANDROID_KEYSTORE)
+            val keyInfo = factory.getKeySpec(privateKey, KeyInfo::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                keyInfo.securityLevel == KeyProperties.SECURITY_LEVEL_TRUSTED_ENVIRONMENT ||
+                    keyInfo.securityLevel == KeyProperties.SECURITY_LEVEL_STRONGBOX ||
+                    @Suppress("DEPRECATION") keyInfo.isInsideSecureHardware
+            } else {
+                @Suppress("DEPRECATION") keyInfo.isInsideSecureHardware
+            }
         } catch (e: Exception) {
             false
         }

@@ -33,6 +33,7 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "1.0.0"
+        buildConfigField("String", "DEFAULT_API_BASE_URL", "\"https://api.brisksms.com\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -73,6 +74,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.11"
@@ -114,10 +116,9 @@ dependencies {
     // WorkManager for reliable background sync
     implementation("androidx.work:work-runtime-ktx:2.9.0")
 
-    // Retrofit & OkHttp
-    implementation("com.squareup.retrofit2:retrofit:2.11.0")
-    implementation("com.squareup.retrofit2:converter-gson:2.11.0")
-    implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
+    // OkHttp & Gson for TLS transport and JSON serialization
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.google.code.gson:gson:2.10.1")
 
     // Android Keystore & Security Crypto
     implementation("androidx.security:security-crypto:1.1.0-alpha06")

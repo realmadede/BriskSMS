@@ -1,5 +1,7 @@
 package tz.co.brisksms.ui.theme
 
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
 /**
@@ -40,5 +42,28 @@ object BriskColors {
     val StatusVerified = Color(0xFF2E7D32)      // M-Pesa / Verified Green
     val StatusReview = Color(0xFFED6C02)        // Review Required Amber
     val StatusRejected = Color(0xFFD32F2F)      // Duplicate / Error Crimson
+
+    // Adaptive Light/Dark Theme Accessors
+    @Composable
+    fun canvasBase(): Color = if (isSystemInDarkTheme()) CanvasBaseDark else CanvasBaseLight
+
+    @Composable
+    fun surfaceSolid(): Color = if (isSystemInDarkTheme()) SurfaceSolidDark else SurfaceSolidLight
+
+    @Composable
+    fun cardContainer(): Color = if (isSystemInDarkTheme()) SurfaceSolidDark else Color.White
+
+    @Composable
+    fun borderHairline(): Color = if (isSystemInDarkTheme()) BorderHairlineDark else BorderHairlineLight
+
+    @Composable
+    fun textPrimary(): Color = if (isSystemInDarkTheme()) TextPrimaryDark else TextPrimaryLight
+
+    @Composable
+    fun textSecondary(): Color = if (isSystemInDarkTheme()) TextSecondaryDark else TextSecondaryLight
+
+    @Composable
+    fun textTertiary(): Color = if (isSystemInDarkTheme()) TextTertiaryDark else TextTertiaryLight
 }
+
 

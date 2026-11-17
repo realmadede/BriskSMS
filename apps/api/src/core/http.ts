@@ -104,6 +104,10 @@ export class Router {
     this.add('PATCH', path, handler);
   }
 
+  put(path: string, handler: RouteHandler): void {
+    this.add('PUT', path, handler);
+  }
+
   delete(path: string, handler: RouteHandler): void {
     this.add('DELETE', path, handler);
   }
@@ -122,7 +126,7 @@ export class Router {
       res.setHeader('Access-Control-Allow-Origin', '*');
     }
 
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
     res.setHeader(
       'Access-Control-Allow-Headers',
       'Content-Type, Authorization, X-Requested-With, Idempotency-Key, X-Signature, X-Timestamp, X-Organization-Id, X-CSRF-Token, X-XSRF-Token, x-api-key, X-API-Key, X-Platform-Admin-Key',
@@ -394,8 +398,4 @@ export function readBodyBuffer(
       }
     });
   });
-}
-
-export function readBody(req: IncomingMessage): Promise<string> {
-  return readBodyBuffer(req).then((buf) => buf.toString('utf-8'));
 }

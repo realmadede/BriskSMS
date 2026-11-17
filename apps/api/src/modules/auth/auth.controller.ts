@@ -438,6 +438,120 @@ export function registerAuthRoutes(router: Router): void {
     };
   });
 
+  router.post('/v1/auth/forgot-password', async (req: RouteRequest): Promise<ApiResponse> => {
+    if (req.headers.origin && !isAllowedOrigin(req.headers.origin as string)) {
+      throw new HttpException(403, 'CSRF_ORIGIN_MISMATCH', `Request origin '${req.headers.origin}' is not authorized`);
+    }
+    if (req.headers['sec-fetch-site'] === 'cross-site') {
+      throw new HttpException(403, 'CSRF_CROSS_SITE_FORBIDDEN', 'Cross-site request blocked by Fetch Metadata policy');
+    }
+    if (
+      req.cookies[SESSION_COOKIE_NAME] ||
+      req.cookies[REFRESH_COOKIE_NAME] ||
+      req.cookies[CSRF_COOKIE_NAME] ||
+      req.headers['x-csrf-token']
+    ) {
+      validateCsrf(req);
+    }
+
+    const email = (req.body.email as string) || '';
+    const result = await authService.forgotPassword(email, extractClientIp(req));
+    return {
+      success: true,
+      data: result,
+    };
+  });
+
+  router.post('/v1/auth/reset-password', async (req: RouteRequest): Promise<ApiResponse> => {
+    if (req.headers.origin && !isAllowedOrigin(req.headers.origin as string)) {
+      throw new HttpException(403, 'CSRF_ORIGIN_MISMATCH', `Request origin '${req.headers.origin}' is not authorized`);
+    }
+    if (req.headers['sec-fetch-site'] === 'cross-site') {
+      throw new HttpException(403, 'CSRF_CROSS_SITE_FORBIDDEN', 'Cross-site request blocked by Fetch Metadata policy');
+    }
+
+    const clientIp = extractClientIp(req);
+    if (clientIp) {
+      await authService.checkRateLimit(`reset_pw_${clientIp}`, 15, 60_000);
+    }
+
+    const token = (req.body.token as string) || '';
+    const newPassword = ((req.body.newPassword || req.body.password) as string) || '';
+    const result = await authService.resetPassword(token, newPassword, req.tokenBlacklist);
+    return {
+      success: true,
+      data: {
+        message: 'Password reset successfully. Please sign in with your new password.',
+        ...result,
+      },
+    };
+  });
+
+  router.post('/v1/auth/accept-invitation', async (req: RouteRequest): Promise<ApiResponse> => {
+    if (req.headers.origin && !isAllowedOrigin(req.headers.origin as string)) {
+      throw new HttpException(403, 'CSRF_ORIGIN_MISMATCH', `Request origin '${req.headers.origin}' is not authorized`);
+    }
+    if (req.headers['sec-fetch-site'] === 'cross-site') {
+      throw new HttpException(403, 'CSRF_CROSS_SITE_FORBIDDEN', 'Cross-site request blocked by Fetch Metadata policy');
+    }
+
+    const clientIp = extractClientIp(req);
+    if (clientIp) {
+      await authService.checkRateLimit(`accept_inv_${clientIp}`, 15, 60_000);
+    }
+
+    const result = await authService.acceptInvitation({
+      token: (req.body.token as string) || '',
+      password: req.body.password as string | undefined,
+      fullName: req.body.fullName as string | undefined,
+    });
+    const csrfToken = generateCsrfToken();
+
+    const cookies: CookieToSet[] = [
+      { name: SESSION_COOKIE_NAME, value: result.tokens.accessToken, options: getSessionCookieOptions() },
+      { name: REFRESH_COOKIE_NAME, value: result.tokens.refreshToken, options: getRefreshCookieOptions() },
+      { name: CSRF_COOKIE_NAME, value: csrfToken, options: getCsrfCookieOptions() },
+    ];
+
+    return {
+      success: true,
+      data: {
+        ...result,
+        csrfToken,
+      },
+      cookies,
+    };
+  });
+
+  router.post('/v1/auth/switch-organization', async (req: RouteRequest): Promise<ApiResponse> => {
+    await authenticate(req);
+    if (req.context.authType === 'oauth') {
+      throw new HttpException(403, 'OAUTH_FORBIDDEN', 'OAuth access tokens cannot switch active organizations');
+    }
+    const userId = req.context.userId!;
+    const organizationId = (req.body.organizationId as string) || '';
+    if (!organizationId) {
+      throw new HttpException(400, 'INVALID_PAYLOAD', 'organizationId is required');
+    }
+
+    const result = await authService.switchOrganization(userId, organizationId);
+    const csrfToken = generateCsrfToken();
+    const cookies: CookieToSet[] = [
+      { name: SESSION_COOKIE_NAME, value: result.tokens.accessToken, options: getSessionCookieOptions() },
+      { name: REFRESH_COOKIE_NAME, value: result.tokens.refreshToken, options: getRefreshCookieOptions() },
+      { name: CSRF_COOKIE_NAME, value: csrfToken, options: getCsrfCookieOptions() },
+    ];
+
+    return {
+      success: true,
+      data: {
+        ...result,
+        csrfToken,
+      },
+      cookies,
+    };
+  });
+
   router.get('/v1/auth/me', async (req: RouteRequest): Promise<ApiResponse> => {
     await authenticate(req);
     const userId = req.context.userId!;

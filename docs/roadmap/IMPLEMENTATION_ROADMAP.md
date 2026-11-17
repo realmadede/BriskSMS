@@ -60,7 +60,7 @@ Phase 6: Developer Platform, Transactional Outbox & Zapier App (CORE PLATFORM IM
 Phase 7: Merchant Web Portal (CUSTOM GLISSE PORTAL IMPLEMENTED in apps/web; Angular 19+ SPA / Playwright E2E Deferred)
    |
    v
-[Full Repository Hard Audit & Remediation: AUD-01..AUD-17 (COMPLETED — 532/532 Workspace Tests + 52/52 Android Unit Tests)]
+[Full Repository Hard Audit & SaaS Production-Readiness: AUD-01..AUD-30 (COMPLETED — 543/543 Workspace Tests Across 41 Files + Android Unit/APK Verified)]
    |
    v
 Phase 8: External Carrier Onboarding, Live Staging, Penetration Testing & Production Launch (IN PROGRESS / EXTERNAL PREREQUISITES)
@@ -175,9 +175,9 @@ Phase 8: External Carrier Onboarding, Live Staging, Penetration Testing & Produc
 
 ---
 
-### Full Repository Hard Audit & Remediation (COMPLETED — 2026-11-15)
-- Audited all **17 subsystems** across the monorepo and remediated findings **`AUD-01` through `AUD-17`** (`webhook_endpoints.secret` AES-256-GCM encryption migration `20261116010000`, fail-closed paid subscription verification, `PLATFORM_ADMIN_SECRET` catalog gate, OAuth/session revocation hardening, worker retry locking, `toMinorUnits` BigInt fix, Android `BriskApiClient` Gson fix, Web traversal/XSS/honesty fixes, CI `set -e -o pipefail`, and test-suite reliability fixes).
-- Post-edit verification: **532/532 workspace tests passing across 39 files** (`bun run test` on PostgreSQL 16 + Redis 7), `bun run typecheck` + `bun run build` exit `0`, **15 migrations** applied, and **11 Android JUnit test classes (`52 @Test`s) + `assembleDebug`** passing.
+### Full Repository Hard Audit & SaaS Production-Readiness (COMPLETED — 2026-11-16)
+- Audited all **17 subsystems** across the monorepo and completed findings **`AUD-01` through `AUD-30`** (`webhook_endpoints.secret` AES-256-GCM encryption migration `20261116010000`, fail-closed paid subscription verification including standalone callback-settled STK transactions, `PLATFORM_ADMIN_SECRET` catalog gate, OAuth `bsk_at_` scope & human-session guards, password reset + invitation acceptance + workspace switching, campaign queue dispatch/cancel + gateway retry worker + maintenance sweepers, operational developer/audit/outbox endpoints, Web Console dynamic QR + full workflow controls, Android `BuildConfig`/`WIPE_AND_REVOKE`/boot sync/vector icons/R8 hardening, dead-code removal, and multi-target `Dockerfile`).
+- Post-edit verification: **543/543 workspace tests passing across 41 files** (`bun run test` on PostgreSQL + Redis), `bun run typecheck` + `bun run build` exit `0`, **15 migrations** applied (`STRICT_MIGRATION_CHECKSUMS=true`), and **10 Android JUnit test classes (`47 @Test`s) + `assembleDebug` + `assembleRelease`** passing.
 
 ---
 

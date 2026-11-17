@@ -5,8 +5,10 @@ import {
   resolveAuthorizedTenantOrgId,
 } from '../../core/guards.js';
 import { OAuthService } from './oauth.service.js';
+import { authService } from '../auth/auth.service.js';
 import { dbStore } from '../../core/store.js';
 import { ApiKeyScope, UserRole } from '@brisksms/shared';
+import { sql } from '@brisksms/db';
 
 const oauthService = new OAuthService();
 
@@ -61,11 +63,40 @@ export function registerOAuthRoutes(router: Router): void {
     };
   });
 
+  // 1b. List Registered OAuth Clients for Organization
+  router.get('/v1/oauth/clients', async (req: RouteRequest): Promise<ApiResponse> => {
+    await authenticate(req);
+    assertHumanSessionAuth(req, 'listing OAuth clients');
+    const userId = req.context.userId!;
+    const orgId = resolveAuthorizedTenantOrgId(req, req.query.organizationId);
+    await assertDeveloperAccess(orgId, userId);
+
+    const rows = await sql`
+      SELECT "id", "organization_id", "name", "redirect_uris", "is_public", "created_at"
+      FROM "oauth_clients"
+      WHERE "organization_id" = ${orgId}
+      ORDER BY "created_at" DESC
+    `;
+    const clients = rows.map((r: any) => ({
+      id: String(r.id),
+      organizationId: String(r.organization_id),
+      name: String(r.name),
+      redirectUris: typeof r.redirect_uris === 'string' ? JSON.parse(r.redirect_uris) : r.redirect_uris,
+      isPublic: Boolean(r.is_public),
+      createdAt: new Date(r.created_at).toISOString(),
+    }));
+    return {
+      success: true,
+      data: { clients },
+    };
+  });
+
   // 2. RFC 7636 Authorization Endpoint (Issues authorization code with PKCE challenge)
   router.get('/v1/oauth/authorize', async (req: RouteRequest): Promise<ApiResponse> => {
     await authenticate(req);
     assertHumanSessionAuth(req, 'OAuth authorization approval');
     const userId = req.context.userId!;
+    await authService.checkRateLimit(`oauth_authz_${userId}`, 60, 60_000);
     const clientId = req.query.client_id;
     const redirectUri = req.query.redirect_uri;
     const responseType = req.query.response_type;
@@ -133,6 +164,7 @@ export function registerOAuthRoutes(router: Router): void {
   router.post('/v1/oauth/token', async (req: RouteRequest): Promise<ApiResponse> => {
     const body = req.body as Record<string, any>;
     const grantType = body.grant_type;
+    await authService.checkRateLimit(`oauth_token_${body.client_id || 'anon'}`, 60, 60_000);
 
     if (grantType === 'authorization_code') {
       const clientId = body.client_id;

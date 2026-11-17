@@ -11,9 +11,6 @@
     "build": "tsc",
     "clean": "rm -rf dist"
   },
-  "dependencies": {
-    "@brisksms/shared": "*"
-  },
   "devDependencies": {
     "@brisksms/config": "*",
     "@types/node": "^20.0.0",

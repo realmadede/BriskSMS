@@ -84,6 +84,80 @@ BriskSMS Team`;
       text,
     });
   }
+
+  async sendPasswordResetEmail(to: string, fullName: string, token: string): Promise<EmailDeliveryResult> {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!to || !emailRegex.test(to.trim())) {
+      return { success: false, error: `Invalid recipient email address: '${to}'` };
+    }
+
+    const frontendBase = (process.env.FRONTEND_URL || 'https://console.brisksms.com').replace(/\/+$/, '');
+    const resetUrl = `${frontendBase}/reset-password#token=${encodeURIComponent(token)}`;
+    const expiryMinutes = parseInt(process.env.PASSWORD_RESET_EXPIRY_MINUTES || '60', 10);
+    const safeName = (fullName || 'Merchant').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+    const subject = 'Reset your password - BriskSMS';
+    const html = `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Reset your BriskSMS password</title></head>
+<body style="font-family: sans-serif; background-color: #F8FAFC; color: #0F172A; padding: 24px;">
+  <div style="max-width: 540px; margin: 0 auto; background: #FFFFFF; border-radius: 12px; border: 1px solid #E2E8F0; padding: 32px;">
+    <div style="font-size: 20px; font-weight: 800; color: #D97706; margin-bottom: 24px;">BriskSMS</div>
+    <h1 style="font-size: 22px; font-weight: 700; margin-top: 0;">Reset your password</h1>
+    <p>Hi ${safeName},</p>
+    <p>We received a request to reset your BriskSMS password. Click the button below to choose a new password:</p>
+    <p style="text-align: center;">
+      <a href="${resetUrl}" style="display: inline-block; background-color: #D97706; color: #FFFFFF; font-weight: 600; text-decoration: none; padding: 12px 28px; border-radius: 8px;" target="_blank">Reset Password</a>
+    </p>
+    <p>This link expires in ${expiryMinutes} minutes. If you did not request a password reset, you can safely ignore this email.</p>
+  </div>
+</body>
+</html>`;
+
+    const text = `Hi ${fullName || 'Merchant'},\n\nReset your BriskSMS password using the link below (expires in ${expiryMinutes} minutes):\n\n${resetUrl}\n\nIf you did not request this, ignore this email.\n\n---\nBriskSMS Team`;
+
+    return this.provider.sendEmail({ to, subject, html, text });
+  }
+
+  async sendOrganizationInviteEmail(
+    to: string,
+    fullName: string,
+    organizationName: string,
+    role: string,
+    token: string,
+  ): Promise<EmailDeliveryResult> {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!to || !emailRegex.test(to.trim())) {
+      return { success: false, error: `Invalid recipient email address: '${to}'` };
+    }
+
+    const frontendBase = (process.env.FRONTEND_URL || 'https://console.brisksms.com').replace(/\/+$/, '');
+    const inviteUrl = `${frontendBase}/accept-invite#token=${encodeURIComponent(token)}`;
+    const safeName = (fullName || 'Team Member').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const safeOrg = (organizationName || 'BriskSMS Workspace').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+    const subject = `You've been invited to join ${organizationName} on BriskSMS`;
+    const html = `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Organization Invitation - BriskSMS</title></head>
+<body style="font-family: sans-serif; background-color: #F8FAFC; color: #0F172A; padding: 24px;">
+  <div style="max-width: 540px; margin: 0 auto; background: #FFFFFF; border-radius: 12px; border: 1px solid #E2E8F0; padding: 32px;">
+    <div style="font-size: 20px; font-weight: 800; color: #D97706; margin-bottom: 24px;">BriskSMS</div>
+    <h1 style="font-size: 22px; font-weight: 700; margin-top: 0;">Join ${safeOrg}</h1>
+    <p>Hi ${safeName},</p>
+    <p>You have been invited to join <strong>${safeOrg}</strong> on BriskSMS with the role <strong>${role}</strong>.</p>
+    <p style="text-align: center;">
+      <a href="${inviteUrl}" style="display: inline-block; background-color: #D97706; color: #FFFFFF; font-weight: 600; text-decoration: none; padding: 12px 28px; border-radius: 8px;" target="_blank">Accept Invitation</a>
+    </p>
+    <p>This invitation link expires in 7 days.</p>
+  </div>
+</body>
+</html>`;
+
+    const text = `Hi ${fullName || 'Team Member'},\n\nYou have been invited to join ${organizationName} on BriskSMS (${role}). Accept your invitation and set up your password here:\n\n${inviteUrl}\n\n---\nBriskSMS Team`;
+
+    return this.provider.sendEmail({ to, subject, html, text });
+  }
 }
 
 export const emailService = new EmailService();

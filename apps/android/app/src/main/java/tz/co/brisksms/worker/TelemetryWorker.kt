@@ -116,7 +116,7 @@ class TelemetryWorker(
         }
     }
 
-    private fun executeCommand(
+    private suspend fun executeCommand(
         cmd: tz.co.brisksms.core.network.DeviceCommandPayload,
         db: BriskDatabase
     ): DeviceCommandAckPayload? {
@@ -164,9 +164,28 @@ class TelemetryWorker(
                 }
                 "WIPE_AND_REVOKE" -> {
                     Log.w(TAG, "Executing emergency WIPE_AND_REVOKE remote command.")
-                    secureStorage.isRevoked = true
-                    secureStorage.isPaired = false
-                    secureStorage.deviceToken = null
+                    runCatching {
+                        apiClient.acknowledgeCommand(
+                            DeviceCommandAckPayload(
+                                commandId = cmd.id,
+                                status = "ACKNOWLEDGED",
+                                leaseToken = cmd.leaseToken
+                            )
+                        )
+                    }
+                    runCatching {
+                        applicationContext.stopService(
+                            android.content.Intent(
+                                applicationContext,
+                                tz.co.brisksms.messaging.service.SmsGateRelayService::class.java
+                            )
+                        )
+                    }
+                    runCatching {
+                        androidx.work.WorkManager.getInstance(applicationContext).cancelUniqueWork("BrisksmsTelemetry")
+                        androidx.work.WorkManager.getInstance(applicationContext).cancelUniqueWork("BrisksmsEvidenceUpload")
+                    }
+                    secureStorage.clearRevokedIdentity()
                     secureStorage.pendingCommandAcksJson = null
                     secureStorage.pendingSmsJobResultsJson = null
                     db.clearAllTables()

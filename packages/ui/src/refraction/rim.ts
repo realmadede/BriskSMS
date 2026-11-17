@@ -1,7 +1,6 @@
 import { LensShape, distanceToRoundedRect } from './lens.js';
 
 export const RIM_WIDTH = 1.22;
-export const EDGE_WIDTH = 0.5;
 
 export interface RimMapData {
   columns: number;

@@ -33,7 +33,7 @@ services:
       retries: 5
 
   api:
-    image: oven/bun:1.1-alpine
+    image: oven/bun:1.4.2-alpine
     container_name: brisksms-api
     working_dir: /app
     restart: unless-stopped
@@ -46,6 +46,8 @@ services:
       REDIS_URL: redis://redis:6379
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-dev_jwt_access_secret_minimum_32_characters_long}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-dev_jwt_refresh_secret_minimum_32_characters_long}
+      ENCRYPTION_MASTER_KEY: ${ENCRYPTION_MASTER_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
+      CSRF_SECRET: ${CSRF_SECRET:-dev_csrf_secret_minimum_32_characters_long_key}
     ports:
       - "${PORT:-3000}:3000"
     depends_on:
@@ -53,11 +55,16 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:3000/health/live').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     command: ["sh", "-c", "bun run packages/db/src/cli.ts migrate && bun run packages/db/src/cli.ts seed && bun run apps/api/src/main.ts"]
     profiles: ["app", "full"]
 
   worker:
-    image: oven/bun:1.1-alpine
+    image: oven/bun:1.4.2-alpine
     container_name: brisksms-worker
     working_dir: /app
     restart: unless-stopped
@@ -67,12 +74,28 @@ services:
       NODE_ENV: ${NODE_ENV:-development}
       DATABASE_URL: postgresql://${POSTGRES_USER:-brisksms}:${POSTGRES_PASSWORD:-brisksms_dev_secret}@postgres:5432/${POSTGRES_DB:-brisksms_dev}?schema=public
       REDIS_URL: redis://redis:6379
+      ENCRYPTION_MASTER_KEY: ${ENCRYPTION_MASTER_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     command: ["bun", "run", "apps/worker/src/main.ts"]
+    profiles: ["app", "full"]
+
+  web:
+    image: oven/bun:1.4.2-alpine
+    container_name: brisksms-web
+    working_dir: /app
+    restart: unless-stopped
+    volumes:
+      - ./:/app
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      WEB_PORT: ${WEB_PORT:-4200}
+    ports:
+      - "${WEB_PORT:-4200}:4200"
+    command: ["bun", "run", "apps/web/src/server.ts"]
     profiles: ["app", "full"]
 
   # Product B: Private Dedicated Gateway Service (Mode B)

@@ -10,6 +10,7 @@ import { dbStore } from '../../core/store.js';
 import { catalogService } from './catalog.service.js';
 import { subscriptionService } from './subscription.service.js';
 import { entitlementService } from './entitlement.service.js';
+import { authService } from '../auth/auth.service.js';
 
 function assertPlatformAdmin(req: RouteRequest): void {
   assertHumanSessionAuth(req, 'platform catalog administration');
@@ -90,6 +91,7 @@ export function registerSubscriptionRoutes(router: Router): void {
     const userId = req.context.userId!;
     const orgId = resolveAuthorizedTenantOrgId(req, req.params.orgId);
     await assertOrgMemberRole(orgId, userId, [UserRole.OWNER, UserRole.ADMIN]);
+    await authService.checkRateLimit(`sub_checkout_${orgId}`, 20, 60_000);
 
     const body = req.body as unknown as {
       planCode: string;
@@ -110,6 +112,21 @@ export function registerSubscriptionRoutes(router: Router): void {
     return {
       success: true,
       data: { subscription },
+    };
+  });
+
+  // 3b. Tenant Subscription Billing Invoices (OWNER, ADMIN, FINANCE)
+  router.get('/v1/organizations/:orgId/subscription/invoices', async (req: RouteRequest): Promise<ApiResponse> => {
+    await authenticate(req);
+    assertHumanSessionAuth(req, 'reading subscription billing invoices');
+    const userId = req.context.userId!;
+    const orgId = resolveAuthorizedTenantOrgId(req, req.params.orgId);
+    await assertOrgMemberRole(orgId, userId, [UserRole.OWNER, UserRole.ADMIN, UserRole.FINANCE]);
+
+    const invoices = await subscriptionService.listSubscriptionInvoices(orgId);
+    return {
+      success: true,
+      data: { invoices },
     };
   });
 

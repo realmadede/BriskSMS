@@ -1,6 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 36" width="160" height="36" fill="none">
-  <rect width="36" height="36" rx="9" fill="#0B0A09"/>
-  <path d="M9 10C9 8.34 10.34 7 12 7H24C25.66 7 27 8.34 27 10V19C27 20.66 25.66 22 24 22H15.5L11 26.5V22H12C10.34 22 9 20.66 9 19V10Z" fill="#F4F1EA"/>
-  <path d="M19.5 9.5L13.5 16H18L16 21.5L22.5 15H17.5L19.5 9.5Z" fill="#C6B480"/>
-  <text x="46" y="25" font-family="Plus Jakarta Sans, sans-serif" font-size="20" font-weight="800" letter-spacing="-0.04em" fill="#0B0A09">Brisk<tspan fill="#C6B480">SMS</tspan></text>
-</svg>

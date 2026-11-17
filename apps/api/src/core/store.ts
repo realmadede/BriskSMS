@@ -917,7 +917,19 @@ export class PostgresStore {
     await tx`
       UPDATE "email_verification_tokens"
       SET "expires_at" = NOW()
-      WHERE "user_id" = ${userId} AND "used_at" IS NULL AND "expires_at" > NOW()
+      WHERE "user_id" = ${userId}
+        AND "used_at" IS NULL
+        AND "expires_at" > NOW()
+    `;
+  }
+
+  async revokeUserPasswordResetTokens(userId: string, tx: SqlExecutor = sql): Promise<void> {
+    await tx`
+      UPDATE "email_verification_tokens"
+      SET "expires_at" = NOW()
+      WHERE "user_id" = ${userId}
+        AND "used_at" IS NULL
+        AND "expires_at" > NOW()
     `;
   }
 

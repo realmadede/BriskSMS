@@ -18,6 +18,7 @@ import {
   QUEUE_NAMES,
   createLogger,
   recordWorkerHeartbeat,
+  removeWorkerHeartbeat,
 } from '@brisksms/db';
 
 const logger = createLogger('brisksms:worker');
@@ -584,11 +585,21 @@ export async function runMaintenanceCleanup(retentionDays: number = 30): Promise
   purgedPairingTokens: number;
   purgedRevokedSessions: number;
   purgedVerificationTokens: number;
+  dispatchedScheduledCampaigns: number;
+  expiredProvisionalClaims: number;
+  expiredOutboundSmsJobs: number;
+  expiredStkTransactions: number;
+  purgedExpiredOAuthAndRefresh: number;
 }> {
   const now = new Date();
   let purgedPairingTokens = 0;
   let purgedRevokedSessions = 0;
   let purgedVerificationTokens = 0;
+  let dispatchedScheduledCampaigns = 0;
+  let expiredProvisionalClaims = 0;
+  let expiredOutboundSmsJobs = 0;
+  let expiredStkTransactions = 0;
+  let purgedExpiredOAuthAndRefresh = 0;
 
   try {
     const deletedPairing = await sql<{ id: string }>`
@@ -630,10 +641,189 @@ export async function runMaintenanceCleanup(retentionDays: number = 30): Promise
     });
   }
 
+  // 4. Sweep due SCHEDULED campaigns
+  try {
+    const dueCampaigns = await sql<{ id: string; organization_id: string }>`
+      SELECT id, organization_id
+      FROM sms_campaigns
+      WHERE status = 'SCHEDULED'::"CampaignStatus"
+        AND scheduled_at IS NOT NULL
+        AND scheduled_at <= ${now}
+      ORDER BY scheduled_at ASC
+      LIMIT 25
+    `;
+    for (const camp of dueCampaigns) {
+      await processSmsCampaignJob({
+        id: `sched_camp_${camp.id}`,
+        name: 'scheduled-campaign',
+        queueName: QUEUE_NAMES.SMS_CAMPAIGN,
+        data: { organizationId: camp.organization_id, campaignId: camp.id },
+        opts: {} as any,
+        status: 'active' as any,
+        attemptsMade: 0,
+        timestamp: Date.now(),
+      });
+      dispatchedScheduledCampaigns++;
+    }
+  } catch (err) {
+    logger.error('Failed to sweep due scheduled SMS campaigns', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  // 5. Expire stale PROVISIONAL payment-reference claims
+  try {
+    const expiredClaims = await sql<{ id: string }>`
+      UPDATE "payment_reference_claims"
+      SET "status" = 'EXPIRED'::"claim_status",
+          "updated_at" = ${now}
+      WHERE "status" = 'PROVISIONAL'::"claim_status"
+        AND "expires_at" IS NOT NULL
+        AND "expires_at" <= ${now}
+      RETURNING "id"
+    `;
+    expiredProvisionalClaims = expiredClaims.length;
+  } catch (err) {
+    logger.error('Failed to expire stale provisional payment-reference claims', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  // 6. Expire stale QUEUED/CLAIMED outbound_sms_jobs and refund reserved credits once
+  try {
+    const staleJobs = await sql<{ id: string; organization_id: string }>`
+      SELECT "id", "organization_id"
+      FROM "outbound_sms_jobs"
+      WHERE "status" IN ('QUEUED'::"OutboundSmsJobStatus", 'CLAIMED'::"OutboundSmsJobStatus")
+        AND "expires_at" <= ${now}
+      LIMIT 50
+    `;
+    for (const sj of staleJobs) {
+      await withTransaction(async (tx) => {
+        const jRows = await tx<Record<string, any>>`
+          SELECT * FROM "outbound_sms_jobs"
+          WHERE "id" = ${sj.id} AND "organization_id" = ${sj.organization_id}
+          FOR UPDATE
+        `;
+        const job = jRows[0];
+        if (!job || (job.status !== 'QUEUED' && job.status !== 'CLAIMED') || new Date(job.expires_at) > now) {
+          return;
+        }
+        const mRows = await tx<Record<string, any>>`
+          SELECT * FROM "sms_messages" WHERE "id" = ${job.message_id} FOR UPDATE
+        `;
+        const cost = Number(mRows[0]?.cost_credits || 1);
+        const refId = `refund_${job.message_id}`;
+        const existingRefund = await tx<{ id: string }>`
+          SELECT "id" FROM "messaging_credit_ledger"
+          WHERE "organization_id" = ${sj.organization_id}
+            AND "reference_id" = ${refId}
+            AND "entry_type" = ${CreditLedgerEntryType.REFUND}::"CreditLedgerEntryType"
+          LIMIT 1
+        `;
+        if (existingRefund.length === 0 && cost > 0) {
+          const acctRows = await tx<Record<string, any>>`
+            SELECT * FROM "messaging_accounts"
+            WHERE "organization_id" = ${sj.organization_id}
+            FOR UPDATE
+          `;
+          if (acctRows.length > 0) {
+            const nextBal = Number(acctRows[0]!.credit_balance) + cost;
+            const curRes = Number(acctRows[0]!.reserved_credits);
+            await tx`
+              UPDATE "messaging_accounts"
+              SET "credit_balance" = ${nextBal}, "updated_at" = ${now}
+              WHERE "organization_id" = ${sj.organization_id}
+            `;
+            await tx`
+              INSERT INTO "messaging_credit_ledger" (
+                "id", "organization_id", "entry_type", "amount_credits",
+                "balance_after", "reserved_after", "reference_id", "created_at"
+              ) VALUES (
+                ${randomUUID()}, ${sj.organization_id}, ${CreditLedgerEntryType.REFUND}::"CreditLedgerEntryType",
+                ${cost}, ${nextBal}, ${curRes}, ${refId}, ${now}
+              )
+            `;
+          }
+        }
+        await tx`
+          UPDATE "outbound_sms_jobs"
+          SET "status" = 'EXPIRED'::"OutboundSmsJobStatus",
+              "failure_code" = 'TTL_EXPIRED',
+              "error_message" = 'Outbound SMS job expired before cellular dispatch',
+              "completed_at" = ${now},
+              "updated_at" = ${now}
+          WHERE "id" = ${sj.id}
+        `;
+        await tx`
+          UPDATE "sms_messages"
+          SET "status" = ${SmsStatus.FAILED}::"SmsStatus",
+              "last_error" = 'Outbound SMS job expired before cellular dispatch',
+              "updated_at" = ${now}
+          WHERE "id" = ${job.message_id}
+        `;
+        expiredOutboundSmsJobs++;
+      });
+    }
+  } catch (err) {
+    logger.error('Failed to sweep expired outbound SMS jobs', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  // 7. Expire stale PENDING STK push transactions (>15 minutes without callback)
+  try {
+    const stkCutoff = new Date(Date.now() - 15 * 60 * 1000);
+    const expiredStks = await sql<{ id: string }>`
+      UPDATE "stk_push_transactions"
+      SET "status" = 'EXPIRED'::"StkPushStatus",
+          "result_description" = 'STK checkout timed out without carrier callback',
+          "updated_at" = ${now}
+      WHERE "status" = 'PENDING'::"StkPushStatus"
+        AND "created_at" < ${stkCutoff}
+      RETURNING "id"
+    `;
+    expiredStkTransactions = expiredStks.length;
+  } catch (err) {
+    logger.error('Failed to expire stale STK push transactions', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  // 8. Purge expired OAuth codes, pairing challenges, and old refresh tokens
+  try {
+    const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
+    const d1 = await sql<{ code: string }>`
+      DELETE FROM "oauth_authorization_codes"
+      WHERE "expires_at" < ${cutoff}
+      RETURNING "code"
+    `;
+    const d2 = await sql<{ id: string }>`
+      DELETE FROM "device_pairing_challenges"
+      WHERE "consumed_at" IS NULL AND "expires_at" < ${now}
+      RETURNING "id"
+    `;
+    const d3 = await sql<{ token_hash: string }>`
+      DELETE FROM "refresh_tokens"
+      WHERE "expires_at" < ${cutoff}
+      RETURNING "token_hash"
+    `;
+    purgedExpiredOAuthAndRefresh = d1.length + d2.length + d3.length;
+  } catch (err) {
+    logger.error('Failed to purge expired OAuth/challenge/refresh records', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
   return {
     purgedPairingTokens,
     purgedRevokedSessions,
     purgedVerificationTokens,
+    dispatchedScheduledCampaigns,
+    expiredProvisionalClaims,
+    expiredOutboundSmsJobs,
+    expiredStkTransactions,
+    purgedExpiredOAuthAndRefresh,
   };
 }
 
@@ -753,12 +943,13 @@ export async function processPaymentProcessingJob(
  */
 export async function processSmsDeliveryRetryJob(
   job: BullJob<SmsDeliveryRetryJobData>,
+  customFetch?: CustomFetchHandler,
 ): Promise<{ status: string; refunded: boolean }> {
   const { organizationId, messageId } = job.data;
   const maxAttempts = 3;
   const now = new Date();
 
-  return withTransaction(async (tx) => {
+  const stateResult = await withTransaction(async (tx) => {
     const msgRows = await tx<Record<string, any>>`
       SELECT * FROM sms_messages
       WHERE id = ${messageId} AND organization_id = ${organizationId}
@@ -771,7 +962,7 @@ export async function processSmsDeliveryRetryJob(
 
     const msg = msgRows[0]!;
     if (msg.status === SmsStatus.DELIVERED || msg.status === SmsStatus.FAILED) {
-      return { status: msg.status, refunded: false };
+      return { terminal: true, status: String(msg.status), refunded: false, msg: null, nextAttempt: 0 };
     }
 
     const currentAttempts = Number(msg.attempt_count || 1);
@@ -830,18 +1021,83 @@ export async function processSmsDeliveryRetryJob(
         }
       }
 
-      return { status: SmsStatus.FAILED, refunded };
+      return { terminal: true, status: SmsStatus.FAILED, refunded, msg: null, nextAttempt: currentAttempts };
     }
 
+    const nextAttempt = currentAttempts + 1;
     await tx`
       UPDATE sms_messages
-      SET attempt_count = ${currentAttempts + 1},
+      SET attempt_count = ${nextAttempt},
           updated_at = ${now}
       WHERE id = ${messageId} AND organization_id = ${organizationId}
     `;
 
-    return { status: msg.status, refunded: false };
+    return { terminal: false, status: String(msg.status), refunded: false, msg, nextAttempt };
   });
+
+  if (stateResult.terminal || !stateResult.msg) {
+    return { status: stateResult.status, refunded: stateResult.refunded };
+  }
+
+  // Attempt gateway re-dispatch if organization gateway credentials are configured
+  const acctRows = await sql<Record<string, any>>`
+    SELECT * FROM messaging_accounts WHERE organization_id = ${organizationId} LIMIT 1
+  `;
+  const acct = acctRows[0];
+  if (acct && acct.gateway_base_url && acct.encrypted_api_token) {
+    try {
+      const endpoint = resolveSmsGateMessagesEndpoint(acct.gateway_base_url);
+      await validateResolvedOutboundUrl(endpoint);
+      const authHeader = buildGatewayAuthHeader(acct.encrypted_api_token);
+      const fetchImpl =
+        customFetch ??
+        ((url: string, init: RequestInit) =>
+          fetch(url, {
+            ...init,
+            redirect: 'error',
+            signal: AbortSignal.timeout(15_000),
+          }));
+      const res = await fetchImpl(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: authHeader,
+          'X-Idempotency-Key': `retry_${messageId}_${stateResult.nextAttempt}`,
+        },
+        body: JSON.stringify({
+          phoneNumbers: [stateResult.msg.recipient_phone],
+          textMessage: { text: stateResult.msg.message_text },
+          simNumber: Number(stateResult.msg.sim_slot || acct.default_sim_slot || 1),
+          withDeliveryReport: true,
+        }),
+      });
+      if (res.ok) {
+        const jsonBody =
+          typeof (res as Response).json === 'function'
+            ? ((await (res as Response).json().catch(() => null)) as Record<string, any> | null)
+            : null;
+        const providerMsgId = (jsonBody?.id as string) || (jsonBody?.messageId as string) || null;
+        await sql`
+          UPDATE sms_messages
+          SET status = ${SmsStatus.SUBMITTED}::"SmsStatus",
+              provider_message_id = COALESCE(${providerMsgId}, provider_message_id),
+              last_error = NULL,
+              updated_at = NOW()
+          WHERE id = ${messageId} AND organization_id = ${organizationId}
+        `;
+        return { status: SmsStatus.SUBMITTED, refunded: false };
+      }
+    } catch (err) {
+      logger.warn('SMS delivery retry gateway attempt failed', {
+        organizationId,
+        messageId,
+        attempt: stateResult.nextAttempt,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  return { status: stateResult.status, refunded: false };
 }
 
 /** Bounded so the durable dispatch lease (60s) always outlives a healthy request. */
@@ -1431,6 +1687,7 @@ export class BriskWorkerRuntime {
       this.paymentWorker.stop(),
       this.retryWorker.stop(),
     ]);
+    await removeWorkerHeartbeat(this.workerId).catch(() => {});
     logger.info('BriskSMS background worker runtime stopped gracefully', {
       workerId: this.workerId,
     });

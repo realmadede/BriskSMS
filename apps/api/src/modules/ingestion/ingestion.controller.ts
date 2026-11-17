@@ -6,6 +6,7 @@ import {
   resolveAuthorizedTenantOrgId,
 } from '../../core/guards.js';
 import { dbStore } from '../../core/store.js';
+import { authService } from '../auth/auth.service.js';
 import { ingestionService } from './ingestion.service.js';
 import { EvidenceSourceType } from '@brisksms/shared';
 
@@ -18,6 +19,7 @@ export function registerIngestionRoutes(router: Router): void {
    */
   router.post('/v1/ingestion/evidence', async (req: RouteRequest): Promise<ApiResponse> => {
     const deviceCtx = await authenticateDevice(req);
+    await authService.checkRateLimit(`ingest_dev_${deviceCtx.deviceId}`, 180, 60_000);
     const body = req.body;
 
     if (!body || typeof body !== 'object') {

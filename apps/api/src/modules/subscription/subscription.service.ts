@@ -112,18 +112,32 @@ export class SubscriptionService {
         const refNorm = dto.paymentMethodRef.trim();
         // Verify settled/verified payment evidence inside the same organization and currency,
         // locking matching rows FOR UPDATE and excluding customer-invoice or disputed claims.
-        const verifiedStkRows = await tx<{ id: string; provider_reference: string | null }>`
-          SELECT "id", "provider_reference"
-          FROM "stk_push_transactions"
-          WHERE "organization_id" = ${organizationId}
-            AND "status" = 'SUCCESS'::"StkPushStatus"
-            AND "invoice_id" IS NULL
-            AND "settled_payment_id" IS NULL
-            AND "currency" = ${matchedPrice.currency}
-            AND "amount_cents" >= ${matchedPrice.amountCents.toString()}::bigint
-            AND ("provider_reference" = ${refNorm} OR "id"::text = ${refNorm})
+        const verifiedStkRows = await tx<{
+          id: string;
+          provider_reference: string | null;
+          settled_payment_id: string | null;
+        }>`
+          SELECT s."id", s."provider_reference", s."settled_payment_id"
+          FROM "stk_push_transactions" s
+          WHERE s."organization_id" = ${organizationId}
+            AND s."status" = 'SUCCESS'::"StkPushStatus"
+            AND s."invoice_id" IS NULL
+            AND s."currency" = ${matchedPrice.currency}
+            AND s."amount_cents" >= ${matchedPrice.amountCents.toString()}::bigint
+            AND (
+              s."provider_reference" = ${refNorm}
+              OR s."id"::text = ${refNorm}
+              OR s."settled_payment_id"::text = ${refNorm}
+            )
+            AND (
+              s."settled_payment_id" IS NULL
+              OR NOT EXISTS (
+                SELECT 1 FROM "invoice_payments" ip
+                WHERE ip."payment_id" = s."settled_payment_id"
+              )
+            )
           LIMIT 1
-          FOR UPDATE
+          FOR UPDATE OF s
         `;
         const verifiedNormRows =
           verifiedStkRows.length === 0
@@ -138,6 +152,11 @@ export class SubscriptionService {
                   AND NOT EXISTS (
                     SELECT 1 FROM "invoice_payments" ip
                     WHERE ip."payment_id" = np."id"
+                  )
+                  AND NOT EXISTS (
+                    SELECT 1 FROM "stk_push_transactions" s2
+                    WHERE s2."settled_payment_id" = np."id"
+                      AND s2."invoice_id" IS NOT NULL
                   )
                   AND NOT EXISTS (
                     SELECT 1 FROM "payment_reference_claims" prc
@@ -159,18 +178,20 @@ export class SubscriptionService {
         }
 
         const matchedEvidenceId = verifiedStkRows[0]?.id ?? verifiedNormRows[0]?.id ?? refNorm;
+        const settledPaymentId = verifiedStkRows[0]?.settled_payment_id ?? verifiedNormRows[0]?.id ?? matchedEvidenceId;
         const canonicalRef =
           verifiedStkRows[0]?.provider_reference ?? verifiedNormRows[0]?.reference ?? refNorm;
 
         // Serialize checkouts targeting the same provider reference or internal evidence ID
         await tx`SELECT pg_advisory_xact_lock(hashtext('sub_pay_ref:' || ${canonicalRef}))`;
         await tx`SELECT pg_advisory_xact_lock(hashtext('sub_pay_id:' || ${matchedEvidenceId}))`;
+        await tx`SELECT pg_advisory_xact_lock(hashtext('sub_pay_settled:' || ${settledPaymentId}))`;
 
         const alreadyUsedRows = await tx<{ id: string }>`
           SELECT "id"
           FROM "subscription_billing_invoices"
           WHERE "is_paid" = true
-            AND "payment_provider_ref" IN (${canonicalRef}, ${refNorm}, ${matchedEvidenceId})
+            AND "payment_provider_ref" IN (${canonicalRef}, ${refNorm}, ${matchedEvidenceId}, ${settledPaymentId})
           LIMIT 1
         `;
         if (alreadyUsedRows.length > 0) {
@@ -353,6 +374,43 @@ export class SubscriptionService {
 
       return (await this.getOrganizationSubscription(organizationId, tx))!;
     });
+  }
+
+  async listSubscriptionInvoices(organizationId: string): Promise<Array<{
+    id: string;
+    organizationId: string;
+    subscriptionId: string;
+    invoiceNumber: string;
+    amountCents: string;
+    currency: string;
+    periodStart: string;
+    periodEnd: string;
+    isPaid: boolean;
+    paidAt: string | null;
+    paymentProviderRef: string | null;
+    createdAt: string;
+  }>> {
+    const rows = await sql`
+      SELECT *
+      FROM "subscription_billing_invoices"
+      WHERE "organization_id" = ${organizationId}
+      ORDER BY "created_at" DESC
+      LIMIT 100
+    `;
+    return rows.map((r: any) => ({
+      id: String(r.id),
+      organizationId: String(r.organization_id),
+      subscriptionId: String(r.subscription_id),
+      invoiceNumber: String(r.invoice_number),
+      amountCents: BigInt(r.amount_cents).toString(),
+      currency: String(r.currency),
+      periodStart: new Date(r.period_start).toISOString(),
+      periodEnd: new Date(r.period_end).toISOString(),
+      isPaid: Boolean(r.is_paid),
+      paidAt: r.paid_at ? new Date(r.paid_at).toISOString() : null,
+      paymentProviderRef: r.payment_provider_ref ? String(r.payment_provider_ref) : null,
+      createdAt: new Date(r.created_at).toISOString(),
+    }));
   }
 }
 

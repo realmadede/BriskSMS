@@ -1,9 +1,13 @@
 import { BriskWorkerRuntime } from './workers.js';
 import { closeDatabasePool, closeRedisClient } from '@brisksms/db';
+import { encryptSecret } from '@brisksms/shared';
 
 const runtime = new BriskWorkerRuntime();
 
 async function bootstrap() {
+  if (process.env.NODE_ENV === 'production') {
+    encryptSecret('worker_boot_encryption_key_check');
+  }
   await runtime.start();
 }
 

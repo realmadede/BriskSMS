@@ -13,6 +13,7 @@ import {
   assertOAuthScope,
   resolveAuthorizedTenantOrgId,
 } from '../../core/guards.js';
+import { authService } from '../auth/auth.service.js';
 
 function mapDeviceDomainError(err: unknown): never {
   if (err instanceof BriskError) {
@@ -108,6 +109,7 @@ export function registerDeviceRoutes(router: Router): void {
     }
 
     const dto = (req.body || {}) as unknown as CreatePairingChallengeRequest;
+    await authService.checkRateLimit(`pair_chal_${dto.enrollmentToken || (req.body as any)?.pairingToken || 'anon'}`, 20, 60_000);
     try {
       const challenge = await deviceService.createPairingChallenge(dto);
       return {
@@ -131,6 +133,7 @@ export function registerDeviceRoutes(router: Router): void {
     }
 
     const dto = (req.body || {}) as unknown as PairDeviceDto;
+    await authService.checkRateLimit(`pair_exec_${dto.enrollmentToken || (req.body as any)?.pairingToken || 'anon'}`, 15, 60_000);
     try {
       const result = await deviceService.pairDevice(dto);
       return {
@@ -175,6 +178,7 @@ export function registerDeviceRoutes(router: Router): void {
   router.post('/v1/devices/:id/telemetry', async (req: RouteRequest): Promise<ApiResponse> => {
     const deviceId = req.params.id || '';
     const deviceToken = extractDeviceBearerToken(req);
+    await authService.checkRateLimit(`dev_telem_${deviceId}`, 120, 60_000);
 
     const dto = (req.body || {}) as unknown as TelemetryDto;
     const telemetry = await deviceService.recordTelemetry(deviceId, deviceToken, dto);

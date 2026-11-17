@@ -18,6 +18,7 @@ export enum CampaignStatus {
   DISPATCHING = 'DISPATCHING',
   COMPLETED = 'COMPLETED',
   PAUSED = 'PAUSED',
+  CANCELED = 'CANCELED',
   CANCELLED = 'CANCELLED',
 }
 
@@ -29,15 +30,6 @@ export enum SenderIdStatus {
   SUBMITTED_TO_TCRA = 'SUBMITTED_TO_TCRA',
   APPROVED = 'APPROVED',
   REJECTED = 'REJECTED',
-}
-
-/**
- * Upstream SMS Gateway / Relay Provider Channel
- */
-export enum SmsGatewayProvider {
-  SMSGATE_SERVER = 'SMSGATE_SERVER',
-  SMSGATE_CLOUD = 'SMSGATE_CLOUD',
-  MOCK_TEST_GATEWAY = 'MOCK_TEST_GATEWAY',
 }
 
 /**

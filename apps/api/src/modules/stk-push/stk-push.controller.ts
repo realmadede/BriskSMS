@@ -2,8 +2,9 @@ import { Router, RouteRequest, ApiResponse, HttpException } from '../../core/htt
 import { authenticate } from '../../core/guards.js';
 import { dbStore } from '../../core/store.js';
 import { ApiKeyScope, BriskError, PaymentProvider } from '@brisksms/shared';
-import { DatabaseUnavailableError } from '@brisksms/db';
+import { DatabaseUnavailableError, sql } from '@brisksms/db';
 import { ApiKeyService } from '../developer/api-key.service.js';
+import { authService } from '../auth/auth.service.js';
 import { stkPushService } from './stk-push.service.js';
 import { CallbackVerificationRequest } from './verifiers/index.js';
 
@@ -112,6 +113,7 @@ export function registerStkPushRoutes(router: Router): void {
    */
   router.post('/v1/payments/stk-push', async (req: RouteRequest): Promise<ApiResponse> => {
     const orgId = await resolveOrganizationContext(req);
+    await authService.checkRateLimit(`stk_init_${orgId}`, 60, 60_000);
     const body = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, any>;
 
     if (!body.phoneNumber || typeof body.phoneNumber !== 'string') {
@@ -172,6 +174,46 @@ export function registerStkPushRoutes(router: Router): void {
       }
       throw new HttpException(500, 'STK_PUSH_ERROR', 'STK push initiation failed due to an unexpected internal error');
     }
+  });
+
+  /**
+   * 1b. List Organization STK Push Transactions
+   */
+  router.get('/v1/payments/stk-push', async (req: RouteRequest): Promise<ApiResponse> => {
+    const orgId = await resolveOrganizationContext(req, [
+      ApiKeyScope.PAYMENT_STK,
+      ApiKeyScope.PAYMENTS_WRITE,
+      ApiKeyScope.PAYMENTS_READ,
+    ]);
+    const rows = await sql`
+      SELECT *
+      FROM "stk_push_transactions"
+      WHERE "organization_id" = ${orgId}
+      ORDER BY "created_at" DESC
+      LIMIT 100
+    `;
+    const transactions = rows.map((r: any) => ({
+      id: String(r.id),
+      organizationId: String(r.organization_id),
+      provider: String(r.provider),
+      phoneNumber: String(r.phone_number),
+      amountCents: BigInt(r.amount_cents).toString(),
+      currency: String(r.currency),
+      referenceNumber: r.reference_number ? String(r.reference_number) : null,
+      invoiceId: r.invoice_id ? String(r.invoice_id) : null,
+      status: String(r.status),
+      checkoutRequestId: String(r.id),
+      providerReference: r.provider_reference ? String(r.provider_reference) : null,
+      settledPaymentId: r.settled_payment_id ? String(r.settled_payment_id) : null,
+      resultCode: r.result_code !== null && r.result_code !== undefined ? Number(r.result_code) : null,
+      resultDescription: r.result_description ? String(r.result_description) : null,
+      createdAt: new Date(r.created_at).toISOString(),
+      updatedAt: new Date(r.updated_at).toISOString(),
+    }));
+    return {
+      success: true,
+      data: { transactions },
+    };
   });
 
   /**
