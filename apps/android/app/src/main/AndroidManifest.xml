@@ -25,9 +25,9 @@
         android:allowBackup="false"
         android:usesCleartextTraffic="false"
         android:networkSecurityConfig="@xml/network_security_config"
-        android:icon="@drawable/ic_brisk_launcher"
+        android:icon="@mipmap/ic_launcher"
         android:label="BriskSMS Relay"
-        android:roundIcon="@drawable/ic_brisk_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
 

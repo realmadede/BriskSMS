@@ -48,14 +48,14 @@ describe('Phase 1: AuthModule & Identity Lifecycle', () => {
 
   it('should prevent duplicate registration with the same email address', async () => {
     await authService.register({
-      email: 'admin@brisksms.co.tz',
+      email: 'admin@brisksms.app',
       password: 'AdminPassword123!',
       fullName: 'System Admin',
     });
 
     await assert.rejects(
       authService.register({
-        email: 'admin@brisksms.co.tz',
+        email: 'admin@brisksms.app',
         password: 'AnotherPassword456!',
         fullName: 'Duplicate Admin',
       }),

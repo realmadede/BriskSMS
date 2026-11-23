@@ -61,11 +61,11 @@ class SmsGateProtocolTest {
 
     @Test
     fun gatewayMode_preservesEndpointSeparation() {
-        val managedUrl = "https://gateway.brisksms.com/api/v1"
+        val managedUrl = "https://gateway.brisksms.app/api/v1"
         val cloudRelayUrl = "https://api.sms-gate.app/3rdparty/v1"
 
         assertNotEquals(managedUrl, cloudRelayUrl)
-        assertTrue(managedUrl.contains("gateway.brisksms.com"))
+        assertTrue(managedUrl.contains("gateway.brisksms.app"))
         assertTrue(cloudRelayUrl.contains("sms-gate.app"))
     }
 }

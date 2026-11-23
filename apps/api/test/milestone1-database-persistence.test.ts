@@ -41,7 +41,7 @@ describe('Milestone 1: Authoritative PostgreSQL Persistence, Constraints & Immut
   it('persists domain state across fresh service instances without in-memory caching', async () => {
     const authServiceA = new AuthService();
     const reg = await authServiceA.register({
-      email: 'persistence-check@brisksms.co.tz',
+      email: 'persistence-check@brisksms.app',
       password: 'StrongPassword123!',
       fullName: 'Persistence Tester',
       organizationName: 'Persistence Corp',
@@ -50,7 +50,7 @@ describe('Milestone 1: Authoritative PostgreSQL Persistence, Constraints & Immut
     // Instantiate a brand-new AuthService instance and verify data is read from PostgreSQL
     const authServiceB = new AuthService();
     const profile = await authServiceB.getMe(reg.user.id);
-    assert.equal(profile.user.email, 'persistence-check@brisksms.co.tz');
+    assert.equal(profile.user.email, 'persistence-check@brisksms.app');
     assert.equal(profile.organizations.length, 1);
     assert.equal(profile.organizations[0]?.id, reg.organizationId);
   });
@@ -141,7 +141,7 @@ describe('Milestone 1: Authoritative PostgreSQL Persistence, Constraints & Immut
   it('enforces append-only immutability triggers on raw_payment_evidence, messaging_credit_ledger, payment_verifications, audit_logs, and subscription_billing_invoices', async () => {
     const authService = new AuthService();
     const reg = await authService.register({
-      email: 'immutable@brisksms.co.tz',
+      email: 'immutable@brisksms.app',
       password: 'StrongPassword123!',
       fullName: 'Immutable Owner',
       organizationName: 'Immutable FinTech',
@@ -267,7 +267,7 @@ describe('Milestone 1: Authoritative PostgreSQL Persistence, Constraints & Immut
       await assert.rejects(
         async () => {
           await authService.register({
-            email: 'outage@brisksms.co.tz',
+            email: 'outage@brisksms.app',
             password: 'StrongPassword123!',
             fullName: 'Outage User',
           });

@@ -1,0 +1,794 @@
+/*
+ * Setup guide (getting-started.html).
+ * Builds on legal.css (tokens, container, footer) and the shared header in site.css.
+ */
+
+.gs-hero {
+  padding: 64px 0 40px;
+}
+
+.gs-eyebrow {
+  display: block;
+  margin-bottom: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent-ink);
+}
+
+.gs-hero h1 {
+  max-width: 860px;
+  font-size: clamp(32px, 3.5vw + 0.5rem, 48px);
+  font-weight: 600;
+  line-height: 1.12;
+  letter-spacing: -0.03em;
+}
+
+.gs-lead {
+  max-width: 680px;
+  margin-top: 16px;
+  font-size: clamp(16px, 1.2vw + 0.5rem, 18px);
+  line-height: 1.55;
+  color: var(--text-sub);
+}
+
+.gs-jump {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 24px;
+}
+
+.gs-jump a {
+  padding: 8px 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 9999px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-sub);
+  text-decoration: none;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.gs-jump a:hover,
+.gs-jump a:focus-visible {
+  background: var(--surface-card);
+  color: var(--text-main);
+}
+
+.gs-section {
+  padding: 48px 0;
+}
+
+.gs-section-tint {
+  background: rgba(220, 214, 203, 0.35);
+  border-top: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.gs-section h2,
+.gs-cta h2 {
+  margin-bottom: 24px;
+  font-size: clamp(22px, 2.5vw + 0.5rem, 32px);
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+.gs-section h3 {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.gs-section p,
+.gs-section dd,
+.gs-section li {
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--text-sub);
+}
+
+.gs-section p + p {
+  margin-top: 12px;
+}
+
+.gs-section strong {
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.gs-section a {
+  color: var(--accent-ink);
+  text-underline-offset: 3px;
+}
+
+/* What you need */
+.gs-needs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  list-style: none;
+}
+
+.gs-needs li {
+  padding: 24px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 18px;
+  background: var(--surface-card);
+}
+
+.gs-needs h3 {
+  margin-bottom: 8px;
+}
+
+/* Steps: a numbered column with a line joining the numbers */
+.gs-steps {
+  max-width: 820px;
+  list-style: none;
+  counter-reset: gs-step;
+}
+
+.gs-steps > li {
+  position: relative;
+  padding: 0 0 32px 56px;
+  counter-increment: gs-step;
+}
+
+.gs-steps > li:last-child {
+  padding-bottom: 0;
+}
+
+.gs-steps > li::before {
+  content: counter(gs-step);
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--color-dark);
+  color: var(--bg-canvas);
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.gs-steps > li::after {
+  content: "";
+  position: absolute;
+  top: 44px;
+  bottom: 8px;
+  left: 17px;
+  width: 1px;
+  background: var(--border-subtle);
+}
+
+.gs-steps > li:last-child::after {
+  display: none;
+}
+
+.gs-steps h3 {
+  margin: 6px 0 8px;
+}
+
+.gs-perms {
+  margin-top: 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  background: var(--surface-card);
+}
+
+.gs-perms > div {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: 16px;
+  padding: 12px 16px;
+}
+
+.gs-perms > div + div {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.gs-perms dt {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.gs-perms dd {
+  font-size: 14px;
+}
+
+/* How it works */
+.gs-flow {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.gs-flow-col {
+  padding: 24px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 18px;
+  background: var(--surface-card);
+}
+
+.gs-flow-col h3 {
+  margin-bottom: 12px;
+}
+
+.gs-flow-col ol {
+  padding-left: 20px;
+}
+
+.gs-flow-col li + li {
+  margin-top: 8px;
+}
+
+.gs-note {
+  margin-top: 16px;
+  padding: 20px 24px;
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--accent-sand);
+  border-radius: 18px;
+  background: var(--surface-card);
+}
+
+.gs-note strong {
+  color: var(--text-main);
+}
+
+/* Troubleshooting */
+.gs-trouble {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+/* The long "Payments do not appear" answer gets a full row, so the other four sit in an even 2 x 2 */
+.gs-trouble > div:nth-child(3) {
+  grid-column: 1 / -1;
+}
+
+.gs-trouble > div {
+  padding: 20px 24px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 18px;
+  background: var(--surface-card);
+}
+
+.gs-trouble dt {
+  margin-bottom: 4px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+/* Official Google Play badge: shown at its own size, never restyled */
+.play-badge {
+  display: inline-flex;
+  line-height: 0;
+}
+
+.play-badge img {
+  display: block;
+  height: 48px;
+  width: auto;
+}
+
+.gs-section .gs-play {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+  margin-top: 16px;
+}
+
+.gs-section .gs-dl {
+  display: inline-flex;
+  align-items: center;
+  height: 48px;
+  padding: 0 20px;
+  border: 1px solid var(--color-dark);
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-main);
+  text-decoration: none;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.gs-section .gs-dl:hover,
+.gs-section .gs-dl:focus-visible {
+  background: var(--color-dark);
+  color: #FFFFFF;
+}
+
+.gs-dl-note {
+  margin-top: 12px;
+  font-size: 14px;
+}
+
+/* Closing call to action */
+.gs-cta {
+  padding: 64px 0;
+  border-top: 1px solid var(--border-subtle);
+  text-align: center;
+}
+
+.gs-cta h2 {
+  margin-bottom: 8px;
+}
+
+.gs-cta p {
+  font-size: 16px;
+  color: var(--text-sub);
+}
+
+.gs-cta-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.gs-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 24px;
+  border-radius: 9999px;
+  font-size: 15px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.gs-btn-primary {
+  background: var(--accent-sand);
+  color: var(--text-main);
+  box-shadow: var(--shadow-button);
+}
+
+.gs-btn-primary:hover {
+  background: var(--accent-sand-hover);
+}
+
+.gs-btn-quiet {
+  background: var(--color-dark);
+  color: #FFFFFF;
+}
+
+.gs-btn-quiet:hover {
+  background: #26241F;
+}
+
+@media (max-width: 900px) {
+  .gs-needs,
+  .gs-flow,
+  .gs-trouble {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .gs-hero {
+    padding: 40px 0 24px;
+  }
+
+  .gs-section {
+    padding: 32px 0;
+  }
+
+  .gs-perms > div {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .gs-cta-actions .gs-btn {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gs-jump a,
+  .gs-btn {
+    transition: none;
+  }
+}
+
+/* ------------------------------------------------------------------------------------------------
+   Hero: copy on the left, a pairing illustration on the right
+   ------------------------------------------------------------------------------------------------ */
+.gs-hero-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  gap: 48px;
+  align-items: center;
+}
+
+.gs-hero h1 {
+  max-width: none;
+}
+
+.gs-art {
+  width: 100%;
+  max-width: 560px;
+  justify-self: end;
+}
+
+.gs-art svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.gs-art .gs-art-phone {
+  display: none;
+}
+
+.gs-art .t {
+  font-family: var(--font-stack);
+}
+
+.gs-art .t-500 {
+  font-weight: 500;
+}
+
+.gs-art .t-600 {
+  font-weight: 600;
+}
+
+.gs-art .m {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+
+@media (max-width: 999px) {
+  .gs-hero-grid {
+    grid-template-columns: 1fr;
+    gap: 32px;
+  }
+
+  .gs-art {
+    justify-self: center;
+    max-width: 520px;
+  }
+}
+
+@media (max-width: 700px) {
+  .gs-art .gs-art-wide {
+    display: none;
+  }
+
+  .gs-art .gs-art-phone {
+    display: block;
+    width: min(240px, 72%);
+    margin: 0 auto;
+  }
+}
+
+/* ------------------------------------------------------------------------------------------------
+   FAQ: the same cards as the landing page
+   ------------------------------------------------------------------------------------------------ */
+.gs-faq {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-width: 820px;
+  border-top: 0;
+}
+
+.gs-faq details {
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: 18px;
+  background: #FFFFFF;
+  transition: border-color 0.2s ease;
+}
+
+.gs-faq details[open] {
+  border-color: var(--accent-sand);
+}
+
+.gs-faq summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.5rem 2rem;
+  font-family: var(--font-stack);
+  font-size: 1.05rem;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--text-main);
+  cursor: pointer;
+  list-style: none;
+}
+
+.gs-faq summary::after {
+  content: "+";
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--bg-canvas);
+  font-size: 1.2rem;
+  font-weight: 400;
+  line-height: 1;
+  color: var(--text-main);
+  transition: transform 0.25s ease;
+}
+
+.gs-faq details[open] summary::after {
+  content: "+";
+  transform: rotate(45deg);
+}
+
+.gs-faq details p {
+  padding: 0 2rem 1.75rem;
+  font-size: 0.95rem;
+  line-height: 1.7;
+  color: var(--text-sub);
+}
+
+@media (max-width: 700px) {
+  .gs-faq summary {
+    padding: 1.25rem;
+    font-size: 0.95rem;
+  }
+
+  .gs-faq details p {
+    padding: 0 1.25rem 1.25rem;
+  }
+}
+
+/* ------------------------------------------------------------------------------------------------
+   Motion. Everything here is switched off under prefers-reduced-motion, and content is fully
+   visible without JavaScript (the hidden start state only exists once the page adds .gs-js).
+   ------------------------------------------------------------------------------------------------ */
+@media (prefers-reduced-motion: no-preference) {
+  /* Hero copy rises in */
+  .gs-hero-copy > * {
+    animation: gs-rise 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .gs-hero-copy > :nth-child(2) { animation-delay: 0.08s; }
+  .gs-hero-copy > :nth-child(3) { animation-delay: 0.16s; }
+  .gs-hero-copy > :nth-child(4) { animation-delay: 0.24s; }
+
+  .gs-art {
+    animation: gs-rise 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.2s both;
+  }
+
+  /* Scroll reveals: hidden until seen, then a one-shot rise staggered within the group */
+  .gs-js .gs-section h2,
+  .gs-js .gs-needs li,
+  .gs-js .gs-steps > li,
+  .gs-js .gs-flow-col,
+  .gs-js .gs-note,
+  .gs-js .gs-trouble > div,
+  .gs-js .gs-faq details,
+  .gs-js .gs-cta .container {
+    opacity: 0;
+  }
+
+  .gs-js .is-in.is-in {
+    opacity: 1;
+    animation: gs-rise 0.6s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+    animation-delay: calc(var(--i, 0) * 70ms);
+  }
+
+  /* Steps: the number pops in, and the line to the next step fills as you scroll past it.
+     The script sets --fill (0 to 1) on each step and marks the step being read. */
+  .gs-js .gs-steps > li::before {
+    transform: scale(0.5);
+    transition: transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) 0.15s, background-color 0.3s ease, color 0.3s ease, box-shadow 0.3s ease;
+  }
+
+  .gs-js .gs-steps > li.is-in::before {
+    transform: scale(1);
+  }
+
+  .gs-js .gs-steps > li::after {
+    width: 2px;
+    left: 16px;
+    background:
+      linear-gradient(var(--color-dark), var(--color-dark)) 0 0 / 100% calc(var(--fill, 0) * 100%) no-repeat,
+      var(--border-subtle);
+  }
+
+  .gs-js .gs-steps > li.is-current::before {
+    background: var(--accent-sand);
+    color: var(--color-dark);
+    transform: scale(1.14);
+    box-shadow: 0 0 0 6px rgba(198, 180, 128, 0.28);
+  }
+
+  /* Scroll-linked: reading progress, and the hero easing away as you leave it */
+  .gs-progress {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 200;
+    height: 3px;
+    pointer-events: none;
+  }
+
+  .gs-progress::after {
+    content: "";
+    display: block;
+    height: 100%;
+    background: var(--accent-sand);
+    transform: scaleX(var(--gs-progress, 0));
+    transform-origin: left;
+  }
+
+  .gs-js .gs-hero-copy {
+    transform: translateY(calc(var(--gs-hero, 0) * -36px));
+    opacity: calc(1 - var(--gs-hero, 0) * 0.7);
+  }
+
+  .gs-js .gs-art svg {
+    transform: translateY(calc(var(--gs-hero, 0) * 48px)) scale(calc(1 - var(--gs-hero, 0) * 0.08));
+    will-change: transform;
+  }
+
+  /* Hover */
+  .gs-needs li,
+  .gs-flow-col,
+  .gs-trouble > div {
+    transition: transform 0.2s ease-out, box-shadow 0.2s ease-out;
+  }
+
+  .gs-needs li:hover,
+  .gs-flow-col:hover,
+  .gs-trouble > div:hover {
+    transform: translateY(-3px);
+    box-shadow: var(--shadow-diffuse);
+  }
+
+  .gs-btn:hover {
+    transform: translateY(-2px);
+  }
+
+  .gs-btn {
+    transition: background-color 0.2s ease, color 0.2s ease, transform 0.2s ease-out;
+  }
+
+  /* On-page links: the section you are reading is marked */
+  .gs-jump a.is-active {
+    background: var(--color-dark);
+    border-color: var(--color-dark);
+    color: #FFFFFF;
+  }
+
+  /* Open answers ease in */
+  .gs-faq details[open] p {
+    animation: gs-fade 0.35s ease-out both;
+  }
+
+  /* The hero illustration: pair, scan, connect, switch on. 12s loop, pauses off-screen */
+  .a-scene { animation: a-scene 12s linear infinite; }
+  .a-qr { animation: a-qr 12s ease-out infinite both; }
+  .a-scan { animation: a-scan 12s ease-in-out infinite both; }
+  .a-timer { animation: a-timer 12s linear infinite both; transform-box: fill-box; transform-origin: left center; }
+  .a-link { animation: a-link 12s linear infinite both; }
+  .a-wait { animation: a-wait 12s linear infinite both; }
+  .a-on { animation: a-on 12s linear infinite both; }
+  .a-row1 { animation: a-row 12s ease-out infinite both; animation-delay: 0s; }
+  .a-row2 { animation: a-row2 12s ease-out infinite both; }
+  .a-row3 { animation: a-row3 12s ease-out infinite both; }
+  .a-check { animation: a-check 12s cubic-bezier(0.34, 1.56, 0.64, 1) infinite both; transform-box: fill-box; transform-origin: center; }
+  .a-cap { animation: a-cap 12s linear infinite both; }
+
+  .gs-art.is-paused * { animation-play-state: paused !important; }
+
+  @keyframes gs-rise {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: none; }
+  }
+
+  @keyframes gs-fade {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: none; }
+  }
+
+  @keyframes a-scene {
+    0% { opacity: 0; }
+    4% { opacity: 1; }
+    94% { opacity: 1; }
+    100% { opacity: 0; }
+  }
+
+  @keyframes a-qr {
+    0% { opacity: 0; }
+    10% { opacity: 1; }
+    100% { opacity: 1; }
+  }
+
+  @keyframes a-scan {
+    0%, 24% { opacity: 0; transform: translateY(0); }
+    26% { opacity: 0.95; transform: translateY(0); }
+    38% { opacity: 0.95; transform: translateY(116px); }
+    40%, 100% { opacity: 0; transform: translateY(116px); }
+  }
+
+  @keyframes a-timer {
+    0% { transform: scaleX(1); }
+    94%, 100% { transform: scaleX(0.82); }
+  }
+
+  @keyframes a-link {
+    0%, 38% { opacity: 0; stroke-dashoffset: 0; }
+    40% { opacity: 1; }
+    52% { opacity: 1; stroke-dashoffset: -33; }
+    54%, 100% { opacity: 0; stroke-dashoffset: -33; }
+  }
+
+  @keyframes a-wait {
+    0%, 50% { opacity: 1; }
+    52%, 100% { opacity: 0; }
+  }
+
+  @keyframes a-on {
+    0%, 50% { opacity: 0; }
+    52%, 100% { opacity: 1; }
+  }
+
+  @keyframes a-row {
+    0%, 53% { opacity: 0; transform: translateX(14px); }
+    58%, 100% { opacity: 1; transform: none; }
+  }
+
+  @keyframes a-row2 {
+    0%, 57% { opacity: 0; transform: translateX(14px); }
+    62%, 100% { opacity: 1; transform: none; }
+  }
+
+  @keyframes a-row3 {
+    0%, 61% { opacity: 0; transform: translateX(14px); }
+    66%, 100% { opacity: 1; transform: none; }
+  }
+
+  @keyframes a-check {
+    0%, 64% { opacity: 0; transform: scale(0.5); }
+    72%, 100% { opacity: 1; transform: scale(1); }
+  }
+
+  @keyframes a-cap {
+    0%, 68% { opacity: 0; }
+    74%, 100% { opacity: 1; }
+  }
+}
+
+.gs-faq summary:focus-visible,
+.gs-jump a:focus-visible,
+.gs-btn:focus-visible,
+.play-badge:focus-visible {
+  outline: 2px solid var(--accent-ink);
+  outline-offset: 2px;
+}
+
+/* Reduced motion: the illustration shows its finished state, nothing animates */
+@media (prefers-reduced-motion: reduce) {
+  .a-wait,
+  .a-scan,
+  .a-link {
+    opacity: 0;
+  }
+
+  .a-link {
+    opacity: 1;
+  }
+}

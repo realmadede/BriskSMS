@@ -17,6 +17,7 @@ import {
 } from '@brisksms/shared';
 import { createApp } from '../src/app.js';
 import { dbStore } from '../src/core/store.js';
+import { BILLING_WORKSPACE_SETTING } from '../src/modules/subscription/subscription.service.js';
 import { authService } from '../src/modules/auth/auth.service.js';
 import { messagingService } from '../src/modules/messaging/messaging.service.js';
 import { outboundSmsJobService } from '../src/modules/messaging/outbound-sms-job.service.js';
@@ -84,7 +85,7 @@ describe('BriskSMS SaaS Production-Readiness & End-to-End Workflows', () => {
 
   it('strips passwordHash and twoFactorSecret from all user profile responses', async () => {
     const reg = await authService.register({
-      email: '2fa-safe@brisksms.co.tz',
+      email: '2fa-safe@brisksms.app',
       password: 'Password123!',
       fullName: 'Safe User',
       organizationName: 'Safe Co',
@@ -107,7 +108,7 @@ describe('BriskSMS SaaS Production-Readiness & End-to-End Workflows', () => {
 
   it('completes forgot-password and reset-password with single-use domain-separated tokens', async () => {
     await authService.register({
-      email: 'reset-flow@brisksms.co.tz',
+      email: 'reset-flow@brisksms.app',
       password: 'OldPassword123!',
       fullName: 'Reset Target',
       organizationName: 'Reset Co',
@@ -117,7 +118,7 @@ describe('BriskSMS SaaS Production-Readiness & End-to-End Workflows', () => {
       'POST',
       '/v1/auth/forgot-password',
       { 'Content-Type': 'application/json' },
-      { email: 'reset-flow@brisksms.co.tz' },
+      { email: 'reset-flow@brisksms.app' },
     );
     assert.equal(forgotRes.statusCode, 200);
     const resetToken = forgotRes.json?.data?.resetToken as string;
@@ -156,7 +157,7 @@ describe('BriskSMS SaaS Production-Readiness & End-to-End Workflows', () => {
       'POST',
       '/v1/auth/login',
       { 'Content-Type': 'application/json' },
-      { email: 'reset-flow@brisksms.co.tz', password: 'NewStrongPassword456!' },
+      { email: 'reset-flow@brisksms.app', password: 'NewStrongPassword456!' },
     );
     assert.equal(loginRes.statusCode, 200);
     assert.ok(loginRes.json?.data?.tokens?.accessToken);
@@ -164,7 +165,7 @@ describe('BriskSMS SaaS Production-Readiness & End-to-End Workflows', () => {
 
   it('completes member invitation, password setup via accept-invitation, and workspace switching', async () => {
     const owner = await authService.register({
-      email: 'owner-inv@brisksms.co.tz',
+      email: 'owner-inv@brisksms.app',
       password: 'Password123!',
       fullName: 'Workspace Owner',
       organizationName: 'Primary Workspace',
@@ -177,7 +178,7 @@ describe('BriskSMS SaaS Production-Readiness & End-to-End Workflows', () => {
         Authorization: `Bearer ${owner.tokens.accessToken}`,
         'Content-Type': 'application/json',
       },
-      { email: 'new-finance@brisksms.co.tz', role: UserRole.FINANCE, fullName: 'Finance Staff' },
+      { email: 'new-finance@brisksms.app', role: UserRole.FINANCE, fullName: 'Finance Staff' },
     );
     assert.equal(inviteRes.statusCode, 200);
     assert.equal(inviteRes.json?.data?.invitationStatus, 'PENDING');
@@ -233,7 +234,7 @@ describe('BriskSMS SaaS Production-Readiness & End-to-End Workflows', () => {
 
   it('accepts callback-settled standalone STK push for subscription checkout and blocks cross-alias replay', async () => {
     const owner = await authService.register({
-      email: 'sub-stk@brisksms.co.tz',
+      email: 'sub-stk@brisksms.app',
       password: 'Password123!',
       fullName: 'Sub Owner',
       organizationName: 'Sub Org',
@@ -282,6 +283,7 @@ describe('BriskSMS SaaS Production-Readiness & End-to-End Workflows', () => {
       )
     `;
 
+    await dbStore.setPlatformSetting(BILLING_WORKSPACE_SETTING, orgId);
     // Checkout using stkTxId succeeds even though settled_payment_id is populated
     const checkoutRes = await makeRequest(
       'POST',
@@ -328,7 +330,7 @@ describe('BriskSMS SaaS Production-Readiness & End-to-End Workflows', () => {
 
   it('supports campaign listing, inspection, cancellation with credit release, and operational developer endpoints', async () => {
     const owner = await authService.register({
-      email: 'camp-ops@brisksms.co.tz',
+      email: 'camp-ops@brisksms.app',
       password: 'Password123!',
       fullName: 'Campaign Owner',
       organizationName: 'Campaign Org',
@@ -411,7 +413,7 @@ describe('BriskSMS SaaS Production-Readiness & End-to-End Workflows', () => {
       },
       {
         gatewayMode: GatewayMode.MANAGED_GATEWAY,
-        gatewayBaseUrl: 'https://gateway.brisksms.com/api/v1',
+        gatewayBaseUrl: 'https://gateway.brisksms.app/api/v1',
         defaultSimSlot: 1,
       },
     );
@@ -463,7 +465,7 @@ describe('BriskSMS SaaS Production-Readiness & End-to-End Workflows', () => {
 
   it('sweeps due scheduled campaigns, expired outbound SMS jobs with credit refund, and stale STK checkouts in runMaintenanceCleanup', async () => {
     const owner = await authService.register({
-      email: 'maint-sweep@brisksms.co.tz',
+      email: 'maint-sweep@brisksms.app',
       password: 'Password123!',
       fullName: 'Sweep Owner',
       organizationName: 'Sweep Org',

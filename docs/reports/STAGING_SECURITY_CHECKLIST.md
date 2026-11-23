@@ -111,6 +111,6 @@ graph TD
 
 The following items represent operational and physical hardware requirements prior to commercial staging launch:
 1. **Google Identity Staging Credentials:** The backend RS256 token verification engine is complete and tested. Staging operation requires provisioning a Google Cloud Project with OAuth 2.0 Web Client credentials (`GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`).
-2. **Resend Staging API Key & Domain Verification:** The Resend transactional email adapter is complete and tested. Staging operation requires configuring live `RESEND_API_KEY` and DNS domain verification for `staging.brisksms.com`.
+2. **Resend Staging API Key & Domain Verification:** The Resend transactional email adapter is complete and tested. Staging operation requires configuring live `RESEND_API_KEY` and DNS domain verification for `staging.brisksms.app`.
 3. **Physical Hardware & SIM Matrix:** Physical Android devices and Tanzanian carrier SIM cards must be provisioned for cellular testing.
 4. **Staging Cloud Infrastructure:** Staging compute VM, managed PostgreSQL 16+, and Redis 7+ are not yet provisioned.

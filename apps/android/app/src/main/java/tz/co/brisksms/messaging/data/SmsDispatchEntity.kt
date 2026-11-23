@@ -68,6 +68,9 @@ interface SmsDispatchDao {
     @Query("SELECT COUNT(*) FROM sms_dispatch_queue WHERE status = 'QUEUED'")
     suspend fun countPending(): Int
 
+    @Query("SELECT COUNT(*) FROM sms_dispatch_queue WHERE status = 'QUEUED' AND createdAt < :beforeTimestamp")
+    suspend fun countQueuedBefore(beforeTimestamp: Long): Int
+
     @Query("SELECT COUNT(*) FROM sms_dispatch_queue WHERE status = 'DISPATCHING'")
     suspend fun countInFlight(): Int
 

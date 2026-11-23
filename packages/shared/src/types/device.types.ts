@@ -62,6 +62,10 @@ export interface DeviceRegistrationRequest {
 export interface DeviceEnrollmentResponse {
   deviceId: string;
   organizationId: string;
+  /** Shown on the phone so the owner sees the account name instead of an ID. */
+  organizationName: string;
+  /** `PERSONAL` or `ORGANIZATION`. */
+  accountType: string;
   deviceToken: string;
   publicKeyFingerprint: string;
   keyAlgorithm: DeviceKeyAlgorithm;

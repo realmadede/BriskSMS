@@ -1,0 +1,896 @@
+/*
+ * Shared styles for the public pages (index.html, developers.html, privacy.html, terms.html).
+ * Page tokens (--text-main, --accent-sand, ...) come from each page's own stylesheet.
+ *
+ * 1. Site header (partials/header.html)
+ * 2. Mobile navigation drawer
+ * 3. Letter roll on links and buttons
+ * 4. Custom pointer and magnetic buttons
+ * 5. Venom: liquid primary calls to action
+ * 6. Sign-in pop-up
+ */
+
+:root {
+  --site-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --accent-ink: #6E5F3D; /* ochre as text: AA on light surfaces */
+  /* Neutral elevation steps (brisksms-design section 4); no colored shadows */
+  --shadow-diffuse: 0 8px 32px -4px rgba(45, 40, 30, 0.06), 0 1px 2px rgba(45, 40, 30, 0.04);
+  --shadow-floating: 0 16px 48px -8px rgba(45, 40, 30, 0.12), 0 2px 6px rgba(45, 40, 30, 0.06);
+  --shadow-button: 0 2px 6px rgba(25, 20, 15, 0.14);
+}
+
+/* 1. SITE HEADER
+   A full-width glass bar at the top of the page that condenses into a floating pill
+   once the page scrolls (site.js sets data-scrolled). */
+.site-header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  height: 72px;
+  border-bottom: 1px solid transparent;
+  transition: background-color 0.35s ease, border-color 0.35s ease, padding 0.6s var(--site-ease);
+}
+
+.site-header[data-scrolled="false"] {
+  background: rgba(244, 241, 234, 0.72);
+  border-bottom-color: var(--border-subtle);
+  -webkit-backdrop-filter: saturate(1.6) blur(18px);
+  backdrop-filter: saturate(1.6) blur(18px);
+}
+
+.site-header[data-scrolled="true"] {
+  padding-top: 10px;
+}
+
+.site-header-inner {
+  width: min(1192px, calc(100% - 48px));
+  height: 100%;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  border: 1px solid transparent;
+  transition: width 0.6s var(--site-ease), height 0.6s var(--site-ease), padding 0.6s var(--site-ease),
+    border-radius 0.6s var(--site-ease), background-color 0.4s ease, border-color 0.4s ease, box-shadow 0.6s ease;
+}
+
+.site-header[data-scrolled="true"] .site-header-inner {
+  width: min(1100px, calc(100% - 32px));
+  height: 58px;
+  padding: 0 8px 0 18px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.62);
+  border-color: rgba(11, 10, 9, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 18px 50px -22px rgba(35, 30, 24, 0.35);
+  -webkit-backdrop-filter: saturate(1.8) blur(22px);
+  backdrop-filter: saturate(1.8) blur(22px);
+}
+
+.site-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-shrink: 0;
+  color: var(--text-main);
+  text-decoration: none;
+}
+
+.site-logo-word {
+  font-size: 1.35rem;
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  white-space: nowrap;
+}
+
+.site-nav-list,
+.site-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  list-style: none;
+}
+
+.site-nav-link {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 12px;
+  border-radius: 9999px;
+  font-size: 0.885rem;
+  font-weight: 500;
+  color: var(--text-main);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.site-nav-link:hover,
+.site-nav-link:focus-visible {
+  background: rgba(198, 180, 128, 0.18);
+  color: var(--accent-ink);
+}
+
+.site-signin {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 10px;
+  font-size: 0.885rem;
+  font-weight: 500;
+  color: var(--text-main);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.site-signin svg {
+  transition: transform 0.45s cubic-bezier(0.82, 0.08, 0.29, 1);
+}
+
+.site-signin:hover svg,
+.site-signin:focus-visible svg {
+  transform: rotate(45deg);
+}
+
+.site-header-actions .venom-host {
+  margin-left: 4px;
+}
+
+/* The header owns its button styles: the pages' own .btn-sand differ (ochre on the
+   landing page, obsidian on the developers page). Two-class selectors beat each page's
+   later-loaded .btn rule. */
+.site-header .site-header-cta,
+.mobile-nav-actions .site-drawer-cta {
+  background-color: var(--accent-sand);
+  color: var(--color-dark);
+  border-radius: 9999px;
+  padding: 0.65rem 1.6rem;
+  font-size: 0.885rem;
+  box-shadow: var(--shadow-button);
+}
+
+.site-header .site-header-cta:hover,
+.mobile-nav-actions .site-drawer-cta:hover {
+  background-color: var(--accent-sand-hover);
+}
+
+.site-icon-button {
+  min-width: 44px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 9999px;
+  background: transparent;
+  color: var(--text-main);
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.site-icon-button:hover {
+  background: rgba(198, 180, 128, 0.18);
+}
+
+.site-mobile-trigger {
+  display: none;
+}
+
+@media (max-width: 1280px) {
+  .site-nav-secondary {
+    display: none;
+  }
+}
+
+@media (max-width: 1040px) {
+  .site-nav {
+    display: none;
+  }
+  .site-mobile-trigger {
+    display: inline-flex;
+  }
+  .site-header-actions {
+    margin-left: auto;
+  }
+}
+
+@media (max-width: 640px) {
+  .site-header-inner {
+    width: calc(100% - 32px);
+    gap: 12px;
+  }
+  .site-header[data-scrolled="true"] .site-header-inner {
+    width: calc(100% - 20px);
+    height: 54px;
+    padding: 0 6px 0 14px;
+  }
+  .site-signin {
+    display: none;
+  }
+}
+
+/* 2. MOBILE NAVIGATION DRAWER */
+.mobile-nav-drawer {
+  position: fixed;
+  inset: 0;
+  z-index: 999999;
+  display: none;
+}
+
+.mobile-nav-drawer.open {
+  display: block;
+}
+
+.mobile-nav-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(11, 10, 9, 0.45);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+
+.mobile-nav-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 310px;
+  max-width: 85vw;
+  height: 100%;
+  background: #F4F1EA;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  box-shadow: -10px 0 30px rgba(0, 0, 0, 0.15);
+  transform: translateX(100%);
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.mobile-nav-drawer.open .mobile-nav-panel {
+  transform: translateX(0);
+}
+
+.mobile-nav-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 1.25rem;
+  border-bottom: 1px solid rgba(11, 10, 9, 0.08);
+  margin-bottom: 1.5rem;
+}
+
+.mobile-nav-header .site-logo-word {
+  font-size: 1.15rem;
+}
+
+.mobile-nav-close {
+  background: none;
+  border: none;
+  font-size: 1.75rem;
+  line-height: 1;
+  color: var(--text-main);
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+}
+
+.mobile-nav-links {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1.15rem;
+}
+
+.mobile-nav-links a {
+  color: var(--text-main);
+  text-decoration: none;
+  font-size: 1.05rem;
+  font-weight: 600;
+  display: block;
+  transition: color 0.2s ease;
+}
+
+.mobile-nav-links a:hover {
+  color: var(--accent-ink);
+}
+
+.mobile-nav-actions {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid rgba(11, 10, 9, 0.08);
+}
+
+.mobile-nav-actions .btn {
+  width: 100%;
+  justify-content: center;
+}
+
+.btn-console-outline {
+  border: 1px solid rgba(11, 10, 9, 0.16);
+  border-radius: 9999px;
+  padding: 0.65rem 1.6rem;
+  font-size: 0.885rem;
+  font-weight: 600;
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.6);
+}
+
+/* 3. LETTER ROLL: each letter rolls up to an identical copy on hover (markup built by site.js) */
+.text-roll {
+  position: relative;
+  display: inline-flex;
+  overflow: hidden;
+  height: 1.25em;
+  line-height: 1.25;
+  vertical-align: middle;
+}
+
+.text-roll-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.text-roll-in {
+  display: inline-flex;
+  text-shadow: 0 1.25em 0 currentColor;
+}
+
+.text-roll-in > span {
+  display: block;
+  white-space: pre;
+  transition: transform 0.45s cubic-bezier(0.82, 0.08, 0.29, 1);
+  transition-delay: calc(var(--i) * 16ms);
+}
+
+:is(a, button):is(:hover, :focus-visible) .text-roll-in > span {
+  transform: translateY(-1.25em);
+}
+
+/* 4. CUSTOM POINTER
+   site.js only adds .cursor-on for a precise hovering pointer and never under reduced
+   motion, so touch devices and reduced-motion users keep the native cursor. */
+.cursor-on,
+.cursor-on * {
+  cursor: none !important;
+}
+
+.cursor-on :is(input, textarea, [contenteditable="true"], pre, code),
+.cursor-on :is(input, textarea, [contenteditable="true"], pre, code) * {
+  cursor: text !important;
+}
+
+/* Zero-size anchors moved by site.js; the visible shapes are centred pseudo-elements */
+.cursor-dot,
+.cursor-ring {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 10000;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  will-change: transform;
+}
+
+.cursor-dot.is-visible,
+.cursor-ring.is-visible {
+  opacity: 1;
+}
+
+.cursor-dot[data-state="text"],
+.cursor-ring[data-state="text"] {
+  opacity: 0;
+}
+
+.cursor-dot::before,
+.cursor-ring::before {
+  content: '';
+  position: absolute;
+  border-radius: 50%;
+  transition: scale 0.25s cubic-bezier(0.2, 0.8, 0.2, 1), background-color 0.25s ease, border-color 0.25s ease;
+}
+
+.cursor-dot::before {
+  inset: -4px;
+  background: var(--color-dark, #0B0A09);
+  box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.85);
+}
+
+.cursor-ring::before {
+  inset: -18px;
+  border: 1px solid rgba(11, 10, 9, 0.35);
+}
+
+/* Over anything clickable the ring opens up with an ochre fill; the darker rim keeps it
+   visible on the ochre buttons, the fill keeps it visible on the obsidian ones */
+.cursor-ring[data-state="hot"]::before {
+  scale: 1.55;
+  background-color: rgba(198, 180, 128, 0.22);
+  border-color: rgba(11, 10, 9, 0.5);
+}
+
+.cursor-dot[data-state="hot"]::before {
+  scale: 0.75;
+}
+
+.cursor-ring.is-down::before {
+  scale: 0.8;
+}
+
+.cursor-ring[data-state="hot"].is-down::before {
+  scale: 1.3;
+}
+
+/* 5. VENOM
+   Primary calls to action become glossy ochre liquid that reaches toward the pointer.
+   site.js builds the goo layer and sets data-venom="live" only for a fine pointer without
+   reduced motion; otherwise the button keeps its normal solid style. The goo layer extends
+   72px past the button so the liquid has room to stretch. */
+.venom-host {
+  --venom-color: var(--accent-sand, #C6B480);
+  position: relative;
+  display: inline-flex;
+  isolation: isolate;
+}
+
+.venom-host:hover {
+  --venom-color: var(--accent-sand-hover, #b8a674);
+}
+
+.venom-goo {
+  position: absolute;
+  inset: -72px;
+  z-index: 0;
+  pointer-events: none;
+  filter: url(#venom-goo) drop-shadow(0 6px 14px rgba(150, 128, 72, 0.35));
+}
+
+.venom-pill,
+.venom-bead {
+  position: absolute;
+  background: var(--venom-color);
+  transition: background-color 0.2s ease;
+}
+
+.venom-pill {
+  inset: 72px;
+  border-radius: 9999px;
+  transition: background-color 0.2s ease, scale 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.venom-bead {
+  left: 0;
+  top: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  transform: scale(0);
+  will-change: transform;
+}
+
+.venom-host[data-venom="live"] .venom-link {
+  position: relative;
+  z-index: 1;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.38), rgba(255, 255, 255, 0) 58%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  transform: none;
+}
+
+.venom-host[data-venom="live"]:hover .venom-pill {
+  scale: 1.03;
+}
+
+.venom-host[data-venom="live"]:active .venom-pill,
+.venom-host[data-venom="live"] .venom-link:active {
+  scale: 0.96;
+}
+
+.venom-link:focus-visible {
+  outline: 3px solid rgba(198, 180, 128, 0.6);
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .site-header,
+  .site-header-inner,
+  .mobile-nav-panel,
+  .site-signin svg {
+    transition: none;
+  }
+  .text-roll-in > span {
+    transition: none;
+    transform: none !important;
+  }
+}
+
+/* 6. SIGN-IN POP-UP (partials/header.html, opened by site.js)
+   A glass modal over a dimmed page. Fields stay solid white so text keeps full contrast. */
+.signin-dialog {
+  width: min(420px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  margin: auto;
+  padding: 32px;
+  border: 1px solid rgba(11, 10, 9, 0.08);
+  border-radius: 18px;
+  background: rgba(250, 248, 244, 0.9);
+  -webkit-backdrop-filter: saturate(1.6) blur(24px);
+  backdrop-filter: saturate(1.6) blur(24px);
+  box-shadow: var(--shadow-floating);
+  color: var(--text-main);
+  font-family: var(--font-stack);
+  overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.signin-dialog::-webkit-scrollbar {
+  display: none;
+}
+
+/* The page behind the pop-up does not scroll, so no scrollbar shows beside it */
+html:has(.signin-dialog[open]) {
+  overflow: hidden;
+}
+
+.signin-dialog[open] {
+  animation: signin-in 0.18s ease-out;
+}
+
+.signin-dialog::backdrop {
+  background: rgba(11, 10, 9, 0.32);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+
+@keyframes signin-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+}
+
+/* The custom cursor sits below the modal's top layer, so the native cursor comes back */
+.cursor-on:has(.signin-dialog[open]) :is(.cursor-dot, .cursor-ring) {
+  display: none;
+}
+
+.cursor-on .signin-dialog,
+.cursor-on .signin-dialog * {
+  cursor: auto !important;
+}
+
+.cursor-on .signin-dialog :is(a, button),
+.cursor-on .signin-dialog :is(a, button) * {
+  cursor: pointer !important;
+}
+
+.cursor-on .signin-dialog input {
+  cursor: text !important;
+}
+
+.signin-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 9999px;
+  background: transparent;
+  color: var(--text-sub);
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.signin-close:hover {
+  background: rgba(11, 10, 9, 0.06);
+  color: var(--text-main);
+}
+
+.signin-view {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.signin-view[hidden] {
+  display: none;
+}
+
+.signin-title {
+  padding-right: 40px;
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.02em;
+}
+
+.signin-lead {
+  margin-top: -8px;
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--text-sub);
+}
+
+.signin-lead strong {
+  font-weight: 600;
+  color: var(--text-main);
+  word-break: break-all;
+}
+
+.signin-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.signin-field > span,
+.signin-field > label,
+.signin-label-row label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.signin-field[hidden] {
+  display: none;
+}
+
+.signin-label-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.signin-field input {
+  width: 100%;
+  height: 44px;
+  padding: 0 14px;
+  border: 1px solid rgba(11, 10, 9, 0.16);
+  border-radius: 10px;
+  background: #FFFFFF;
+  color: var(--text-main);
+  font: inherit;
+  font-size: 15px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.signin-field input:focus {
+  outline: none;
+  border-color: var(--accent-ink);
+  box-shadow: 0 0 0 3px rgba(110, 95, 61, 0.18);
+}
+
+.signin-field input[aria-invalid="true"] {
+  border-color: #D32F2F;
+}
+
+.signin-password {
+  position: relative;
+}
+
+.signin-password input {
+  padding-right: 48px;
+}
+
+.signin-reveal {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-sub);
+  cursor: pointer;
+}
+
+.signin-reveal:hover {
+  color: var(--text-main);
+}
+
+.signin-reveal .icon-eye-off,
+.signin-reveal[aria-pressed="true"] .icon-eye {
+  display: none;
+}
+
+.signin-reveal[aria-pressed="true"] .icon-eye-off {
+  display: block;
+}
+
+.signin-link,
+.signin-foot a {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent-ink);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.signin-link:hover,
+.signin-foot a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.signin-error {
+  padding: 12px 14px;
+  border: 1px solid rgba(211, 47, 47, 0.24);
+  border-radius: 10px;
+  background: rgba(211, 47, 47, 0.06);
+  font-size: 14px;
+  line-height: 1.5;
+  color: #B71C1C;
+}
+
+.signin-error[hidden] {
+  display: none;
+}
+
+.signin-submit {
+  height: 44px;
+  margin-top: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 9999px;
+  background: var(--color-dark);
+  color: #FFFFFF;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 0.2s ease, opacity 0.2s ease;
+}
+
+.signin-submit:hover {
+  background: #2A2825;
+}
+
+.signin-submit:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.signin-back {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 9999px;
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-sub);
+  cursor: pointer;
+}
+
+.signin-back:hover {
+  color: var(--text-main);
+  background: rgba(11, 10, 9, 0.05);
+}
+
+.signin-foot {
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: center;
+  color: var(--text-sub);
+}
+
+.signin-or {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-sub);
+}
+
+.signin-or::before,
+.signin-or::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: rgba(11, 10, 9, 0.1);
+}
+
+.signin-google {
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 1px solid rgba(11, 10, 9, 0.14);
+  border-radius: 9999px;
+  background: #FFFFFF;
+  color: var(--text-main);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.signin-google:hover {
+  background: #F4F1EA;
+}
+
+.signin-hint {
+  min-height: 18px;
+  margin-top: -8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-sub);
+}
+
+.signin-hint[data-state="ok"] {
+  color: #2E7D32;
+}
+
+.signin-hint[data-state="bad"] {
+  color: #B71C1C;
+}
+
+.signin-foot + .signin-foot {
+  margin-top: -8px;
+}
+
+.signin-dialog :focus-visible {
+  outline: 2px solid var(--accent-ink);
+  outline-offset: 2px;
+}
+
+@media (max-width: 480px) {
+  .signin-dialog {
+    padding: 24px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .signin-dialog[open] {
+    animation: none;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .signin-dialog {
+    background: #FAF8F4;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+/* Narrow phones (Galaxy Fold, small Androids): the header's logo, button and menu fit in one row */
+@media (max-width: 360px) {
+  .site-header-inner { gap: 6px; }
+  .site-header .site-header-cta { padding: 0.55rem 1rem; font-size: 0.8rem; }
+  .site-logo-word { font-size: 1.05rem; }
+}
+@media (max-width: 300px) {
+  .site-header .site-header-cta { padding: 0.5rem 0.75rem; font-size: 0.75rem; }
+  .site-logo-word { display: none; }
+}

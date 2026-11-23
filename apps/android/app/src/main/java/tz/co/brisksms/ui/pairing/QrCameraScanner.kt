@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -29,9 +30,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions
@@ -153,7 +152,7 @@ fun QrCameraScanner(
 
             // Border reticle
             drawRoundRect(
-                color = Color(0xFFE5853B), // BriskSMS Accent
+                color = BriskColors.AccentPrimaryDark, // Brightened Ochre reads on the dimmed camera feed
                 topLeft = Offset(left, top),
                 size = Size(scanAreaSize, scanAreaSize),
                 cornerRadius = CornerRadius(20.dp.toPx(), 20.dp.toPx()),
@@ -169,16 +168,15 @@ fun QrCameraScanner(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
-                text = "Point camera at Web Console QR code",
+                text = "Point the camera at the QR code in your web console",
                 color = Color.White,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.SemiBold
+                style = MaterialTheme.typography.titleSmall
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "Token valid for 5 minutes • Handshake is encrypted",
+                text = "Codes expire after 5 minutes · the handshake is encrypted",
                 color = Color.White.copy(alpha = 0.75f),
-                fontSize = 12.sp
+                style = MaterialTheme.typography.bodySmall
             )
         }
 
@@ -193,9 +191,9 @@ fun QrCameraScanner(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(bottom = 48.dp)
-                .height(46.dp)
+                .height(48.dp)
         ) {
-            Text(text = "Enter Code Manually", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text(text = "Enter code manually", style = MaterialTheme.typography.labelLarge)
         }
     }
 }

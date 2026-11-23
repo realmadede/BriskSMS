@@ -16,6 +16,8 @@ import { authService } from '../src/modules/auth/auth.service.js';
 import { entitlementService } from '../src/modules/subscription/entitlement.service.js';
 import { organizationService } from '../src/modules/organization/organization.service.js';
 import { OAuthService } from '../src/modules/oauth/oauth.service.js';
+import { grantDeveloperPlan } from './helpers/developer-plan.js';
+import { BILLING_WORKSPACE_SETTING } from '../src/modules/subscription/subscription.service.js';
 
 const oauthService = new OAuthService();
 
@@ -99,7 +101,7 @@ describe('Cluster 1 Security & Integrity Hardening Suite', () => {
 
   it('rejects deactivated user and revoked organization membership immediately on JWT endpoints', async () => {
     const reg = await authService.register({
-      email: 'deactivated-user@brisksms.co.tz',
+      email: 'deactivated-user@brisksms.app',
       password: 'Password123!',
       fullName: 'Deactivated Target',
       organizationName: 'Target Org',
@@ -120,7 +122,7 @@ describe('Cluster 1 Security & Integrity Hardening Suite', () => {
 
   it('enforces platform admin key (503 unset / 403 mismatch) on /v1/admin/catalog/plans', async () => {
     const merchant = await authService.register({
-      email: 'merchant-nonadmin@brisksms.co.tz',
+      email: 'merchant-nonadmin@brisksms.app',
       password: 'Password123!',
       fullName: 'Merchant User',
       organizationName: 'Merchant Co',
@@ -159,12 +161,13 @@ describe('Cluster 1 Security & Integrity Hardening Suite', () => {
 
   it('fails closed (402 PAYMENT_VERIFICATION_REQUIRED) on paid subscription checkout without verified payment and expires lapsed periods', async () => {
     const reg = await authService.register({
-      email: 'sub-failclosed@brisksms.co.tz',
+      email: 'sub-failclosed@brisksms.app',
       password: 'Password123!',
       fullName: 'Billing Owner',
       organizationName: 'Billing Org',
     });
 
+    await dbStore.setPlatformSetting(BILLING_WORKSPACE_SETTING, reg.organizationId!);
     const unpaidCheckout = await makeRequest(
       'POST',
       `/v1/organizations/${reg.organizationId}/subscription/checkout`,
@@ -219,13 +222,13 @@ describe('Cluster 1 Security & Integrity Hardening Suite', () => {
 
   it('blocks cross-organization access on stk-push and ingestion evidence endpoints with 403', async () => {
     const orgA = await authService.register({
-      email: 'org-a-iso@brisksms.co.tz',
+      email: 'org-a-iso@brisksms.app',
       password: 'Password123!',
       fullName: 'Org A Owner',
       organizationName: 'Org A',
     });
     const orgB = await authService.register({
-      email: 'org-b-iso@brisksms.co.tz',
+      email: 'org-b-iso@brisksms.app',
       password: 'Password123!',
       fullName: 'Org B Owner',
       organizationName: 'Org B',
@@ -250,13 +253,13 @@ describe('Cluster 1 Security & Integrity Hardening Suite', () => {
 
   it('protects OWNER role from ADMIN demotion and avoids sentinel password hashes on invitations', async () => {
     const owner = await authService.register({
-      email: 'owner-org@brisksms.co.tz',
+      email: 'owner-org@brisksms.app',
       password: 'Password123!',
       fullName: 'Original Owner',
       organizationName: 'Role Guard Org',
     });
     const invitedAdmin = await organizationService.inviteMember(owner.organizationId!, owner.user.id, {
-      email: 'second-admin@brisksms.co.tz',
+      email: 'second-admin@brisksms.app',
       fullName: 'Second Admin',
       role: UserRole.ADMIN,
     });
@@ -278,12 +281,13 @@ describe('Cluster 1 Security & Integrity Hardening Suite', () => {
 
   it('enforces OAuth clientSecret on confidential refresh, rejects plain PKCE, and authenticates Bearer bsk_at_ tokens', async () => {
     const reg = await authService.register({
-      email: 'oauth-hardening@brisksms.co.tz',
+      email: 'oauth-hardening@brisksms.app',
       password: 'Password123!',
       fullName: 'OAuth Owner',
       organizationName: 'OAuth Hardening Org',
     });
 
+    await grantDeveloperPlan(reg.organizationId!);
     const clientSecret = 'very_strong_client_secret_value_123';
     const client = await oauthService.registerClient({
       organizationId: reg.organizationId!,

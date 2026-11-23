@@ -19,6 +19,7 @@ import {
   createLogger,
   recordWorkerHeartbeat,
   removeWorkerHeartbeat,
+  type SqlExecutor,
 } from '@brisksms/db';
 
 const logger = createLogger('brisksms:worker');
@@ -578,6 +579,238 @@ export async function processSmsCampaignJob(
 }
 
 /**
+ * Finishes account deletions whose 30-day hold has passed.
+ * Personal and operational data is erased. Payment evidence, ledgers and audit records stay,
+ * with the customer's name and phone number scrubbed where those tables allow it.
+ * Raw evidence and the ledgers reject updates and deletes by design, so they stay sealed.
+ * Each account runs in its own transaction, so one failure never blocks the others.
+ */
+export async function purgeDeletedAccounts(now: Date = new Date()): Promise<number> {
+  const due = await sql<{ id: string }>`
+    SELECT "id" FROM "users"
+    WHERE "deletion_scheduled_for" IS NOT NULL AND "deletion_scheduled_for" <= ${now} AND "is_active" = TRUE
+    LIMIT 25
+  `;
+  let purged = 0;
+  for (const user of due) {
+    try {
+      const memberships = await sql<{ organization_id: string; role: string; others: number }>`
+        SELECT uo."organization_id", uo."role"::text AS role,
+          (SELECT COUNT(*)::int FROM "users_organizations" x
+            WHERE x."organization_id" = uo."organization_id" AND x."user_id" <> uo."user_id") AS others
+        FROM "users_organizations" uo WHERE uo."user_id" = ${user.id}
+      `;
+      if (memberships.some((m) => m.role === 'OWNER' && m.others > 0)) {
+        logger.warn('Account deletion skipped: owner still has other members', { userId: user.id });
+        continue;
+      }
+      await withTransaction(async (tx) => {
+        for (const m of memberships) {
+          const orgId = m.organization_id;
+          await tx`DELETE FROM "users_organizations" WHERE "user_id" = ${user.id} AND "organization_id" = ${orgId}`;
+          if (m.others > 0) continue; // a member leaving someone else's workspace only loses access
+
+          // Phones get a wipe command, then the device is revoked
+          const devices = await tx<{ id: string }>`
+            SELECT "id" FROM "devices" WHERE "organization_id" = ${orgId} AND "status" <> 'REVOKED'::"DeviceStatus"
+          `;
+          for (const d of devices) {
+            const payload = JSON.stringify({ reason: 'Account deleted after 30-day hold' });
+            await tx`
+              UPDATE "device_commands"
+              SET "status" = 'CANCELLED'::"DeviceCommandStatus", "cancelled_at" = NOW(),
+                  "cancellation_reason" = 'Account deleted', "lease_token" = NULL, "lease_expires_at" = NULL, "updated_at" = NOW()
+              WHERE "organization_id" = ${orgId} AND "device_id" = ${d.id} AND "status" IN ('PENDING', 'DELIVERED')
+            `;
+            await tx`
+              INSERT INTO "device_commands" (
+                "id", "organization_id", "device_id", "source", "command_type", "payload", "status",
+                "idempotency_key", "request_fingerprint", "expires_at", "max_delivery_attempts"
+              ) VALUES (
+                ${randomUUID()}, ${orgId}, ${d.id}, 'ACCOUNT_DELETION', 'WIPE_AND_REVOKE'::"DeviceCommandType",
+                ${payload}::text::jsonb, 'PENDING'::"DeviceCommandStatus",
+                ${'account-deletion:' + d.id}, ${'account-deletion:' + d.id},
+                ${new Date(now.getTime() + 7 * 24 * 3600 * 1000)}, 1
+              )
+            `;
+            await tx`
+              UPDATE "devices"
+              SET "status" = 'REVOKED'::"DeviceStatus", "revoked_at" = NOW(),
+                  "revocation_reason" = 'Account deleted', "updated_at" = NOW()
+              WHERE "id" = ${d.id} AND "organization_id" = ${orgId}
+            `;
+          }
+
+          // Erase operational data (children before parents)
+          await tx`DELETE FROM "sms_delivery_attempts" WHERE "organization_id" = ${orgId}`;
+          await tx`DELETE FROM "sms_campaign_recipients" WHERE "organization_id" = ${orgId}`;
+          await tx`DELETE FROM "outbound_sms_jobs" WHERE "organization_id" = ${orgId}`;
+          await tx`DELETE FROM "sms_messages" WHERE "organization_id" = ${orgId}`;
+          await tx`DELETE FROM "sms_campaigns" WHERE "organization_id" = ${orgId}`;
+          await tx`DELETE FROM "message_idempotency_records" WHERE "organization_id" = ${orgId}`;
+          await tx`DELETE FROM "webhook_deliveries" WHERE "organization_id" = ${orgId}`;
+          await tx`DELETE FROM "webhook_endpoints" WHERE "organization_id" = ${orgId}`;
+          await tx`DELETE FROM "outbox_events" WHERE "organization_id" = ${orgId}`;
+          await tx`DELETE FROM "oauth_tokens" WHERE "organization_id" = ${orgId}`;
+          await tx`DELETE FROM "oauth_authorization_codes" WHERE "organization_id" = ${orgId}`;
+          await tx`DELETE FROM "oauth_clients" WHERE "organization_id" = ${orgId}`;
+          await tx`DELETE FROM "api_keys" WHERE "organization_id" = ${orgId}`;
+          await tx`DELETE FROM "device_pairing_challenges" WHERE "organization_id" = ${orgId}`;
+          await tx`DELETE FROM "pairing_tokens" WHERE "organization_id" = ${orgId}`;
+          await tx`DELETE FROM "sender_ids" WHERE "organization_id" = ${orgId}`;
+          await tx`DELETE FROM "automation_logs" WHERE "organization_id" = ${orgId}`;
+          await tx`DELETE FROM "automation_rules" WHERE "organization_id" = ${orgId}`;
+          await tx`DELETE FROM "smsgate_webhook_events" WHERE "organization_id" = ${orgId}`;
+          await tx`DELETE FROM "smsgate_signing_keys" WHERE "organization_id" = ${orgId}`;
+          await tx`DELETE FROM "organization_invitations" WHERE "organization_id" = ${orgId}`;
+          await tx`DELETE FROM "customers" WHERE "organization_id" = ${orgId}`;
+          await tx`UPDATE "messaging_accounts" SET "gateway_base_url" = NULL, "encrypted_api_token" = NULL WHERE "organization_id" = ${orgId}`;
+
+          // Keep the money records, drop who paid
+          await tx`
+            UPDATE "normalized_payments"
+            SET "sender_phone" = 'ERASED', "sender_name" = NULL
+            WHERE "organization_id" = ${orgId}
+          `;
+          await tx`
+            UPDATE "invoices" SET "customer_name" = NULL, "customer_phone" = NULL, "metadata" = NULL
+            WHERE "organization_id" = ${orgId}
+          `;
+          await tx`
+            UPDATE "stk_push_transactions"
+            SET "phone_number" = 'ERASED', "memo" = NULL, "error_message" = NULL, "raw_callback_payload" = NULL, "metadata" = NULL
+            WHERE "organization_id" = ${orgId}
+          `;
+          await tx`
+            UPDATE "devices" SET "label" = 'Erased device', "device_model" = 'Erased' WHERE "organization_id" = ${orgId}
+          `;
+          await tx`
+            UPDATE "organizations"
+            SET "name" = 'Deleted account', "slug" = ${'deleted-' + orgId}, "is_active" = FALSE, "updated_at" = NOW()
+            WHERE "id" = ${orgId}
+          `;
+        }
+        await tx`DELETE FROM "refresh_tokens" WHERE "user_id" = ${user.id}`;
+        await tx`DELETE FROM "email_verification_tokens" WHERE "user_id" = ${user.id}`;
+        await tx`
+          UPDATE "users"
+          SET "email" = ${'deleted-' + user.id + '@deleted.invalid'}, "full_name" = 'Deleted user',
+              "password_hash" = NULL, "phone_number" = NULL, "google_id" = NULL, "avatar_url" = NULL,
+              "two_factor_secret" = NULL, "two_factor_enabled" = FALSE, "two_factor_recovery_hashes" = NULL,
+              "pending_email" = NULL, "is_active" = FALSE, "deletion_scheduled_for" = NULL, "updated_at" = NOW()
+          WHERE "id" = ${user.id}
+        `;
+      });
+      purged++;
+    } catch (err) {
+      logger.error('Failed to purge deleted account', {
+        userId: user.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  return purged;
+}
+
+const DEFAULT_HISTORY_RETENTION_DAYS = 90;
+const MIN_HISTORY_RETENTION_DAYS = 30;
+
+/** How long finished outbound SMS jobs and device commands are kept. Never below 30 days. */
+export function resolveHistoryRetentionDays(raw: string | undefined = process.env.HISTORY_RETENTION_DAYS): number {
+  const days = Number.parseInt(raw ?? '', 10);
+  if (!Number.isFinite(days)) return DEFAULT_HISTORY_RETENTION_DAYS;
+  return Math.max(days, MIN_HISTORY_RETENTION_DAYS);
+}
+
+export interface HistoryPurgeOptions {
+  batchSize?: number;
+  maxBatches?: number;
+  pauseMs?: number;
+}
+
+/**
+ * Deletes finished outbound SMS jobs and device commands older than the retention period.
+ * Built so it cannot disturb live traffic: only finished rows are touched (found through the partial
+ * cleanup indexes), each batch is a short transaction that skips any row another session holds and
+ * gives up after 2 seconds of waiting for a lock, there is a pause between batches, and a run stops
+ * after a fixed number of batches so the next scheduled run continues the work.
+ * The sms_messages records, the credit ledger and the audit log are not touched.
+ */
+export async function purgeOldRelayHistory(
+  retentionDays: number = resolveHistoryRetentionDays(),
+  options: HistoryPurgeOptions = {},
+): Promise<{ purgedOutboundSmsJobs: number; purgedDeviceCommands: number }> {
+  const batchSize = options.batchSize ?? 500;
+  const maxBatches = options.maxBatches ?? 20;
+  const pauseMs = options.pauseMs ?? 250;
+  const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
+
+  async function purge(deleteBatch: (tx: SqlExecutor) => Promise<number>): Promise<number> {
+    let total = 0;
+    for (let batch = 0; batch < maxBatches; batch++) {
+      const deleted = await withTransaction(async (tx) => {
+        await tx`SET LOCAL lock_timeout = '2s'`;
+        await tx`SET LOCAL statement_timeout = '15s'`;
+        return deleteBatch(tx);
+      });
+      total += deleted;
+      if (deleted < batchSize) break;
+      await new Promise((resolve) => setTimeout(resolve, pauseMs));
+    }
+    return total;
+  }
+
+  let purgedOutboundSmsJobs = 0;
+  let purgedDeviceCommands = 0;
+
+  try {
+    purgedOutboundSmsJobs = await purge(async (tx) => {
+      const rows = await tx<{ id: string }>`
+        DELETE FROM "outbound_sms_jobs"
+        WHERE "id" IN (
+          SELECT "id" FROM "outbound_sms_jobs"
+          WHERE "status" IN ('DELIVERED', 'FAILED', 'EXPIRED', 'CANCELLED')
+            AND "updated_at" < ${cutoff}
+          ORDER BY "updated_at"
+          LIMIT ${batchSize}
+          FOR UPDATE SKIP LOCKED
+        )
+        RETURNING "id"
+      `;
+      return rows.length;
+    });
+  } catch (err) {
+    logger.error('Failed to purge old outbound SMS jobs', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  try {
+    purgedDeviceCommands = await purge(async (tx) => {
+      const rows = await tx<{ id: string }>`
+        DELETE FROM "device_commands"
+        WHERE "id" IN (
+          SELECT "id" FROM "device_commands"
+          WHERE "status" IN ('ACKNOWLEDGED', 'FAILED', 'EXPIRED', 'CANCELLED')
+            AND "updated_at" < ${cutoff}
+          ORDER BY "updated_at"
+          LIMIT ${batchSize}
+          FOR UPDATE SKIP LOCKED
+        )
+        RETURNING "id"
+      `;
+      return rows.length;
+    });
+  } catch (err) {
+    logger.error('Failed to purge old device commands', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  return { purgedOutboundSmsJobs, purgedDeviceCommands };
+}
+
+/**
  * Executes maintenance housekeeping across ephemeral and expired records.
  * Isolated error handling ensures that a failure in one table does not halt other maintenance cleanups.
  */
@@ -590,6 +823,9 @@ export async function runMaintenanceCleanup(retentionDays: number = 30): Promise
   expiredOutboundSmsJobs: number;
   expiredStkTransactions: number;
   purgedExpiredOAuthAndRefresh: number;
+  purgedDeletedAccounts: number;
+  purgedOutboundSmsJobs: number;
+  purgedDeviceCommands: number;
 }> {
   const now = new Date();
   let purgedPairingTokens = 0;
@@ -600,6 +836,7 @@ export async function runMaintenanceCleanup(retentionDays: number = 30): Promise
   let expiredOutboundSmsJobs = 0;
   let expiredStkTransactions = 0;
   let purgedExpiredOAuthAndRefresh = 0;
+  let purgedDeletedAccounts = 0;
 
   try {
     const deletedPairing = await sql<{ id: string }>`
@@ -815,6 +1052,16 @@ export async function runMaintenanceCleanup(retentionDays: number = 30): Promise
     });
   }
 
+  try {
+    purgedDeletedAccounts = await purgeDeletedAccounts(now);
+  } catch (err) {
+    logger.error('Failed to purge deleted accounts', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  const { purgedOutboundSmsJobs, purgedDeviceCommands } = await purgeOldRelayHistory();
+
   return {
     purgedPairingTokens,
     purgedRevokedSessions,
@@ -824,6 +1071,9 @@ export async function runMaintenanceCleanup(retentionDays: number = 30): Promise
     expiredOutboundSmsJobs,
     expiredStkTransactions,
     purgedExpiredOAuthAndRefresh,
+    purgedDeletedAccounts,
+    purgedOutboundSmsJobs,
+    purgedDeviceCommands,
   };
 }
 
@@ -1535,7 +1785,9 @@ export class MaintenanceRunner {
       if (
         result.purgedPairingTokens > 0 ||
         result.purgedRevokedSessions > 0 ||
-        result.purgedVerificationTokens > 0
+        result.purgedVerificationTokens > 0 ||
+        result.purgedOutboundSmsJobs > 0 ||
+        result.purgedDeviceCommands > 0
       ) {
         logger.info('Maintenance cleanup cycle executed', result);
       }

@@ -263,6 +263,7 @@ model Organization {
   timezone     String   @default("Africa/Dar_es_Salaam") @db.VarChar(50)
   planTier     String   @default("STARTER") @map("plan_tier") @db.VarChar(50)
   isActive     Boolean  @default(true) @map("is_active")
+  accountType  String   @default("ORGANIZATION") @map("account_type") @db.VarChar(20)
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -318,8 +319,12 @@ model User {
   phoneNumber      String?  @map("phone_number") @db.VarChar(50)
   isEmailVerified  Boolean  @default(false) @map("is_email_verified")
   isActive         Boolean  @default(true) @map("is_active")
-  twoFactorSecret  String?  @map("two_factor_secret") @db.VarChar(100)
+  twoFactorSecret  String?  @map("two_factor_secret") @db.VarChar(255)
   twoFactorEnabled Boolean  @default(false) @map("two_factor_enabled")
+  twoFactorRecoveryHashes String? @map("two_factor_recovery_hashes") @db.Text
+  pendingEmail     String?  @map("pending_email") @db.VarChar(255)
+  deletionRequestedAt  DateTime? @map("deletion_requested_at") @db.Timestamptz(6)
+  deletionScheduledFor DateTime? @map("deletion_scheduled_for") @db.Timestamptz(6)
   googleId         String?  @unique @map("google_id") @db.VarChar(255)
   authProvider     String   @default("LOCAL") @map("auth_provider") @db.VarChar(32)
   avatarUrl        String?  @map("avatar_url") @db.Text
@@ -1238,6 +1243,87 @@ model PlanEntitlement {
 
   @@unique([planVersionId, featureKey])
   @@map("plan_entitlements")
+}
+
+model PlatformSetting {
+  key       String   @id @db.VarChar(64)
+  value     String   @db.Text
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@map("platform_settings")
+}
+
+model BillingCheckoutRequest {
+  id                    String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId        String    @map("organization_id") @db.Uuid
+  billingOrganizationId String    @map("billing_organization_id") @db.Uuid
+  billingInvoiceId      String    @unique @map("billing_invoice_id") @db.Uuid
+  referenceNumber       String    @map("reference_number") @db.VarChar(100)
+  planVersionId         String    @map("plan_version_id") @db.Uuid
+  currency              String    @db.VarChar(3)
+  billingInterval       BillingInterval @map("billing_interval")
+  amountCents           BigInt    @map("amount_cents")
+  status                String    @default("PENDING") @db.VarChar(20)
+  createdById           String?   @map("created_by_id") @db.Uuid
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  activatedAt           DateTime? @map("activated_at") @db.Timestamptz(6)
+  cancelledAt           DateTime? @map("cancelled_at") @db.Timestamptz(6)
+
+  @@index([organizationId, createdAt(sort: Desc)])
+  @@map("billing_checkout_requests")
+}
+
+model CreditPack {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code        String   @unique @db.VarChar(40)
+  name        String   @db.VarChar(100)
+  credits     Int
+  currency    String   @db.VarChar(3)
+  amountCents BigInt   @map("amount_cents")
+  isActive    Boolean  @default(true) @map("is_active")
+  sortOrder   Int      @default(0) @map("sort_order")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("credit_packs")
+}
+
+model CreditPurchase {
+  id                    String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId        String    @map("organization_id") @db.Uuid
+  billingOrganizationId String    @map("billing_organization_id") @db.Uuid
+  billingInvoiceId      String    @unique @map("billing_invoice_id") @db.Uuid
+  referenceNumber       String    @map("reference_number") @db.VarChar(100)
+  packId                String    @map("pack_id") @db.Uuid
+  credits               Int
+  currency              String    @db.VarChar(3)
+  amountCents           BigInt    @map("amount_cents")
+  status                String    @default("PENDING") @db.VarChar(20)
+  createdById           String?   @map("created_by_id") @db.Uuid
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  activatedAt           DateTime? @map("activated_at") @db.Timestamptz(6)
+  cancelledAt           DateTime? @map("cancelled_at") @db.Timestamptz(6)
+
+  @@index([organizationId, createdAt(sort: Desc)])
+  @@map("credit_purchases")
+}
+
+model PlatformAuditLog {
+  id                   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  adminUserId          String   @map("admin_user_id") @db.Uuid
+  ipAddress            String?  @map("ip_address") @db.VarChar(64)
+  action               String   @db.VarChar(100)
+  targetType           String?  @map("target_type") @db.VarChar(50)
+  targetId             String?  @map("target_id") @db.VarChar(100)
+  targetOrganizationId String?  @map("target_organization_id") @db.Uuid
+  reason               String?  @db.Text
+  previousState        Json?    @map("previous_state") @db.JsonB
+  newState             Json?    @map("new_state") @db.JsonB
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([createdAt(sort: Desc)])
+  @@index([action, createdAt(sort: Desc)])
+  @@map("platform_audit_logs")
 }
 
 model OrganizationSubscription {

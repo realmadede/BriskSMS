@@ -234,7 +234,7 @@ Direct native RouterOS SSH/API and WHMCS PHP worker adapters inside `apps/worker
                       +---------------+---------------+
                       |                               |
                       v                               v
-             [api.brisksms.com]             [console.brisksms.com]
+             [api.brisksms.app]             [console.brisksms.app]
              (apps/api :3000)                 (apps/web :4200)
                       |
                       +---------------+---------------+

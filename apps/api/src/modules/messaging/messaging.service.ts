@@ -131,8 +131,8 @@ export class MessagingService {
   /**
    * Retrieves or provisions a tenant's messaging account
    */
-  async getOrCreateAccount(organizationId: string): Promise<MessagingAccountRecord> {
-    const existing = await sql<Record<string, any>>`
+  async getOrCreateAccount(organizationId: string, db: SqlExecutor = sql): Promise<MessagingAccountRecord> {
+    const existing = await db<Record<string, any>>`
       SELECT * FROM messaging_accounts WHERE organization_id = ${organizationId} LIMIT 1
     `;
     if (existing.length > 0) {
@@ -141,14 +141,14 @@ export class MessagingService {
 
     const id = randomUUID();
     const now = new Date();
-    const inserted = await sql<Record<string, any>>`
+    const inserted = await db<Record<string, any>>`
       INSERT INTO messaging_accounts (
         id, organization_id, credit_balance, reserved_credits,
         gateway_mode, gateway_base_url, encrypted_api_token,
         default_sim_slot, is_active, created_at, updated_at
       ) VALUES (
         ${id}, ${organizationId}, 0, 0,
-        ${GatewayMode.MANAGED_GATEWAY}, 'https://gateway.brisksms.com/api/v1', NULL,
+        ${GatewayMode.MANAGED_GATEWAY}, 'https://gateway.brisksms.app/api/v1', NULL,
         1, true, ${now}, ${now}
       )
       ON CONFLICT (organization_id) DO UPDATE SET updated_at = messaging_accounts.updated_at
@@ -184,7 +184,7 @@ export class MessagingService {
       }
       gatewayBaseUrl = dto.gatewayBaseUrl.trim();
     } else if (dto.gatewayMode === GatewayMode.MANAGED_GATEWAY && !account.gatewayBaseUrl) {
-      gatewayBaseUrl = 'https://gateway.brisksms.com/api/3rdparty/v1';
+      gatewayBaseUrl = 'https://gateway.brisksms.app/api/3rdparty/v1';
     } else if (dto.gatewayMode === GatewayMode.EXTERNAL_RELAY && !account.gatewayBaseUrl) {
       gatewayBaseUrl = 'https://api.sms-gate.app/3rdparty/v1';
     }
@@ -268,14 +268,16 @@ export class MessagingService {
     organizationId: string,
     amountCredits: number,
     referenceId?: string,
+    outerTx?: SqlExecutor,
   ): Promise<number> {
     if (amountCredits <= 0) {
       throw new BriskError('MESSAGING_ERROR', 'Purchased credits must be greater than zero.');
     }
 
-    await this.getOrCreateAccount(organizationId);
+    // With outerTx the credits join the caller's transaction (used when a verified payment adds them)
+    await this.getOrCreateAccount(organizationId, outerTx);
 
-    return withTransaction(async (tx) => {
+    const run = async (tx: SqlExecutor) => {
       const rows = await tx<Record<string, any>>`
         SELECT * FROM messaging_accounts
         WHERE organization_id = ${organizationId}
@@ -301,7 +303,8 @@ export class MessagingService {
       `;
 
       return newBalance;
-    });
+    };
+    return outerTx ? run(outerTx) : withTransaction(run);
   }
 
   /**
@@ -1134,7 +1137,7 @@ export class MessagingService {
       result = await this.provider.sendMessage(
         {
           mode: account.gatewayMode,
-          baseUrl: account.gatewayBaseUrl || 'https://gateway.brisksms.com/api/v1',
+          baseUrl: account.gatewayBaseUrl || 'https://gateway.brisksms.app/api/v1',
           apiToken: typeof rawToken === 'string' ? rawToken : String(rawToken),
           auth: typeof parsedAuth === 'object' ? parsedAuth : undefined,
           defaultSimSlot: account.defaultSimSlot,

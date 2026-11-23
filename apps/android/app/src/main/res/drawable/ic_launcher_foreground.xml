@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- BriskSMS mark (receipt slip + tick) from apps/web/src/assets/brand/favicon.svg, scaled into the adaptive icon safe zone -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="2.4"
+        android:scaleY="2.4"
+        android:translateX="15.6"
+        android:translateY="18.6">
+        <path
+            android:fillColor="#F4F1EA"
+            android:pathData="M10 5H22A2 2 0 0 1 24 7V25L22 23L20 25L18 23L16 25L14 23L12 25L10 23L8 25V7A2 2 0 0 1 10 5Z" />
+        <path
+            android:fillColor="#C6B480"
+            android:pathData="M10.36 15.14L14.5 19.33L21.68 11.09L20.32 9.91L14.5 16.67L11.64 13.86Z" />
+    </group>
+</vector>

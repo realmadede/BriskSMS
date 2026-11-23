@@ -26,6 +26,7 @@ import {
   UnsupportedStkAdapter,
   stkPushService,
 } from '../src/modules/stk-push/index.js';
+import { grantDeveloperPlan } from './helpers/developer-plan.js';
 
 describe('P0: Carrier Dispatch Adapter Integrity & Fail-Closed Boundaries', () => {
   const router = createApp();
@@ -107,6 +108,7 @@ describe('P0: Carrier Dispatch Adapter Integrity & Fail-Closed Boundaries', () =
       isActive: true,
     });
 
+    await grantDeveloperPlan(orgId);
     const created = await apiKeyService.createApiKey(orgId, {
       organizationId: orgId,
       name: 'STK Key',

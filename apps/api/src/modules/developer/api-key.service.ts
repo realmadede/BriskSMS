@@ -4,9 +4,11 @@ import {
   ApiKeyDto,
   CreateApiKeyDto,
   CreatedApiKeyResult,
+  FeatureKey,
 } from '@brisksms/shared';
 import { sql, withTransaction } from '@brisksms/db';
 import { ApiKeyRecord } from '../../core/store.js';
+import { entitlementService } from '../subscription/entitlement.service.js';
 
 export class ApiKeyService {
   private mapRow(row: Record<string, any>): ApiKeyRecord {
@@ -92,8 +94,12 @@ export class ApiKeyService {
     }
 
     const keyHash = createHash('sha256').update(rawKey.trim()).digest('hex');
+    // Keys of a suspended organization stop working until it is reactivated
     const rows = await sql<Record<string, any>>`
-      SELECT * FROM api_keys WHERE key_hash = ${keyHash} LIMIT 1
+      SELECT k.* FROM api_keys k
+      JOIN organizations o ON o.id = k.organization_id
+      WHERE k.key_hash = ${keyHash} AND o.is_active = true
+      LIMIT 1
     `;
     if (rows.length === 0) {
       return null;
@@ -105,6 +111,11 @@ export class ApiKeyService {
     }
 
     if (requiredScope && !record.scopes.includes(requiredScope)) {
+      return null;
+    }
+
+    // A plan without API access stops existing keys too, so a downgrade takes effect at once
+    if (!(await entitlementService.isFeatureEnabled(record.organizationId, FeatureKey.API_ACCESS))) {
       return null;
     }
 

@@ -16,7 +16,7 @@ describe('BriskSMS Zapier Integration (@brisksms/zapier-app)', () => {
 
   it('configures OAuth2 with /v1/oauth routes and PKCE S256', () => {
     const auth = App.authentication.oauth2Config;
-    assert.equal(auth.authorizeUrl.url, 'https://api.brisksms.com/v1/oauth/authorize');
+    assert.equal(auth.authorizeUrl.url, 'https://api.brisksms.app/v1/oauth/authorize');
     assert.equal(auth.authorizeUrl.params.code_challenge_method, 'S256');
     assert.equal(auth.authorizeUrl.params.response_type, 'code');
     assert.equal(auth.autoRefresh, true);
@@ -62,7 +62,7 @@ describe('BriskSMS Zapier Integration (@brisksms/zapier-app)', () => {
       authData: {},
       inputData: { code: 'c1', code_verifier: 'v1', redirect_uri: 'https://zapier.com/cb' },
     });
-    assert.equal(calls[1]?.url, 'https://api.brisksms.com/v1/oauth/token');
+    assert.equal(calls[1]?.url, 'https://api.brisksms.app/v1/oauth/token');
     assert.equal(tokens.access_token, 'bsk_at_new');
   });
 
@@ -94,14 +94,14 @@ describe('BriskSMS Zapier Integration (@brisksms/zapier-app)', () => {
       inputData: { recipientPhone: '+255754000111', message: 'Hello from Zapier!', simSlot: 1 },
     } as ZapierBundle<SendSmsInput>);
 
-    assert.equal(captured[0]?.url, 'https://api.brisksms.com/v1/messages/send');
+    assert.equal(captured[0]?.url, 'https://api.brisksms.app/v1/messages/send');
     assert.equal((smsResult as { messageId: string }).messageId, 'msg_test_123');
 
     const invResult = await App.creates.create_invoice.operation.perform(mockZ, {
       authData: { access_token: 'bsk_at_test_token' },
       inputData: { referenceNumber: 'INV-2026-001', totalAmountCents: '15000000' },
     });
-    assert.equal(captured[1]?.url, 'https://api.brisksms.com/v1/reconciliation/invoices');
+    assert.equal(captured[1]?.url, 'https://api.brisksms.app/v1/reconciliation/invoices');
     assert.equal((invResult as { id: string }).id, 'inv_123');
   });
 
@@ -130,7 +130,7 @@ describe('BriskSMS Zapier Integration (@brisksms/zapier-app)', () => {
       inputData: {},
       targetUrl: 'https://hooks.example.com/catch/mock_hook_123',
     });
-    assert.equal(calls[0]?.url, 'https://api.brisksms.com/v1/developer/webhooks');
+    assert.equal(calls[0]?.url, 'https://api.brisksms.app/v1/developer/webhooks');
     assert.deepEqual(calls[0]?.body, {
       url: 'https://hooks.example.com/catch/mock_hook_123',
       subscribedEvents: ['payment.matched'],
@@ -141,14 +141,14 @@ describe('BriskSMS Zapier Integration (@brisksms/zapier-app)', () => {
       authData: { access_token: 'bsk_at_test_token' },
       inputData: {},
     });
-    assert.equal(calls[1]?.url, 'https://api.brisksms.com/v1/reconciliation/payments?state=MATCHED&limit=5');
+    assert.equal(calls[1]?.url, 'https://api.brisksms.app/v1/reconciliation/payments?state=MATCHED&limit=5');
     assert.equal(matchedList[0]?.paymentId, 'pay_1');
 
     const reviewList = await App.triggers.payment_needs_review.operation.performList(mockZ, {
       authData: { access_token: 'bsk_at_test_token' },
       inputData: {},
     });
-    assert.equal(calls[2]?.url, 'https://api.brisksms.com/v1/reconciliation/payments?state=REVIEW_REQUIRED&limit=5');
+    assert.equal(calls[2]?.url, 'https://api.brisksms.app/v1/reconciliation/payments?state=REVIEW_REQUIRED&limit=5');
     assert.equal(reviewList.length, 1);
   });
 });

@@ -54,7 +54,7 @@ export const createInvoiceAction = {
     ],
     perform: async (z: ZapierZ, bundle: ZapierBundle<CreateInvoiceInput>) => {
       const response = await z.request({
-        url: 'https://api.brisksms.com/v1/reconciliation/invoices',
+        url: 'https://api.brisksms.app/v1/reconciliation/invoices',
         method: 'POST',
         headers: {
           Authorization: `Bearer ${bundle.authData.access_token}`,

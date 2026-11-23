@@ -126,3 +126,7 @@ temp/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# MD files
+TASKS.md
+docs

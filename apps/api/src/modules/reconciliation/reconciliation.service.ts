@@ -24,6 +24,8 @@ import {
   paymentReferenceClaimService,
 } from './payment-reference-claim.service.js';
 import { assertTenantContext, sql, SqlExecutor, withTransaction } from '@brisksms/db';
+import { activateBillingRequestForInvoice } from '../subscription/billing-activation.js';
+import { activateCreditPurchaseForInvoice } from '../messaging/credit-activation.js';
 
 export interface CreateInvoiceDto {
   referenceNumber: string;
@@ -802,6 +804,9 @@ export class ReconciliationService {
           },
           tx,
         );
+        // A paid invoice in the billing workspace may be a customer's plan or credit payment: activate it atomically
+        await activateBillingRequestForInvoice(tx, updatedInvoice);
+        await activateCreditPurchaseForInvoice(tx, updatedInvoice);
       } else if (newInvoiceStatus === InvoiceStatus.PARTIALLY_PAID) {
         await dbStore.insertOutboxEvent(
           {

@@ -37,6 +37,8 @@ class KeystoreSecureStorage(private val context: Context) {
         private const val KEY_DEVICE_TOKEN = "device_token"
         private const val KEY_DEVICE_ID = "device_id"
         private const val KEY_ORGANIZATION_ID = "organization_id"
+        private const val KEY_ORGANIZATION_NAME = "organization_name"
+        private const val KEY_ACCOUNT_TYPE = "account_type"
         private const val KEY_API_BASE_URL = "api_base_url"
         private const val KEY_IS_PAIRED = "is_paired"
         private const val KEY_IS_REVOKED = "is_revoked"
@@ -48,8 +50,8 @@ class KeystoreSecureStorage(private val context: Context) {
         private const val KEY_PENDING_COMMAND_ACKS = "pending_command_acks_json"
         private const val KEY_PENDING_SMS_JOB_RESULTS = "pending_sms_job_results_json"
 
-        const val DEFAULT_API_BASE_URL = "https://api.brisksms.co.tz"
-        const val DEFAULT_SMSGATE_BASE_URL = "https://gateway.brisksms.com/api/v1"
+        const val DEFAULT_API_BASE_URL = "https://api.brisksms.app"
+        const val DEFAULT_SMSGATE_BASE_URL = "https://gateway.brisksms.app/api/v1"
     }
 
     private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE)
@@ -144,6 +146,15 @@ class KeystoreSecureStorage(private val context: Context) {
         get() = prefs.getString(KEY_ORGANIZATION_ID, null)
         set(value) = prefs.edit().putString(KEY_ORGANIZATION_ID, value).apply()
 
+    /** Account name and type (`PERSONAL` or `ORGANIZATION`) for display. Null on phones paired before the server sent them. */
+    var organizationName: String?
+        get() = prefs.getString(KEY_ORGANIZATION_NAME, null)
+        set(value) = prefs.edit().putString(KEY_ORGANIZATION_NAME, value).apply()
+
+    var accountType: String?
+        get() = prefs.getString(KEY_ACCOUNT_TYPE, null)
+        set(value) = prefs.edit().putString(KEY_ACCOUNT_TYPE, value).apply()
+
     var apiBaseUrl: String
         get() = prefs.getString(KEY_API_BASE_URL, DEFAULT_API_BASE_URL) ?: DEFAULT_API_BASE_URL
         set(value) = prefs.edit().putString(KEY_API_BASE_URL, value.trimEnd('/')).apply()
@@ -186,6 +197,16 @@ class KeystoreSecureStorage(private val context: Context) {
         get() = prefs.getBoolean(KEY_BULK_MESSAGING_ENABLED, true)
         set(value) = prefs.edit().putBoolean(KEY_BULK_MESSAGING_ENABLED, value).apply()
 
+    // Asks for the phone's own screen lock when the app opens; off until the owner turns it on
+    var isAppLockEnabled: Boolean
+        get() = prefs.getBoolean("app_lock_enabled", false)
+        set(value) = prefs.edit().putBoolean("app_lock_enabled", value).apply()
+
+    // A once-a-day notification with local counts; off until the owner turns it on
+    var isDailySummaryEnabled: Boolean
+        get() = prefs.getBoolean("daily_summary_enabled", false)
+        set(value) = prefs.edit().putBoolean("daily_summary_enabled", value).apply()
+
     var preferredSimSlot: Int
         get() = prefs.getInt("preferred_sim_slot", 1)
         set(value) = prefs.edit().putInt("preferred_sim_slot", value).apply()
@@ -220,6 +241,8 @@ class KeystoreSecureStorage(private val context: Context) {
             .remove(KEY_DEVICE_TOKEN)
             .remove(KEY_DEVICE_ID)
             .remove(KEY_ORGANIZATION_ID)
+            .remove(KEY_ORGANIZATION_NAME)
+            .remove(KEY_ACCOUNT_TYPE)
             .remove(KEY_SMSGATE_API_TOKEN)
             .remove(KEY_PENDING_COMMAND_ACKS)
             .remove(KEY_PENDING_SMS_JOB_RESULTS)

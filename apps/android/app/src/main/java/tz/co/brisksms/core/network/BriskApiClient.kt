@@ -337,7 +337,9 @@ class BriskApiClient(private val secureStorage: KeystoreSecureStorage) : Pairing
                     deviceToken = data.getString("deviceToken"),
                     publicKeyFingerprint = data.optString("publicKeyFingerprint", ""),
                     keyAlgorithm = data.optString("keyAlgorithm", DevicePairingProtocol.KEY_ALGORITHM),
-                    syncIntervalSeconds = data.optInt("syncIntervalSeconds", 30)
+                    syncIntervalSeconds = data.optInt("syncIntervalSeconds", 30),
+                    organizationName = data.optString("organizationName", ""),
+                    accountType = data.optString("accountType", "")
                 )
                 Result.success(result)
             }
@@ -735,6 +737,29 @@ class BriskApiClient(private val secureStorage: KeystoreSecureStorage) : Pairing
             json.optJSONObject("error")?.optString("code")?.ifEmpty { null }
         } catch (_: Exception) {
             null
+        }
+    }
+
+    /**
+     * Tells the server this phone is being unpaired so its plan slot is freed (POST /v1/devices/:id/disconnect).
+     * A 401 or 403 means the server already no longer knows this device, which is the state we want.
+     */
+    suspend fun disconnectDevice(): Result<Unit> {
+        return try {
+            val deviceId = secureStorage.deviceId ?: return Result.success(Unit)
+            val request = Request.Builder()
+                .url("${getBaseUrl()}/v1/devices/$deviceId/disconnect")
+                .post("{}".toRequestBody(JSON_MEDIA_TYPE))
+                .build()
+            okHttpClient.newCall(request).execute().use { response ->
+                if (response.isSuccessful || response.code == 401 || response.code == 403) {
+                    Result.success(Unit)
+                } else {
+                    Result.failure(IllegalStateException("The server replied ${response.code}"))
+                }
+            }
+        } catch (e: IOException) {
+            Result.failure(e)
         }
     }
 

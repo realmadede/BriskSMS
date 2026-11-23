@@ -28,7 +28,12 @@ object BriskColors {
     // Pill Action Accents
     val AccentPrimary = Color(0xFFC2B28F)       // Warm Ochre / Sand Gold
     val AccentPrimaryHover = Color(0xFFB2A27E)
+    val AccentPrimaryDark = Color(0xFFD4C5A2)   // Brightened Ochre for dark contrast
+    val AccentInkLight = Color(0xFF6E5F3D)      // Ochre as text/focus on light surfaces (5:1 on Bone, 6.2:1 on white)
     val ContrastPill = Color(0xFF121212)        // Deep Obsidian
+
+    // Surface step for selected/raised states
+    val SurfaceRaisedDark = Color(0xFF2A2A2F)
 
     // Typography
     val TextPrimaryLight = Color(0xFF121212)    // 12.4:1 contrast (WCAG AAA)
@@ -42,6 +47,7 @@ object BriskColors {
     val StatusVerified = Color(0xFF2E7D32)      // M-Pesa / Verified Green
     val StatusReview = Color(0xFFED6C02)        // Review Required Amber
     val StatusRejected = Color(0xFFD32F2F)      // Duplicate / Error Crimson
+    val StatusRejectedDark = Color(0xFFF07171)  // Crimson as text on dark surfaces (AA on #1E1E22)
 
     // Adaptive Light/Dark Theme Accessors
     @Composable
@@ -64,6 +70,18 @@ object BriskColors {
 
     @Composable
     fun textTertiary(): Color = if (isSystemInDarkTheme()) TextTertiaryDark else TextTertiaryLight
+
+    @Composable
+    fun canvasDeep(): Color = if (isSystemInDarkTheme()) SurfaceRaisedDark else CanvasDeepLight
+
+    @Composable
+    fun accentPill(): Color = if (isSystemInDarkTheme()) AccentPrimaryDark else AccentPrimary
+
+    @Composable
+    fun accentInk(): Color = if (isSystemInDarkTheme()) AccentPrimaryDark else AccentInkLight
+
+    @Composable
+    fun negativeInk(): Color = if (isSystemInDarkTheme()) StatusRejectedDark else StatusRejected
 }
 
 

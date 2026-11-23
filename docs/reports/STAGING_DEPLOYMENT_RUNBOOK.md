@@ -16,8 +16,8 @@ BriskSMS staging deploys as a **modular monolith** on a single isolated staging 
         │
         ▼ (HTTPS / TLS 1.3)
 [ Cloudflare / Nginx Reverse Proxy ]
-        ├── staging-api.brisksms.com      ──▶ apps/api (Port 3000)
-        └── staging-console.brisksms.com  ──▶ apps/web (Port 4200)
+        ├── staging-api.brisksms.app      ──▶ apps/api (Port 3000)
+        └── staging-console.brisksms.app  ──▶ apps/web (Port 4200)
                                                     │
                                                     ▼
                                           [ apps/worker (BullMQ) ]
@@ -33,7 +33,7 @@ BriskSMS staging deploys as a **modular monolith** on a single isolated staging 
 - **Single-Node Availability Limitation:** A single-node compute staging deployment represents a **Single Point of Failure (SPOF)** with zero multi-AZ redundancy. This is acceptable for functional and integration staging, but is not suitable for high-availability production.
 - **Runtimes:** Bun v1.4.2 (`packageManager`) and Node.js v20+ / v24+.
 - **Database:** Managed PostgreSQL 16+ with SSL enabled (`sslmode=require`).
-- **Cache & Queue:** Redis 7+ reachable over private VPC TCP network (`redis://...`) with password authentication. Note: The application runtime (`packages/db/src/redis.ts`) uses raw TCP `net.Socket` and does not perform application-level TLS handshakes. In-transit encryption must be provided by the underlying network or a secure tunnel.
+- **Cache & Queue:** Redis 7+ reachable over private VPC TCP network (`redis://...`) with password authentication. Note: The application runtime (`packages/db/src/redis.ts`) uses raw TCP `net.Socket` for `redis://` URLs and TLS (`tls.connect`) for `rediss://` URLs. Use `rediss://` if Redis traffic leaves the host.
 - **Object Storage:** **None required.** BriskSMS persists all payment evidence in PostgreSQL (`raw_payment_evidence` table) as native JSONB.
 
 ---
@@ -70,9 +70,9 @@ Create `/opt/brisksms/.env` using the template from `docs/reports/STAGING_ENVIRO
 cat << 'EOF' > /opt/brisksms/.env
 NODE_ENV=production
 PORT=3000
-API_BASE_URL=https://staging-api.brisksms.com
-FRONTEND_URL=https://staging-console.brisksms.com
-ALLOWED_ORIGINS=https://staging-console.brisksms.com
+API_BASE_URL=https://staging-api.brisksms.app
+FRONTEND_URL=https://staging-console.brisksms.app
+ALLOWED_ORIGINS=https://staging-console.brisksms.app
 
 DATABASE_URL=postgresql://brisksms_staging_user:STRONG_STAGING_PASSWORD@postgres-staging.internal:5432/brisksms_staging?sslmode=require
 FORCE_TCP_POSTGRES=true
@@ -99,7 +99,7 @@ BRISKSMS_SILENT_LOGS=false
 GOOGLE_CLIENT_ID=replace_with_staging_google_client_id.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=replace_with_staging_google_client_secret
 RESEND_API_KEY=re_replace_with_staging_resend_api_key
-RESEND_FROM_EMAIL=BriskSMS Staging <verify@staging.brisksms.com>
+RESEND_FROM_EMAIL=BriskSMS Staging <verify@staging.brisksms.app>
 EMAIL_VERIFICATION_EXPIRY_HOURS=24
 EOF
 ```
@@ -170,10 +170,10 @@ bun run apps/web/server.ts
 # API Reverse Proxy
 server {
     listen 443 ssl http2;
-    server_name staging-api.brisksms.com;
+    server_name staging-api.brisksms.app;
 
-    ssl_certificate /etc/letsencrypt/live/staging-api.brisksms.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/staging-api.brisksms.com/privkey.pem;
+    ssl_certificate /etc/letsencrypt/live/staging-api.brisksms.app/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/staging-api.brisksms.app/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
 
     location / {
@@ -191,10 +191,10 @@ server {
 # Web Console Reverse Proxy
 server {
     listen 443 ssl http2;
-    server_name staging-console.brisksms.com;
+    server_name staging-console.brisksms.app;
 
-    ssl_certificate /etc/letsencrypt/live/staging-console.brisksms.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/staging-console.brisksms.com/privkey.pem;
+    ssl_certificate /etc/letsencrypt/live/staging-console.brisksms.app/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/staging-console.brisksms.app/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
 
     location / {
@@ -214,7 +214,7 @@ server {
 
 ### Health Probe Verification
 ```bash
-curl -s -i https://staging-api.brisksms.com/v1/health
+curl -s -i https://staging-api.brisksms.app/v1/health
 ```
 *Expected HTTP Response (200 OK):*
 ```json
@@ -238,33 +238,33 @@ curl -s -i https://staging-api.brisksms.com/v1/health
 ### Smoke Test Sequence
 1. **Merchant Registration:**
    ```bash
-   curl -s -i -X POST https://staging-api.brisksms.com/v1/auth/register \
+   curl -s -i -X POST https://staging-api.brisksms.app/v1/auth/register \
      -H "Content-Type: application/json" \
      -d '{"email":"staging-admin@example.com","password":"StagingPassword2026!","fullName":"Staging Admin","organizationName":"Staging Corp"}'
    ```
 2. **Device QR Pairing Token:**
    ```bash
-   curl -s -i -X POST https://staging-api.brisksms.com/v1/devices/pairing-token \
+   curl -s -i -X POST https://staging-api.brisksms.app/v1/devices/pairing-token \
      -H "Content-Type: application/json" \
      -b cookies.txt
    ```
 3. **Notification Evidence Ingestion:**
    ```bash
-   curl -s -i -X POST https://staging-api.brisksms.com/v1/ingestion/evidence \
+   curl -s -i -X POST https://staging-api.brisksms.app/v1/ingestion/evidence \
      -H "Authorization: Bearer bsk_dev_TEST_TOKEN" \
      -H "Content-Type: application/json" \
      -d '{"senderAddress":"MPESA","rawPayload":"0123456 Confirmed. Received Tsh 50,000...","simSlot":1,"deviceTimestamp":"2026-11-10T04:00:00Z"}'
    ```
 4. **Authorized Payment Verification:**
    ```bash
-   curl -s -i -X POST https://staging-api.brisksms.com/v1/reconciliation/verify \
+   curl -s -i -X POST https://staging-api.brisksms.app/v1/reconciliation/verify \
      -H "Content-Type: application/json" \
      -b cookies.txt \
      -d '{"paymentId":"PAYMENT_UUID","verificationMethod":"MANUAL_FINANCE_APPROVAL"}'
    ```
 5. **SMSGate Inbound Delivery Webhook:**
    ```bash
-   curl -s -i -X POST https://staging-api.brisksms.com/v1/messaging/webhooks/smsgate \
+   curl -s -i -X POST https://staging-api.brisksms.app/v1/messaging/webhooks/smsgate \
      -H "X-Signature: HMAC_SIGNATURE" \
      -H "X-Timestamp: 1794260000" \
      -H "Content-Type: application/json" \
@@ -272,13 +272,13 @@ curl -s -i https://staging-api.brisksms.com/v1/health
    ```
 6. **Email Verification Token Consumption:**
    ```bash
-   curl -s -i -X POST https://staging-api.brisksms.com/v1/auth/verify-email \
+   curl -s -i -X POST https://staging-api.brisksms.app/v1/auth/verify-email \
      -H "Content-Type: application/json" \
      -d '{"token":"bsk_ev_TOKEN_FROM_EMAIL"}'
    ```
 7. **Google Identity Sign-In (OpenID Connect SSO):**
    ```bash
-   curl -s -i -X POST https://staging-api.brisksms.com/v1/auth/google \
+   curl -s -i -X POST https://staging-api.brisksms.app/v1/auth/google \
      -H "Content-Type: application/json" \
      -d '{"idToken":"VALID_GOOGLE_ID_TOKEN"}'
    ```
@@ -302,7 +302,7 @@ curl -s -i https://staging-api.brisksms.com/v1/health
    ```bash
    systemctl start brisksms-worker brisksms-api
    ```
-4. Verify health via `curl -s https://staging-api.brisksms.com/v1/health`.
+4. Verify health via `curl -s https://staging-api.brisksms.app/v1/health`.
 
 ### 5.2 Database Migration Rollback Considerations
 - **Transactional Rollback:** All BriskSMS migrations execute within explicit PostgreSQL ACID transactions (`withTransaction` in `packages/db/src/migrate.ts`). If any SQL statement fails during execution, PostgreSQL rolls back all schema changes in that migration automatically.
@@ -335,7 +335,7 @@ curl -s -i https://staging-api.brisksms.com/v1/health
 
 ## 7. Implementation Blockers
 
-The following items are completely absent from the codebase and block production release:
-1. **Google Sign-In:** No identity token verification endpoints or Google client libraries exist.
-2. **Resend / SMTP Email Delivery:** No email client exists to deliver registration verification or password reset tokens.
+The following items block production release:
+1. **Google Sign-In credentials:** The code exists (`POST /v1/auth/google/nonce`, `POST /v1/auth/google`), but a Google Cloud OAuth Web Client ID for the staging origin has not been provisioned.
+2. **Resend email credentials:** The code exists (`apps/api/src/modules/auth/providers/resend.provider.ts`), but a Resend API key and DKIM/SPF/DMARC records for the staging sender domain have not been provisioned.
 3. **Physical Cellular Hardware:** Staging deployment is blocked pending physical Android phones and live Tanzanian carrier SIM cards.

@@ -41,7 +41,7 @@ export const sendSmsAction = {
     ],
     perform: async (z: ZapierZ, bundle: ZapierBundle<SendSmsInput>) => {
       const response = await z.request({
-        url: 'https://api.brisksms.com/v1/messages/send',
+        url: 'https://api.brisksms.app/v1/messages/send',
         method: 'POST',
         headers: {
           Authorization: `Bearer ${bundle.authData.access_token}`,

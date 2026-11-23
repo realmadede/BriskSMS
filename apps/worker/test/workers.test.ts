@@ -9,13 +9,15 @@ import {
   SmsStatus,
   encryptSecret,
 } from '@brisksms/shared';
-import { sql, resetTestDatabaseState, QUEUE_NAMES } from '@brisksms/db';
+import { sql, withTransaction, resetTestDatabaseState, QUEUE_NAMES } from '@brisksms/db';
 import {
   computeWebhookSignature,
   defaultRecoverStaleDispatches,
   processSmsCampaignJob,
   processSmsDeliveryRetryJob,
   processWebhookDeliveryJob,
+  purgeOldRelayHistory,
+  resolveHistoryRetentionDays,
 } from '../src/workers.js';
 
 describe('Standalone Worker Security & Concurrency Suite', () => {
@@ -248,5 +250,135 @@ describe('Standalone Worker Security & Concurrency Suite', () => {
     `;
     assert.equal(Number(acct[0]!.credit_balance), 19); // 18 + 1 released for 422 failure
     assert.equal(Number(acct[0]!.reserved_credits), 0);
+  });
+  describe('relay history retention', () => {
+    let deviceId: string;
+
+    async function addJob(status: string, daysOld: number): Promise<string> {
+      const messageId = randomUUID();
+      await sql`
+        INSERT INTO sms_messages (
+          id, organization_id, campaign_id, recipient_phone, message_text,
+          status, cost_credits, sim_slot, gateway_provider, created_at, updated_at
+        ) VALUES (
+          ${messageId}, ${orgId}, NULL, '+255754000222', 'History test',
+          ${SmsStatus.QUEUED}::"SmsStatus", 1, 1, 'MANAGED_GATEWAY', NOW(), NOW()
+        )
+      `;
+      const jobId = randomUUID();
+      await sql`
+        INSERT INTO outbound_sms_jobs (
+          id, organization_id, message_id, request_fingerprint, recipient_phone, message_text,
+          status, expires_at, created_at, updated_at
+        ) VALUES (
+          ${jobId}, ${orgId}, ${messageId}, 'fp', '+255754000222', 'History test',
+          ${status}::"OutboundSmsJobStatus",
+          NOW() - ${daysOld} * INTERVAL '1 day' + INTERVAL '1 hour',
+          NOW() - ${daysOld} * INTERVAL '1 day', NOW() - ${daysOld} * INTERVAL '1 day'
+        )
+      `;
+      return jobId;
+    }
+
+    async function addCommand(status: string, daysOld: number): Promise<string> {
+      const commandId = randomUUID();
+      await sql`
+        INSERT INTO device_commands (
+          id, organization_id, device_id, command_type, status, expires_at, created_at, updated_at
+        ) VALUES (
+          ${commandId}, ${orgId}, ${deviceId}, 'PAUSE_RELAY'::"DeviceCommandType", ${status}::"DeviceCommandStatus",
+          NOW() - ${daysOld} * INTERVAL '1 day' + INTERVAL '1 hour',
+          NOW() - ${daysOld} * INTERVAL '1 day', NOW() - ${daysOld} * INTERVAL '1 day'
+        )
+      `;
+      return commandId;
+    }
+
+    beforeEach(async () => {
+      deviceId = randomUUID();
+      await sql`
+        INSERT INTO devices (
+          id, organization_id, label, device_model, manufacturer, android_version, app_version,
+          public_key_pem, device_token_hash, status, created_at, updated_at
+        ) VALUES (
+          ${deviceId}, ${orgId}, 'History phone', 'Pixel', 'Google', '14', '1.0.0',
+          'pem', ${`hash-${deviceId}`}, 'ACTIVE'::"DeviceStatus", NOW(), NOW()
+        )
+      `;
+    });
+
+    it('removes only finished rows older than the retention period and leaves messages alone', async () => {
+      const oldDelivered = await addJob('DELIVERED', 100);
+      const oldFailed = await addJob('FAILED', 100);
+      const keptUncertain = await addJob('UNCERTAIN', 100);
+      const keptQueued = await addJob('QUEUED', 100);
+      const keptRecent = await addJob('DELIVERED', 10);
+
+      const oldAcked = await addCommand('ACKNOWLEDGED', 100);
+      const oldCancelled = await addCommand('CANCELLED', 100);
+      const keptPending = await addCommand('PENDING', 100);
+      const keptDelivered = await addCommand('DELIVERED', 100);
+      const keptRecentFailed = await addCommand('FAILED', 10);
+
+      const result = await purgeOldRelayHistory(90, { pauseMs: 0 });
+      assert.deepEqual(result, { purgedOutboundSmsJobs: 2, purgedDeviceCommands: 2 });
+
+      const jobs = await sql<{ id: string }>`SELECT id FROM outbound_sms_jobs WHERE organization_id = ${orgId}`;
+      assert.deepEqual(new Set(jobs.map((r) => r.id)), new Set([keptUncertain, keptQueued, keptRecent]));
+      assert.ok(!jobs.some((r) => r.id === oldDelivered || r.id === oldFailed));
+
+      const commands = await sql<{ id: string }>`SELECT id FROM device_commands WHERE organization_id = ${orgId}`;
+      assert.deepEqual(new Set(commands.map((r) => r.id)), new Set([keptPending, keptDelivered, keptRecentFailed]));
+      assert.ok(!commands.some((r) => r.id === oldAcked || r.id === oldCancelled));
+
+      const messages = await sql<{ n: string }>`SELECT COUNT(*)::text AS n FROM sms_messages WHERE organization_id = ${orgId}`;
+      assert.equal(Number(messages[0]!.n), 5);
+    });
+
+    it('works in small batches and a later run continues where the last one stopped', async () => {
+      for (let i = 0; i < 5; i++) await addJob('EXPIRED', 120);
+
+      const first = await purgeOldRelayHistory(90, { batchSize: 2, maxBatches: 2, pauseMs: 0 });
+      assert.equal(first.purgedOutboundSmsJobs, 4);
+
+      const second = await purgeOldRelayHistory(90, { batchSize: 2, maxBatches: 2, pauseMs: 0 });
+      assert.equal(second.purgedOutboundSmsJobs, 1);
+
+      const left = await sql<{ n: string }>`SELECT COUNT(*)::text AS n FROM outbound_sms_jobs WHERE organization_id = ${orgId}`;
+      assert.equal(Number(left[0]!.n), 0);
+    });
+
+    it('skips rows another session is holding instead of waiting for them', async () => {
+      const held = await addJob('FAILED', 100);
+      const free = await addJob('FAILED', 100);
+
+      let release: () => void = () => {};
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      let locked: () => void = () => {};
+      const isLocked = new Promise<void>((resolve) => { locked = resolve; });
+      const holder = withTransaction(async (tx) => {
+        await tx`SELECT id FROM outbound_sms_jobs WHERE id = ${held} FOR UPDATE`;
+        locked();
+        await gate;
+      });
+      await isLocked;
+
+      const result = await purgeOldRelayHistory(90, { pauseMs: 0 });
+      release();
+      await holder;
+
+      assert.equal(result.purgedOutboundSmsJobs, 1);
+      const left = await sql<{ id: string }>`SELECT id FROM outbound_sms_jobs WHERE organization_id = ${orgId}`;
+      assert.deepEqual(left.map((r) => r.id), [held]);
+      assert.ok(free);
+    });
+
+    it('never keeps history for less than 30 days, whatever the setting says', () => {
+      assert.equal(resolveHistoryRetentionDays(undefined), 90);
+      assert.equal(resolveHistoryRetentionDays('not a number'), 90);
+      assert.equal(resolveHistoryRetentionDays('120'), 120);
+      assert.equal(resolveHistoryRetentionDays('3'), 30);
+      assert.equal(resolveHistoryRetentionDays('0'), 30);
+    });
   });
 });

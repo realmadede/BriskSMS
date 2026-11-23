@@ -58,11 +58,21 @@ These capabilities have separate services, Room databases/tables, queues, permis
 
 ## 3. Product A: Payment Intelligence Integration
 
+### 3.0 How payment texts reach the app (decision of 22 November 2026)
+The product owner reports that the provider apps (CRDB, NMB, Vodacom and others) do not post a notification when money arrives, so payment capture cannot rely on those apps. The payment SMS is the evidence, and the app has two ways to read it:
+
+| Build | Mechanism | Permission | Status |
+| :--- | :--- | :--- | :--- |
+| `play` | `BriskNotificationListenerService` reads the notification the Messages app shows for a payment SMS (sender shortcode in the title plus an incoming-credit text). | Notification access only. No SMS permission. | Code exists. Not yet verified on a physical phone. Limits: truncated or grouped notifications, a contact name instead of the shortcode, Messages notifications switched off, OEM or Android 15 redaction. |
+| `direct` | `tz.co.brisksms.payment.sms.PaymentSmsReceiver` receives `SMS_RECEIVED` and keeps a message only if `PaymentProviderRegistry.isEligibleSmsSource` accepts it. Everything else is dropped on the phone, unread and unstored. The notification path stays on as a fallback. | `RECEIVE_SMS` (not `READ_SMS`). | Built. Not yet verified on a physical phone. |
+
+Both paths end in `tz.co.brisksms.payment.PaymentEvidenceRecorder` (sign, encrypt, store, upload). A payment seen by both paths is de-duplicated on the server (organization, provider, reference), not on the phone. The `direct` build is the one offered for download from the website. The APK is hosted in a Cloudflare R2 bucket, not on the public GitHub releases page, because that page exposes the source code (planned; the website link is a placeholder address until the bucket has a public domain); the `play` build waits for Google's decision on the permission declaration (see `docs/compliance/PLAY_STORE_SMS_POLICY_STUDY.md`).
+
 ### 3.1 Scoped Notification Ingestion
 - **Service:** `tz.co.brisksms.service.BriskNotificationListenerService`
 - **Registry:** `tz.co.brisksms.payment.provider.PaymentProviderRegistry`
 - **Permission:** `android.permission.BIND_NOTIFICATION_LISTENER_SERVICE`
-- **Scoped Whitelist:** Only inspects notifications originating from authorized Tanzanian financial application packages:
+- **Scoped Whitelist:** Inspects notifications from the authorized Tanzanian financial application packages below, and from any other app (except blocked personal apps) only when the notification title is a supported shortcode and the text is an incoming credit. These packages are kept for the case where a provider app does post a notification; see 3.0 for what is observed today:
   - **Verified Google Play Store Packages:**
     - `com.vodacom.mpesa` (Vodacom M-Pesa Tanzania)
     - `tz.tigo.mfsapp` (Mixx by Yas / Tigo Pesa Tanzania)
@@ -82,6 +92,8 @@ These capabilities have separate services, Room databases/tables, queues, permis
 ### 3.2 Purpose-Limited Relay & Authoritative Server Parsing
 - **Filter:** `tz.co.brisksms.payment.provider.PaymentProviderRegistry`
 - Filters strictly for authorized Tanzanian financial app packages and carrier shortcodes while rejecting outgoing transfer notifications and personal chats/SMS in memory.
+- **Payment-message check (23 November 2026):** a text from a supported shortcode is kept only if it also contains an incoming-credit phrase (the same phrases the server parser accepts), an amount (`Tsh`/`TZS` followed by a digit) and a transaction reference (a leading code such as `QA12BC34DE Imethibitishwa`, or a label such as `Kumbukumbu`, `Ref`, `Txn`, `Transaction ID`, `Namba ya muamala`). It only checks that each is present; reading the values stays on the server. Promos, balances, one-time codes and outgoing money are dropped. The check is meant to be no stricter than the server parsers, so a message the server could parse is never dropped on the phone. A new provider format or a changed wording must be added to both sides.
+- **One notification, several texts:** `NotificationTextExtractor` judges the notification title text, the structured message list, the inbox lines and the conversation title separately, so a payment grouped with another message is not lost. A text from a saved contact name or a phone number is still dropped; the filter is deliberately not relaxed for messaging apps, because that would let personal messages in.
 - **Zero Client-Side Regex Exposure:** Authoritative carrier regex extraction and E.164/amount normalization occur exclusively on the backend in `packages/parser-engine`, so proprietary carrier parsing patterns are never shipped inside the APK.
 
 ### 3.3 Local Evidence Encryption
@@ -221,6 +233,17 @@ SMSGate delivers delivery reports and status updates via HTTP POST webhooks with
   - `commandAcknowledgements` (optional): Deferred `ACKNOWLEDGED`/`FAILED` command outcomes when an immediate `/ack` call failed due to connectivity loss.
 - **Revocation & Battery Protection:** If `403 DEVICE_REVOKED` is returned during telemetry, `BriskApiClient` clears local credentials/paired state and `TelemetryWorker` returns `Result.failure()` (halting retries). UI warns operator if battery drops below 20% and device is unplugged.
 
+### 5.1 Relay Alerts (local, no network)
+
+- **Worker:** `tz.co.brisksms.worker.RelayHealthWorker` (WorkManager unique periodic work `BrisksmsRelayHealth`, every 30 minutes, started with the other background workers once the phone is paired). It reads only local counts, so it still works when the network is the problem.
+- **Rules (`RelayHealth.problems`, unit-tested):** bulk messaging on and no SIM ready (only when `READ_PHONE_STATE` is granted); bulk messaging on and queued messages older than 30 minutes; payment texts not uploaded for over an hour. A revoked phone stays quiet, and a queue that is meant to wait while messaging is paused is not reported.
+- **Notification:** one `relay_alerts` notification (id 4108, "BriskSMS needs attention") updated in place without re-alerting, and removed on the next check that finds nothing wrong. No message text or phone numbers are shown.
+
+### 5.2 Daily Summary (optional)
+
+- **Worker:** `tz.co.brisksms.worker.DailySummaryWorker` (unique periodic work `BrisksmsDailySummary`, every 24 hours, first run at the next 18:00 on the phone's clock). It exists only while the owner has switched on Settings, Notifications, "Daily summary at 18:00" (`KeystoreSecureStorage.isDailySummaryEnabled`, default off), and is cancelled when it is switched off or the phone is unpaired.
+- **Content (`DailySummary.lines`, unit-tested):** from local counts for today, "N payment texts captured, M sent to your account" and "N messages sent, M delivered". A day with nothing to report posts nothing. Never message text, phone numbers or amounts.
+
 ---
 
 ## 6. Jetpack Compose Operator Interface
@@ -248,7 +271,7 @@ Adheres to the BriskSMS design system (Stitch warm palette, geometric typography
 │ 3. Bulk Messaging Screen (Product B):                                       │
 │    • Gateway mode badge (MANAGED_GATEWAY vs EXTERNAL_RELAY)                 │
 │    • Endpoint URL display                                                   │
-│    • Dual-SIM active cards (SIM 1 / SIM 2 carriers, today's sent count)     │
+│    • Dual-SIM cards (carrier, sent today of the 400-a-day SIM limit)        │
 │    • Queue status (Queued, In-Flight, 1.5s / SIM safety pacing)             │
 │    • Outbound dispatch feed with masked phone numbers                       │
 ├─────────────────────────────────────────────────────────────────────────────┤
@@ -260,13 +283,39 @@ Adheres to the BriskSMS design system (Stitch warm palette, geometric typography
 │    • "Send Health Heartbeat Now" force telemetry trigger                    │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │ 5. Settings Screen:                                                         │
-│    • Organization ID and Device attributes                                  │
+│    • Account name and type (Personal / Business), Device attributes         │
 │    • Android OS version, companion version, hardware model                  │
-│    • API & SMSGate endpoint URLs                                            │
+│    • Servers card only for a custom API or an external relay                │
 │    • Permission shortcuts (Notification, App Permissions, Battery Exemption)│
-│    • "Disconnect & Unpair Device" with confirmation dialog                  │
+│    • "Keep running in the background" steps (Samsung, Xiaomi, Tecno family) │
+│    • "Lock with screen lock" (phone's PIN/pattern/password; off by default) │
+│    • "Daily summary at 18:00" (counts only; off by default)                 │
+│    • "Share diagnostics with support" (settings and counts only)            │
+│    • "Unpair this phone" (tells the server, then wipes the phone)           │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## 6A. App Updates
+
+How the phone learns about and installs a new version depends on the build flavor.
+
+- **`play`:** Google Play delivers updates. Settings has one row, "Check for updates in Google Play", that opens the Play listing (`market://`, with an `https://play.google.com` fallback). The app makes no update request of its own and holds no install permission.
+- **`direct`:** `tz.co.brisksms.update.UpdateEngine` is a process-wide engine (state in a `StateFlow`, so a download survives leaving Settings). Settings, section "App updates", drives it:
+  1. **Check:** `GET {apiBaseUrl}/v1/app/releases/latest?versionCode=<installed>`. The endpoint is public, rate limited per IP, and reads the published release from the `APP_RELEASE_*` variables (see `docs/reports/ENVIRONMENT_VARIABLE_INVENTORY.md`). It returns `updateAvailable`, `required` (installed version below `APP_RELEASE_MIN_SUPPORTED_VERSION_CODE`) and the release (`versionCode`, `versionName`, `apkUrl`, `sha256`, `notes`). The phone does not trust `updateAvailable`: it re-compares the version code and rejects a release whose URL is not `https` or whose checksum is not 64 hex characters.
+  2. **Download:** the APK is streamed to `cacheDir/updates` and hashed as it arrives. The file is deleted unless it is complete, at most 150 MB, and matches the published SHA-256. Package name and version code are then read from the archive and must be this app at the promised version.
+  3. **Install:** the file goes to the system installer through a `FileProvider`. If Android has not allowed installs from BriskSMS yet, the "Install unknown apps" screen opens first. Android refuses the APK unless it is signed with the same key as the installed app.
+  
+  4. **Update window:** `UpdatePromptHost` (in `MainActivity`) calls `UpdateEngine.autoCheck()` whenever the app opens or returns to the front (quietly, at most once an hour, and a failed check shows nothing). When a newer release exists it opens a window with the new version, what is new (`notes`) and two buttons, **Update now** (download, then Install) and **Not now**. "Not now" is stored in the app's private preferences (`UpdateReminder`: release version code and a time 24 hours ahead); the window opens again on the first launch or resume after that time. A newer release, a required update, or a phone clock set back past the snooze open it immediately. A required update (installed version below `APP_RELEASE_MIN_SUPPORTED_VERSION_CODE`) has no **Not now** and cannot be dismissed. The window is held back while the welcome screen or the SMS disclosure is showing.
+
+  5. **Background check and reminder:** `UpdateCheckWorker` (WorkManager, unique periodic work `BrisksmsUpdateCheck`, every 12 hours, network required) runs the same check without the app open. On an unmetered network (Wi-Fi) it also downloads and verifies the APK, so the owner needs one tap to install; on mobile data it only checks, because customers pay for their bundles. If a release is waiting it posts one notification on the `app_updates` channel, at most once every 24 hours per release (a newer release notifies at once). The notification says "available" or "ready to install" and shows the notes. Tapping it opens the app and the update window even when "Not now" is still active (the snooze is cleared). It is removed when the phone is up to date. A verified download of the same release is reused instead of fetched again, and any other file in `cacheDir/updates` is deleted.
+
+  Android always asks the owner to confirm an install of an app that is not a system app, so there is no silent update: the background download removes the wait, not the confirmation.
+
+  The engine uses its own HTTP client, not `BriskApiClient`, so the device token is never sent to the download host.
+
+Publishing a release today means setting the `APP_RELEASE_*` variables and redeploying the API.
 
 ---
 
@@ -280,11 +329,12 @@ Adheres to the BriskSMS design system (Stitch warm palette, geometric typography
    {
      "token": "bsk_pair_...",
      "org": "org_cly...",
-     "endpoint": "https://api.brisksms.co.tz"
+     "endpoint": "https://api.brisksms.app"
    }
    ```
 
 ### 7.2 Android Device Enrollment (Challenge-Response Proof-of-Possession)
+0. **First launch only:** before `PairingScreen`, the companion shows a four-page swipeable onboarding carousel (`ui/onboarding/WelcomeScreen.kt`) with illustrations, a page indicator, Skip and Get started. The pages cover payment alert matching, what the listener reads and ignores, bulk SMS from the SIM, and the runtime permissions Android is about to request. Those permissions (§9.1) are requested when the operator taps Get started or Skip, not at startup. Once the pages are dismissed, a plain `brisksms_welcome` SharedPreferences flag records it (not secure storage, so unpairing does not bring the pages back). Already-paired installs never see them. On later launches, permissions are requested at startup as before.
 1. Operator opens BriskSMS Relay companion (`PairingScreen`) and scans or pastes the QR payload (`token`, `org`, `endpoint`, `exp`).
 2. Companion ensures or generates a hardware EC P-256 (`secp256r1`) key pair in Android Keystore (`KeystoreManager.ensureDeviceKeyPair()`), exports canonical X.509 SPKI PEM (`getPublicKeyPem()`), and computes its SHA-256 DER fingerprint (`getPublicKeyFingerprintHex()`).
 3. **Step 1 (`POST /v1/devices/pairing-challenge`):** Companion submits `enrollmentToken`, `publicKeyPem`, optional `organizationId`, `keyAlgorithm: "EC_P256"`, and `signatureAlgorithm: "SHA256_ECDSA"`.
@@ -292,9 +342,11 @@ Adheres to the BriskSMS design system (Stitch warm palette, geometric typography
 4. **Canonical Signing (`DevicePairingProtocol.buildPairingChallengeTranscript`):** Companion verifies the challenge metadata (`protocolVersion == "BRISKSMS-DEVICE-PAIRING-POP-V1"`, matching `organizationId`, matching `publicKeyFingerprint`, non-expired `expiresAt`), constructs the length-prefixed binary transcript (`uint32be(byteLength) || utf8(field)` over the 10 ordered fields: `protocolVersion`, `challengeId`, `enrollmentId`, `organizationId`, `sha256Hex(enrollmentToken)`, `publicKeyFingerprint`, `keyAlgorithm`, `signatureAlgorithm`, `challengeNonce`, `expiresAtIso`), and signs it with the Keystore EC P-256 private key (`SHA256withECDSA`).
 5. **Step 2 (`POST /v1/devices/pair`):** Companion submits `enrollmentToken`, `challengeId`, `enrollmentId`, `organizationId`, `publicKeyPem`, `keyAlgorithm`, `signatureAlgorithm`, `challengeSignature`, and device metadata.
    - Backend acquires locks in strict order (`pairing_tokens -> device_pairing_challenges -> devices`), verifies token/challenge state, binding, expiry, key fingerprint, ASN.1 DER ECDSA signature, and quota, rejects silent key replacement (`DEVICE_KEY_REPLACEMENT_FORBIDDEN`, `PUBLIC_KEY_ALREADY_REGISTERED`), atomically marks the challenge `CONSUMED` and token used, and registers the device with its normalized PEM and unique `publicKeyFingerprint`.
+   - The 200 reply carries `deviceId`, `organizationId`, `deviceToken`, `publicKeyFingerprint`, `keyAlgorithm`, `syncIntervalSeconds` and, for display only, `organizationName` and `accountType` (`PERSONAL` or `ORGANIZATION`). The phone shows the name and a Personal/Business type instead of the raw ID. A phone paired before these fields existed has neither and shows the short organization ID until it is paired again.
    - Failed challenge verification transitions `device_pairing_challenges` to `REJECTED` or `EXPIRED` with an audit log without creating a device.
    - **Key Error Codes:** `PROOF_OF_POSSESSION_REQUIRED`, `CHALLENGE_EXPIRED`, `CHALLENGE_ALREADY_CONSUMED`, `CHALLENGE_BINDING_MISMATCH`, `PUBLIC_KEY_MISMATCH`, `INVALID_CHALLENGE_SIGNATURE`, `PUBLIC_KEY_ALREADY_REGISTERED`, `DEVICE_KEY_REPLACEMENT_FORBIDDEN`, `UNSUPPORTED_PUBLIC_KEY`, `UNSUPPORTED_CRYPTO_ALGORITHM`, `INVALID_PUBLIC_KEY`, `PRIVATE_KEY_SUBMISSION_FORBIDDEN`.
 6. **Commit Local State Only After Server 200 OK:** Companion stores `bsk_dev_...` and device metadata in Keystore AES-256-GCM storage (`KeystoreSecureStorage`) only after HTTP 200 OK, and deletes both secure storage and the Keystore key alias on disconnect (`SettingsScreen`).
+7. **Unpair Frees the Plan Slot:** "Unpair this phone" first calls `POST /v1/devices/:id/disconnect` with the device token (`BriskApiClient.disconnectDevice`). The server sets the device `REVOKED` (reason "Unpaired from the phone", audit action `DEVICE_DISCONNECTED` with actor type `DEVICE`), cancels its pending commands, and it stops counting against the plan's device limit. A `401` or `403` reply means the server already forgot the device and counts as done. If the server cannot be reached the dialog stays open with **Try again** and **Unpair anyway**; unpairing anyway only wipes the phone, and the owner must then revoke the device from the web console (`POST /v1/devices/:id/revoke`) to free the slot.
 
 
 ---
@@ -349,6 +401,8 @@ The repository includes automated CI verification for Android via GitHub Actions
 | `android.permission.RECEIVE_BOOT_COMPLETED` | Shared | Automatically resurrecting synchronization workers and foreground gateway on device boot. |
 | `android.permission.POST_NOTIFICATIONS` | Shared | Android 13+ requirement to display the ongoing SMSGate cellular gateway foreground notification. |
 | `android.permission.BIND_NOTIFICATION_LISTENER_SERVICE` | Product A | Required to intercept financial notifications from whitelisted payment apps. |
+| `android.permission.RECEIVE_SMS` | Product A (`direct` build only) | Receive payment texts from supported shortcodes. Not `READ_SMS`. Anything else is dropped on arrival. Absent from the `play` build. |
+| `android.permission.REQUEST_INSTALL_PACKAGES` | Shared (`direct` build only) | Hand a downloaded, checksum-verified update to the system installer. Absent from the `play` build, which updates through Google Play. |
 | `android.permission.SEND_SMS` | Product B | Telephony radio access to transmit cellular SMS messages via `SmsManager`. |
 | `android.permission.READ_PHONE_STATE` | Product B | Enumerate active SIM subscriptions, carrier names, and dual-SIM slots via `SubscriptionManager`. |
 | `android.permission.FOREGROUND_SERVICE` | Product B | Keep the SMSGate cellular gateway listening and dispatching reliably in background. |
@@ -397,6 +451,7 @@ Located in `apps/android/app/src/test/java/tz/co/brisksms/`:
 - `SimManagerLogicTest`: Validates Tanzanian telco normalization, dual-SIM slot mapping, and subscription fallback.
 - `OutboundSmsJobCoordinatorTest`: Validates outbound SMS job payload gating, SIM selection decoupled from recipient phone prefixes, duplicate-dispatch prevention, `/dispatching` pre-radio gate enforcement, and pending result reconciliation.
 - `DeviceCommandQueueTest` & `DevicePairingProofOfPossessionTest`: Validates fleet command allowlists, ACK deduplication, EC P-256 transcript signing, and PoP key binding.
+- `UpdateRulesTest`: Validates the release reply (newer only, `https` only, checksum required, unreadable replies refused), the 24-hour "Not now" rule (silent until 24 hours pass, immediate for a newer or required release or a clock set back) the reminder-notification rule (once per release per 24 hours, immediately for a newer release or a clock set back) and the download integrity rules (matching checksum kept; mismatch, truncation and oversize deleted; an earlier download is reused only if it still matches).
 - `ProductIsolationTest`: Invariant checks verifying complete database, queue, and entitlement separation between Product A and Product B.
 
 ---
@@ -408,9 +463,15 @@ Located in `apps/android/app/src/test/java/tz/co/brisksms/`:
 2. **Notification Listener OS Binding:**
    - Android requires the user to explicitly grant "Notification Access" in Android System Settings. Third-party apps cannot programmatically grant this permission; the companion UI provides a direct shortcut to system settings.
 3. **Google Play Policy Scoping:**
-   - `SEND_SMS` and `BIND_NOTIFICATION_LISTENER_SERVICE` are sensitive permissions. When publishing to Google Play, the application must be declared under the Enterprise Device Gateway policy exemption or distributed via enterprise private APK / MDM sideload.
+   - `SEND_SMS`, `RECEIVE_SMS` and `BIND_NOTIFICATION_LISTENER_SERVICE` are sensitive. On Google Play the SMS permissions need an approved exception in the Permissions Declaration Form; the closest listed one is "SMS-based financial transactions", which lists RECEIVE_SMS, READ_SMS and SEND_SMS (approval is Google's decision and is not guaranteed). Until then the `direct` build is distributed from the website. No exception named "Enterprise Device Gateway" exists on Google's page.
 4. **Carrier Radio Pacing & Safety Throttle:**
    - Cellular radio hardware requires safe dispatch pacing. The dispatcher enforces an internal engineering default of 1,500ms pacing delay between consecutive dispatches to prevent mobile carrier radio throttling and radio queue exhaustion.
+5. **App Lock Scope:**
+   - "Lock with screen lock" (Settings, Security; `KeystoreSecureStorage.isAppLockEnabled`, default off) asks for the phone's own PIN, pattern, password or fingerprint through `KeyguardManager.createConfirmDeviceCredentialIntent` when the app opens and after it has been away for more than 60 seconds. It covers the screens only: payment capture, the relay and background sync keep running while locked. It does nothing if the phone has no screen lock (the toggle explains this), so an owner who later removes the phone's screen lock is not locked out.
+6. **Keep-Running Guide Is Unverified On Real Phones:**
+   - `BackgroundGuide` lists where Samsung, Xiaomi (Redmi, POCO) and Tecno, Infinix and itel phones usually hide their background-app limits; any other maker gets the generic battery steps. The wording comes from the makers' general menu layout and has not been checked on physical devices (see section 13). Menu names change between versions, so the dialog says "usually".
+7. **Support Diagnostics Content:**
+   - "Share diagnostics with support" (`SupportBundle`) sends one plain-text block through the Android share sheet: app version and flavor, phone model and Android version, paired state and device ID, account type, server host, gateway mode, SIM count, permission and battery-exemption state, and queue counts. It never includes tokens, message text, phone numbers, payment details or the full server URL.
 
 ---
 
@@ -421,6 +482,8 @@ The following capabilities require real Android physical hardware with active lo
 | Check | Required Hardware / Configuration | Expected Outcome |
 | :--- | :--- | :--- |
 | **Notification Listener Permission Prompt** | Physical device running Android 8.0 - 14 | System dialog directs user to Notification Access screen; app displays green "ACTIVE" badge upon return. |
+| **Real Payment SMS (direct build)** | Physical device with the direct build, paired, a real mobile money payment received | The payment SMS is accepted by the receiver, stored encrypted, uploaded, and appears in the Reconciliation feed. A personal-number SMS and an OTP SMS received at the same time create no evidence. | 
+| **Real Payment SMS (play build)** | Physical device with the play build and Messages notifications on | The Messages notification is captured through the listener. Repeat with the screen off and with Messages open. | 
 | **Real Payment App Interception** | Physical device with installed M-Pesa / Mixx app | Real incoming financial notification is captured, encrypted via Keystore AES-256-GCM, and inserted into Room database. |
 | **Zero Personal Chat Leakage** | WhatsApp / SMS message received | Incoming message is dropped in memory; zero non-financial notifications appear in database or logs. |
 | **StrongBox Hardware Keystore** | Device supporting hardware StrongBox Keymaster | Key pair generated with `setIsStrongBoxBacked(true)` successfully seals private key inside tamper-resistant hardware silicon. |

@@ -15,7 +15,7 @@
 +--------------------------------------------------------------------------------+
                       |                                       |
                       v                                       v
-         [console.brisksms.com]                      [api.brisksms.com]
+         [console.brisksms.app]                      [api.brisksms.app]
        (apps/web Static Portal :4200)            (apps/api Modular Monolith :3000)
                                                               |
                                                               v
@@ -33,7 +33,7 @@
                                               +----------------------------------+
 ```
 
-- **Redis Transport Security Boundary:** `packages/db/src/redis.ts` uses raw TCP (`net.createConnection`) or local Unix domain sockets without internal TLS. In staging and production, Redis **must** remain inside a private VPC / localhost or behind a private TLS tunnel.
+- **Redis Transport Security Boundary:** `packages/db/src/redis.ts` uses raw TCP (`net.createConnection`) or local Unix domain sockets for `redis://` URLs, and TLS (`tls.connect` with SNI) for `rediss://` URLs. In staging and production, Redis **must** remain inside a private VPC / localhost; `rediss://` adds in-transit encryption but does not replace network isolation.
 - **Reverse Proxy Trust Boundary:** Set `TRUST_PROXY=true` only when the upstream reverse proxy strips and overwrites `X-Forwarded-For` with the real client socket address.
 
 ---

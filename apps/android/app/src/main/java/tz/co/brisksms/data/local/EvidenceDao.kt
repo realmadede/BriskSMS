@@ -26,6 +26,9 @@ interface EvidenceDao {
     @Query("SELECT COUNT(*) FROM offline_payment_evidence WHERE isUploaded = 0 AND isPermanentFailure = 0")
     suspend fun countPending(): Int
 
+    @Query("SELECT COUNT(*) FROM offline_payment_evidence WHERE isUploaded = 0 AND isPermanentFailure = 0 AND createdAt < :beforeTimestamp")
+    suspend fun countPendingBefore(beforeTimestamp: Long): Int
+
     @Query("SELECT COUNT(*) FROM offline_payment_evidence WHERE createdAt >= :sinceTimestamp")
     suspend fun countCollectedSince(sinceTimestamp: Long): Int
 

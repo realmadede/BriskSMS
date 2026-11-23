@@ -11,7 +11,7 @@ val BriskShapes = Shapes(
     extraSmall = RoundedCornerShape(4.dp),
     small = RoundedCornerShape(8.dp),
     medium = RoundedCornerShape(10.dp),  // Controls & Inputs
-    large = RoundedCornerShape(18.dp),   // Cards & Panels
+    large = RoundedCornerShape(22.dp),   // Cards & Panels
     extraLarge = RoundedCornerShape(50)  // Pill Buttons & Badges (9999px)
 )
 

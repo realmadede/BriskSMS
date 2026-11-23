@@ -4,7 +4,7 @@ import { createHash, generateKeyPairSync, randomUUID, sign as cryptoSign } from 
 import { sql } from '@brisksms/db';
 import { dbStore } from '../src/core/store.js';
 import { catalogService } from '../src/modules/subscription/catalog.service.js';
-import { subscriptionService } from '../src/modules/subscription/subscription.service.js';
+import { subscriptionService, BILLING_WORKSPACE_SETTING } from '../src/modules/subscription/subscription.service.js';
 import { entitlementService } from '../src/modules/subscription/entitlement.service.js';
 import { authService } from '../src/modules/auth/auth.service.js';
 import { deviceService } from '../src/modules/device/device.service.js';
@@ -68,6 +68,7 @@ describe('Phase 2: Dynamic Subscription Catalog & Entitlements Engine', () => {
     });
     const orgId = ownerRes.organizationId!;
 
+    await dbStore.setPlatformSetting(BILLING_WORKSPACE_SETTING, orgId);
     // Seed verified STK settlement backing the checkout paymentMethodRef
     await sql`
       INSERT INTO "stk_push_transactions" (

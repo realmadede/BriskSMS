@@ -28,7 +28,7 @@ describe('Web Console Session Security & CSRF Protection', () => {
     await authService.clearRateLimits();
 
     const reg = await authService.register({
-      email: 'merchant@brisksms.co.tz',
+      email: 'merchant@brisksms.app',
       password: 'SecurePassword123!',
       fullName: 'Merchant Security Admin',
       organizationName: 'Secure Retailers Ltd',
@@ -112,7 +112,7 @@ describe('Web Console Session Security & CSRF Protection', () => {
   describe('1. Cookie Security Attributes', () => {
     it('sets HttpOnly, SameSite=Lax, and narrow Path on bsk_session upon login', async () => {
       const res = await makeRequest('POST', '/v1/auth/login', {}, {
-        email: 'merchant@brisksms.co.tz',
+        email: 'merchant@brisksms.app',
         password: 'SecurePassword123!',
       });
 
@@ -151,7 +151,7 @@ describe('Web Console Session Security & CSRF Protection', () => {
 
       try {
         const res = await makeRequest('POST', '/v1/auth/login', {}, {
-          email: 'merchant@brisksms.co.tz',
+          email: 'merchant@brisksms.app',
           password: 'SecurePassword123!',
         });
 
@@ -169,7 +169,7 @@ describe('Web Console Session Security & CSRF Protection', () => {
 
     it('clears all session cookies on logout with Max-Age=0', async () => {
       const loginRes = await makeRequest('POST', '/v1/auth/login', {}, {
-        email: 'merchant@brisksms.co.tz',
+        email: 'merchant@brisksms.app',
         password: 'SecurePassword123!',
       });
 
@@ -196,7 +196,7 @@ describe('Web Console Session Security & CSRF Protection', () => {
   describe('2. Session Lifecycle & Invalidation', () => {
     it('authenticates GET /v1/auth/session using valid HttpOnly bsk_session cookie', async () => {
       const loginRes = await makeRequest('POST', '/v1/auth/login', {}, {
-        email: 'merchant@brisksms.co.tz',
+        email: 'merchant@brisksms.app',
         password: 'SecurePassword123!',
       });
 
@@ -206,13 +206,13 @@ describe('Web Console Session Security & CSRF Protection', () => {
       });
 
       assert.equal(res.statusCode, 200);
-      assert.equal(res.json.data.user.email, 'merchant@brisksms.co.tz');
+      assert.equal(res.json.data.user.email, 'merchant@brisksms.app');
       assert.equal(res.json.data.authType, 'cookie');
     });
 
     it('rejects expired bsk_session cookie with 401 UNAUTHORIZED', async () => {
       const expiredJwt = signJwt(
-        { sub: userId, email: 'merchant@brisksms.co.tz', organizationId: orgId, role: 'OWNER' },
+        { sub: userId, email: 'merchant@brisksms.app', organizationId: orgId, role: 'OWNER' },
         -10, // Expired 10 seconds ago
       );
 
@@ -226,7 +226,7 @@ describe('Web Console Session Security & CSRF Protection', () => {
 
     it('rejects revoked bsk_session token after logout with 401 TOKEN_REVOKED', async () => {
       const loginRes = await makeRequest('POST', '/v1/auth/login', {}, {
-        email: 'merchant@brisksms.co.tz',
+        email: 'merchant@brisksms.app',
         password: 'SecurePassword123!',
       });
 
@@ -250,7 +250,7 @@ describe('Web Console Session Security & CSRF Protection', () => {
 
     it('rotates refresh token and issues fresh cookies upon /v1/auth/refresh', async () => {
       const loginRes = await makeRequest('POST', '/v1/auth/login', {}, {
-        email: 'merchant@brisksms.co.tz',
+        email: 'merchant@brisksms.app',
         password: 'SecurePassword123!',
       });
 
@@ -294,7 +294,7 @@ describe('Web Console Session Security & CSRF Protection', () => {
   describe('3. CSRF Protection for State-Changing Operations', () => {
     it('rejects state-changing POST when X-CSRF-Token header is missing', async () => {
       const loginRes = await makeRequest('POST', '/v1/auth/login', {}, {
-        email: 'merchant@brisksms.co.tz',
+        email: 'merchant@brisksms.app',
         password: 'SecurePassword123!',
       });
 
@@ -321,7 +321,7 @@ describe('Web Console Session Security & CSRF Protection', () => {
 
     it('rejects state-changing POST when X-CSRF-Token does not match bsk_csrf cookie', async () => {
       const loginRes = await makeRequest('POST', '/v1/auth/login', {}, {
-        email: 'merchant@brisksms.co.tz',
+        email: 'merchant@brisksms.app',
         password: 'SecurePassword123!',
       });
 
@@ -348,7 +348,7 @@ describe('Web Console Session Security & CSRF Protection', () => {
 
     it('rejects request when Origin header is from an untrusted domain', async () => {
       const loginRes = await makeRequest('POST', '/v1/auth/login', {}, {
-        email: 'merchant@brisksms.co.tz',
+        email: 'merchant@brisksms.app',
         password: 'SecurePassword123!',
       });
 
@@ -376,7 +376,7 @@ describe('Web Console Session Security & CSRF Protection', () => {
 
     it('accepts state-changing POST when valid CSRF token, cookie, and trusted origin are provided', async () => {
       const loginRes = await makeRequest('POST', '/v1/auth/login', {}, {
-        email: 'merchant@brisksms.co.tz',
+        email: 'merchant@brisksms.app',
         password: 'SecurePassword123!',
       });
 
@@ -404,7 +404,7 @@ describe('Web Console Session Security & CSRF Protection', () => {
 
     it('allows safe GET requests to read data without requiring X-CSRF-Token header', async () => {
       const loginRes = await makeRequest('POST', '/v1/auth/login', {}, {
-        email: 'merchant@brisksms.co.tz',
+        email: 'merchant@brisksms.app',
         password: 'SecurePassword123!',
       });
 
@@ -423,7 +423,7 @@ describe('Web Console Session Security & CSRF Protection', () => {
   describe('4. Authentication Boundary Isolation', () => {
     it('prevents browser cookie session from authenticating device ingestion endpoint', async () => {
       const loginRes = await makeRequest('POST', '/v1/auth/login', {}, {
-        email: 'merchant@brisksms.co.tz',
+        email: 'merchant@brisksms.app',
         password: 'SecurePassword123!',
       });
 
@@ -482,7 +482,7 @@ describe('Web Console Session Security & CSRF Protection', () => {
           origin: 'https://evil-attacker.com',
         },
         {
-          email: 'merchant@brisksms.co.tz',
+          email: 'merchant@brisksms.app',
           password: 'SecurePassword123!',
         },
       );
@@ -499,7 +499,7 @@ describe('Web Console Session Security & CSRF Protection', () => {
           'sec-fetch-site': 'cross-site',
         },
         {
-          email: 'merchant@brisksms.co.tz',
+          email: 'merchant@brisksms.app',
           password: 'SecurePassword123!',
         },
       );
@@ -557,7 +557,7 @@ describe('Web Console Session Security & CSRF Protection', () => {
           'x-csrf-token': csrfCookie,
         },
         {
-          email: 'merchant@brisksms.co.tz',
+          email: 'merchant@brisksms.app',
           password: 'SecurePassword123!',
         },
       );
@@ -571,7 +571,7 @@ describe('Web Console Session Security & CSRF Protection', () => {
   describe('6. Refresh Endpoint CSRF, Rotation & Concurrency Safety', () => {
     it('rejects cross-site refresh when Origin is from an untrusted domain with 403 CSRF_ORIGIN_MISMATCH', async () => {
       const loginRes = await makeRequest('POST', '/v1/auth/login', {}, {
-        email: 'merchant@brisksms.co.tz',
+        email: 'merchant@brisksms.app',
         password: 'SecurePassword123!',
       });
       const refreshCookie = extractCookie(loginRes.setCookies, REFRESH_COOKIE_NAME)!;
@@ -594,7 +594,7 @@ describe('Web Console Session Security & CSRF Protection', () => {
 
     it('rejects cross-site refresh when Sec-Fetch-Site is cross-site with 403 CSRF_CROSS_SITE_FORBIDDEN', async () => {
       const loginRes = await makeRequest('POST', '/v1/auth/login', {}, {
-        email: 'merchant@brisksms.co.tz',
+        email: 'merchant@brisksms.app',
         password: 'SecurePassword123!',
       });
       const refreshCookie = extractCookie(loginRes.setCookies, REFRESH_COOKIE_NAME)!;
@@ -617,7 +617,7 @@ describe('Web Console Session Security & CSRF Protection', () => {
 
     it('rejects cookie refresh when X-CSRF-Token header is missing', async () => {
       const loginRes = await makeRequest('POST', '/v1/auth/login', {}, {
-        email: 'merchant@brisksms.co.tz',
+        email: 'merchant@brisksms.app',
         password: 'SecurePassword123!',
       });
       const refreshCookie = extractCookie(loginRes.setCookies, REFRESH_COOKIE_NAME)!;
@@ -639,7 +639,7 @@ describe('Web Console Session Security & CSRF Protection', () => {
 
     it('rejects cookie refresh when X-CSRF-Token is invalid or mismatched', async () => {
       const loginRes = await makeRequest('POST', '/v1/auth/login', {}, {
-        email: 'merchant@brisksms.co.tz',
+        email: 'merchant@brisksms.app',
         password: 'SecurePassword123!',
       });
       const refreshCookie = extractCookie(loginRes.setCookies, REFRESH_COOKIE_NAME)!;
@@ -662,7 +662,7 @@ describe('Web Console Session Security & CSRF Protection', () => {
 
     it('rotates refresh token and invalidates old token upon successful refresh', async () => {
       const loginRes = await makeRequest('POST', '/v1/auth/login', {}, {
-        email: 'merchant@brisksms.co.tz',
+        email: 'merchant@brisksms.app',
         password: 'SecurePassword123!',
       });
       const oldRefreshCookie = extractCookie(loginRes.setCookies, REFRESH_COOKIE_NAME)!;
@@ -687,7 +687,7 @@ describe('Web Console Session Security & CSRF Protection', () => {
 
     it('strictly rejects reuse/replay of old revoked refresh token with 401 INVALID_TOKEN', async () => {
       const loginRes = await makeRequest('POST', '/v1/auth/login', {}, {
-        email: 'merchant@brisksms.co.tz',
+        email: 'merchant@brisksms.app',
         password: 'SecurePassword123!',
       });
       const oldRefreshCookie = extractCookie(loginRes.setCookies, REFRESH_COOKIE_NAME)!;
@@ -723,7 +723,7 @@ describe('Web Console Session Security & CSRF Protection', () => {
 
     it('prevents race condition: concurrent refresh requests cannot create multiple valid refresh branches', async () => {
       const loginRes = await makeRequest('POST', '/v1/auth/login', {}, {
-        email: 'merchant@brisksms.co.tz',
+        email: 'merchant@brisksms.app',
         password: 'SecurePassword123!',
       });
       const refreshCookie = extractCookie(loginRes.setCookies, REFRESH_COOKIE_NAME)!;
@@ -834,7 +834,7 @@ describe('Web Console Session Security & CSRF Protection', () => {
           origin: 'http://localhost:4200.evil.com',
         },
         {
-          email: 'merchant@brisksms.co.tz',
+          email: 'merchant@brisksms.app',
           password: 'SecurePassword123!',
         },
       );
@@ -843,13 +843,13 @@ describe('Web Console Session Security & CSRF Protection', () => {
       assert.equal(res.json.error.code, 'CSRF_ORIGIN_MISMATCH');
     });
 
-    it('rejects deceptive origin subdomain attacks (e.g. evil-console.brisksms.co.tz)', () => {
+    it('rejects deceptive origin subdomain attacks (e.g. evil-console.brisksms.app)', () => {
       const prevEnv = process.env.FRONTEND_URL;
       try {
-        process.env.FRONTEND_URL = 'https://console.brisksms.co.tz';
-        assert.equal(isAllowedOrigin('https://evil-console.brisksms.co.tz'), false);
-        assert.equal(isAllowedOrigin('https://console.brisksms.co.tz.attacker.org'), false);
-        assert.equal(isAllowedOrigin('https://console.brisksms.co.tz'), true);
+        process.env.FRONTEND_URL = 'https://console.brisksms.app';
+        assert.equal(isAllowedOrigin('https://evil-console.brisksms.app'), false);
+        assert.equal(isAllowedOrigin('https://console.brisksms.app.attacker.org'), false);
+        assert.equal(isAllowedOrigin('https://console.brisksms.app'), true);
       } finally {
         if (prevEnv) process.env.FRONTEND_URL = prevEnv; else delete process.env.FRONTEND_URL;
       }
@@ -863,7 +863,7 @@ describe('Web Console Session Security & CSRF Protection', () => {
           origin: 'null',
         },
         {
-          email: 'merchant@brisksms.co.tz',
+          email: 'merchant@brisksms.app',
           password: 'SecurePassword123!',
         },
       );
@@ -884,8 +884,8 @@ describe('Web Console Session Security & CSRF Protection', () => {
         assert.equal(isAllowedOrigin('http://localhost:4200'), false);
         assert.equal(isAllowedOrigin('http://127.0.0.1:4200'), false);
 
-        process.env.ALLOWED_ORIGINS = 'https://console.brisksms.co.tz';
-        assert.equal(isAllowedOrigin('https://console.brisksms.co.tz'), true);
+        process.env.ALLOWED_ORIGINS = 'https://console.brisksms.app';
+        assert.equal(isAllowedOrigin('https://console.brisksms.app'), true);
         assert.equal(isAllowedOrigin('http://localhost:4200'), false);
       } finally {
         process.env.NODE_ENV = prevEnv;
@@ -939,7 +939,7 @@ describe('Web Console Session Security & CSRF Protection', () => {
 
     it('sets Cache-Control: no-store on POST /v1/auth/login', async () => {
       const res = await makeRequest('POST', '/v1/auth/login', {}, {
-        email: 'merchant@brisksms.co.tz',
+        email: 'merchant@brisksms.app',
         password: 'SecurePassword123!',
       });
       assert.equal(res.statusCode, 200);
@@ -950,7 +950,7 @@ describe('Web Console Session Security & CSRF Protection', () => {
 
     it('sets Cache-Control: no-store on GET /v1/auth/session', async () => {
       const loginRes = await makeRequest('POST', '/v1/auth/login', {}, {
-        email: 'merchant@brisksms.co.tz',
+        email: 'merchant@brisksms.app',
         password: 'SecurePassword123!',
       });
       const sessionCookie = extractCookie(loginRes.setCookies, SESSION_COOKIE_NAME)!;
@@ -964,7 +964,7 @@ describe('Web Console Session Security & CSRF Protection', () => {
 
     it('sets Cache-Control: no-store on POST /v1/auth/refresh', async () => {
       const loginRes = await makeRequest('POST', '/v1/auth/login', {}, {
-        email: 'merchant@brisksms.co.tz',
+        email: 'merchant@brisksms.app',
         password: 'SecurePassword123!',
       });
       const refreshCookie = extractCookie(loginRes.setCookies, REFRESH_COOKIE_NAME)!;

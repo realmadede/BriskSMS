@@ -1,9 +1,10 @@
 import { RouteRequest, HttpException } from './http.js';
 import { hashToken, verifyJwt } from './crypto.js';
-import { ApiKeyScope, DeviceStatus } from '@brisksms/shared';
+import { ApiKeyScope, DeviceStatus, FeatureKey } from '@brisksms/shared';
 import { sql, redisClient } from '@brisksms/db';
 import { dbStore, DeviceRecord, mapDeviceRow } from './store.js';
 import { OAuthService } from '../modules/oauth/oauth.service.js';
+import { entitlementService } from '../modules/subscription/entitlement.service.js';
 import { timingSafeEqual } from 'node:crypto';
 import {
   SESSION_COOKIE_NAME,
@@ -228,6 +229,12 @@ export async function authenticate(req: RouteRequest): Promise<void> {
     if (!membership) {
       throw new HttpException(403, 'FORBIDDEN', 'Organization membership is no longer active');
     }
+    await assertOrganizationActive(verifiedOAuth.organizationId);
+    // Tokens already issued stop working when the plan no longer includes Zapier or the API
+    await entitlementService.assertAnyFeatureEnabled(verifiedOAuth.organizationId, [
+      FeatureKey.ZAPIER_INTEGRATION,
+      FeatureKey.API_ACCESS,
+    ]);
     req.context.userId = verifiedOAuth.userId;
     req.context.organizationId = verifiedOAuth.organizationId;
     req.context.role = membership.role;
@@ -256,6 +263,7 @@ export async function authenticate(req: RouteRequest): Promise<void> {
     if (!membership) {
       throw new HttpException(403, 'FORBIDDEN', 'Organization membership is no longer active');
     }
+    await assertOrganizationActive(payload.organizationId);
     effectiveRole = membership.role;
   }
 
@@ -268,6 +276,48 @@ export async function authenticate(req: RouteRequest): Promise<void> {
   // Enforce CSRF protection for cookie-authenticated browser requests
   if (authType === 'cookie') {
     validateCsrf(req);
+  }
+}
+
+/**
+ * A platform administrator can suspend an organization; its sessions and tokens then stop
+ * working on the next request instead of when they expire.
+ */
+async function assertOrganizationActive(organizationId: string): Promise<void> {
+  const org = await dbStore.findOrgById(organizationId);
+  if (!org || !org.isActive) {
+    throw new HttpException(403, 'ORGANIZATION_SUSPENDED', 'This organization is suspended. Contact BriskSMS support.');
+  }
+}
+
+/**
+ * Platform administration needs a signed-in human session plus the PLATFORM_ADMIN_SECRET,
+ * sent as the X-Platform-Admin-Key header. Fails closed when the secret is not configured.
+ */
+export function assertPlatformAdmin(req: RouteRequest): void {
+  assertHumanSessionAuth(req, 'platform administration');
+  const configuredSecret = process.env.PLATFORM_ADMIN_SECRET?.trim();
+  if (!configuredSecret || configuredSecret.length < 24) {
+    throw new HttpException(
+      503,
+      'PLATFORM_ADMIN_UNCONFIGURED',
+      'Platform administration is disabled until PLATFORM_ADMIN_SECRET is configured.',
+    );
+  }
+
+  const provided =
+    (typeof req.headers['x-platform-admin-key'] === 'string'
+      ? req.headers['x-platform-admin-key'].trim()
+      : undefined) || '';
+
+  if (!provided) {
+    throw new HttpException(403, 'PLATFORM_ADMIN_REQUIRED', 'Platform administrator credentials are required');
+  }
+
+  const a = Buffer.from(provided, 'utf8');
+  const b = Buffer.from(configuredSecret, 'utf8');
+  if (a.length !== b.length || !timingSafeEqual(a, b)) {
+    throw new HttpException(403, 'PLATFORM_ADMIN_FORBIDDEN', 'Invalid platform administrator credentials');
   }
 }
 

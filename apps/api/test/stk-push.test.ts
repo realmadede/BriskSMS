@@ -18,6 +18,7 @@ import { ApiKeyService } from '../src/modules/developer/api-key.service.js';
 import { IngestionService } from '../src/modules/ingestion/ingestion.service.js';
 import { ReconciliationService } from '../src/modules/reconciliation/reconciliation.service.js';
 import { stkPushService, TestCallbackVerifier, TestStkAdapter } from '../src/modules/stk-push/index.js';
+import { grantDeveloperPlan } from './helpers/developer-plan.js';
 
 describe('Carrier STK Push & Asynchronous Reconciliation Engine', () => {
   const router = createApp();
@@ -124,6 +125,7 @@ describe('Carrier STK Push & Asynchronous Reconciliation Engine', () => {
       isActive: true,
     });
 
+    await grantDeveloperPlan(orgId);
     const fullKeyRes = await apiKeyService.createApiKey(orgId, {
       organizationId: orgId,
       name: 'STK Live Checkout Key',
@@ -131,6 +133,7 @@ describe('Carrier STK Push & Asynchronous Reconciliation Engine', () => {
     });
     validApiKey = fullKeyRes.plainTextSecret;
 
+    await grantDeveloperPlan(orgId);
     const restKeyRes = await apiKeyService.createApiKey(orgId, {
       organizationId: orgId,
       name: 'SMS Only Key',
@@ -1201,6 +1204,7 @@ describe('Carrier STK Push & Asynchronous Reconciliation Engine', () => {
         totalAmountCents: 2000000n, // 20,000 TZS
       });
 
+      await grantDeveloperPlan(otherOrgId);
       const keyResB = await apiKeyService.createApiKey(otherOrgId, {
         organizationId: otherOrgId,
         name: 'Org B Key',
@@ -1362,6 +1366,7 @@ describe('Carrier STK Push & Asynchronous Reconciliation Engine', () => {
         totalAmountCents: 5000000n,
       });
 
+      await grantDeveloperPlan(otherOrgId);
       const keyResB = await apiKeyService.createApiKey(otherOrgId, {
         organizationId: otherOrgId,
         name: 'Worker B Key',

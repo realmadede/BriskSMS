@@ -1476,7 +1476,7 @@ describe('Google Sign-In & Resend Email Verification Security Suite', () => {
   // ==========================================
   describe('4. Resend Provider Error Handling & Security Redaction', () => {
     it('returns failure when RESEND_API_KEY is missing without throwing unhandled exceptions', async () => {
-      const providerWithoutKey = new ResendEmailProvider('', 'noreply@brisksms.com');
+      const providerWithoutKey = new ResendEmailProvider('', 'noreply@brisksms.app');
       const result = await providerWithoutKey.sendEmail({
         to: 'target@example.com',
         subject: 'Test',

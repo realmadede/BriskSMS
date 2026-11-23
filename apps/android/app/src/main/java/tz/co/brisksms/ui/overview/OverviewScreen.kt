@@ -1,20 +1,15 @@
 package tz.co.brisksms.ui.overview
 
 import android.os.Build
-import androidx.compose.foundation.background
+import androidx.annotation.DrawableRes
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import kotlinx.coroutines.Dispatchers
@@ -22,11 +17,15 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import tz.co.brisksms.core.storage.KeystoreSecureStorage
 import tz.co.brisksms.data.local.BriskDatabase
+import tz.co.brisksms.R
+import tz.co.brisksms.ui.components.*
 import tz.co.brisksms.ui.theme.BriskColors
-import tz.co.brisksms.ui.theme.BriskShapes
 import tz.co.brisksms.worker.EvidenceUploadWorker
 import tz.co.brisksms.worker.TelemetryWorker
+import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun OverviewScreen(
@@ -63,297 +62,117 @@ fun OverviewScreen(
         }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(BriskColors.CanvasBaseLight)
-            .padding(20.dp)
-            .verticalScroll(rememberScrollState())
+    val todayLabel = remember { SimpleDateFormat("d MMM yyyy", Locale.getDefault()).format(Date()) }
+    val isActive = !secureStorage.isRevoked && secureStorage.isPaired
+
+    CollapsingScreen(
+        title = "Overview",
+        subtitle = "Relay status and today's activity",
+        trailing = {
+            StatusTag(
+                kind = if (isActive) StatusKind.Positive else StatusKind.Negative,
+                text = if (secureStorage.isRevoked) "Revoked" else if (secureStorage.isPaired) "Active" else "Offline"
+            )
+        }
     ) {
-        // Top Header
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column {
-                Text(
-                    text = "BriskSMS Companion",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = BriskColors.TextPrimaryLight
-                )
-                Text(
-                    text = "${Build.MANUFACTURER} ${Build.MODEL}",
-                    fontSize = 12.sp,
-                    color = BriskColors.TextSecondaryLight
-                )
-            }
-
-            Surface(
-                shape = BriskShapes.extraLarge,
-                color = if (!secureStorage.isRevoked && secureStorage.isPaired)
-                    BriskColors.StatusVerified.copy(alpha = 0.15f)
-                else
-                    BriskColors.StatusRejected.copy(alpha = 0.15f)
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(6.dp)
-                            .background(
-                                if (!secureStorage.isRevoked && secureStorage.isPaired)
-                                    BriskColors.StatusVerified
-                                else
-                                    BriskColors.StatusRejected,
-                                CircleShape
-                            )
-                    )
-                    Text(
-                        text = if (secureStorage.isRevoked) "REVOKED" else if (secureStorage.isPaired) "ACTIVE" else "OFFLINE",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (!secureStorage.isRevoked && secureStorage.isPaired)
-                            BriskColors.StatusVerified
-                        else
-                            BriskColors.StatusRejected
-                    )
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Device Identity Card
-        Card(
-            shape = BriskShapes.large,
-            colors = CardDefaults.cardColors(containerColor = BriskColors.SurfaceSolidLight),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text(
-                    text = "DEVICE IDENTITY",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = BriskColors.TextTertiaryLight
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = "Organization ID:",
-                        fontSize = 12.sp,
-                        color = BriskColors.TextSecondaryLight
-                    )
-                    Text(
-                        text = secureStorage.organizationId ?: "Unknown",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = BriskColors.TextPrimaryLight
-                    )
-                }
-                Spacer(modifier = Modifier.height(4.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = "Device Token ID:",
-                        fontSize = 12.sp,
-                        color = BriskColors.TextSecondaryLight
-                    )
-                    Text(
-                        text = secureStorage.deviceId?.take(16) ?: "Unassigned",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = BriskColors.TextPrimaryLight
-                    )
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Product Status Badges
-        Text(
-            text = "Product Status",
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold,
-            color = BriskColors.TextPrimaryLight,
-            modifier = Modifier.padding(vertical = 4.dp)
-        )
-
-        Row(
+        // Device identity
+        SectionLabel("This device")
+        BriskCard(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)
         ) {
-            // Product A Card
-            Card(
-                shape = BriskShapes.medium,
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                modifier = Modifier
-                    .weight(1f),
-                onClick = onNavigateToPayment
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(modifier = Modifier.padding(12.dp)) {
+                BriskMark(size = 36.dp)
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Product A",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = BriskColors.AccentPrimary
+                        text = "BriskSMS Companion",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = BriskColors.textPrimary()
                     )
                     Text(
-                        text = "Payment Intel",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = BriskColors.TextPrimaryLight
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = if (secureStorage.isPaymentIntelligenceEnabled) "Active Relay" else "Disabled",
-                        fontSize = 11.sp,
-                        color = if (secureStorage.isPaymentIntelligenceEnabled) BriskColors.StatusVerified else BriskColors.TextTertiaryLight,
-                        fontWeight = FontWeight.Bold
+                        text = "${Build.MANUFACTURER} ${Build.MODEL}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = BriskColors.textSecondary(),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
-
-            // Product B Card
-            Card(
-                shape = BriskShapes.medium,
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                modifier = Modifier
-                    .weight(1f),
-                onClick = onNavigateToMessaging
-            ) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    Text(
-                        text = "Product B",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = BriskColors.AccentPrimary
-                    )
-                    Text(
-                        text = "SMSGate Gateway",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = BriskColors.TextPrimaryLight
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = if (secureStorage.isBulkMessagingEnabled) "Cellular Active" else "Disabled",
-                        fontSize = 11.sp,
-                        color = if (secureStorage.isBulkMessagingEnabled) BriskColors.StatusVerified else BriskColors.TextTertiaryLight,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
+            HairlineDivider()
+            val accountName = secureStorage.organizationName
+            KeyValueRow("Account", accountName ?: secureStorage.organizationId ?: "Unknown", mono = accountName == null)
+            HairlineDivider()
+            KeyValueRow("Device ID", secureStorage.deviceId?.take(16) ?: "Unassigned", mono = true)
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(24.dp))
 
-        // Today's Operational Metrics
-        Text(
-            text = "Today's Metrics",
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold,
-            color = BriskColors.TextPrimaryLight,
-            modifier = Modifier.padding(vertical = 4.dp)
-        )
+        // Product status
+        SectionLabel("Products")
+        BriskCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(0.dp)) {
+            ProductRow(
+                icon = R.drawable.ic_receipt,
+                title = "Payment texts",
+                isActive = secureStorage.isPaymentIntelligenceEnabled,
+                onClick = onNavigateToPayment
+            )
+            HairlineDivider(modifier = Modifier.padding(start = 58.dp))
+            ProductRow(
+                icon = R.drawable.ic_message_square,
+                title = "Bulk SMS",
+                isActive = secureStorage.isBulkMessagingEnabled,
+                onClick = onNavigateToMessaging
+            )
+        }
 
-        Card(
-            shape = BriskShapes.large,
-            colors = CardDefaults.cardColors(containerColor = Color.White),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column {
-                        Text(
-                            text = "NOTIFICATIONS CAPTURED",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = BriskColors.TextTertiaryLight
-                        )
-                        Text(
-                            text = "$collectedToday",
-                            fontSize = 22.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = BriskColors.TextPrimaryLight
-                        )
-                    }
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text(
-                            text = "NOTIFICATIONS FORWARDED",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = BriskColors.TextTertiaryLight
-                        )
-                        Text(
-                            text = "$uploadedToday",
-                            fontSize = 22.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = BriskColors.StatusVerified
-                        )
-                    }
-                }
+        Spacer(modifier = Modifier.height(24.dp))
 
-                Divider(
-                    modifier = Modifier.padding(vertical = 12.dp),
-                    color = BriskColors.BorderHairlineLight
+        // Today's receipt
+        BriskCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(0.dp)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Today",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = BriskColors.textPrimary(),
+                    modifier = Modifier.weight(1f)
                 )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column {
-                        Text(
-                            text = "CELLULAR SMS SENT",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = BriskColors.TextTertiaryLight
-                        )
-                        Text(
-                            text = "$smsDispatchedToday",
-                            fontSize = 22.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = BriskColors.TextPrimaryLight
-                        )
-                    }
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text(
-                            text = "DELIVERED TO HANDSET",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = BriskColors.TextTertiaryLight
-                        )
-                        Text(
-                            text = "$smsDeliveredToday",
-                            fontSize = 22.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = BriskColors.StatusVerified
-                        )
-                    }
-                }
+                Text(text = todayLabel, style = MaterialTheme.typography.bodySmall, color = BriskColors.textSecondary())
+            }
+            PerforatedDivider()
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 16.dp, top = 8.dp)
+            ) {
+                Figure("Texts captured", "%,d".format(collectedToday), Modifier.weight(1f))
+                Figure("Texts forwarded", "%,d".format(uploadedToday), Modifier.weight(1f))
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 16.dp, bottom = 20.dp)
+            ) {
+                Figure("SMS sent", "%,d".format(smsDispatchedToday), Modifier.weight(1f))
+                Figure("SMS delivered", "%,d".format(smsDeliveredToday), Modifier.weight(1f))
             }
         }
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // Quick Sync Action Button
-        Button(
+        PrimaryPillButton(
+            text = "Sync now",
+            icon = R.drawable.ic_refresh_cw,
+            loading = isSyncing,
             onClick = {
                 isSyncing = true
                 coroutineScope.launch {
@@ -370,22 +189,22 @@ fun OverviewScreen(
                     }
                     isSyncing = false
                 }
-            },
-            enabled = !isSyncing,
-            shape = BriskShapes.extraLarge,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = BriskColors.ContrastPill,
-                contentColor = Color.White
-            ),
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(48.dp)
-        ) {
-            if (isSyncing) {
-                CircularProgressIndicator(color = Color.White, modifier = Modifier.size(20.dp))
-            } else {
-                Text(text = "Sync & Force Upload Now", fontWeight = FontWeight.SemiBold)
             }
-        }
+        )
     }
+}
+
+@Composable
+private fun ProductRow(@DrawableRes icon: Int, title: String, isActive: Boolean, onClick: () -> Unit) {
+    ActionRow(
+        icon = icon,
+        text = title,
+        onClick = onClick,
+        status = {
+            StatusTag(
+                kind = if (isActive) StatusKind.Positive else StatusKind.Neutral,
+                text = if (isActive) "Active" else "Off"
+            )
+        }
+    )
 }

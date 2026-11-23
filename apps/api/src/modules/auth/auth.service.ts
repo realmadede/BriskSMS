@@ -19,6 +19,8 @@ export interface RegisterDto {
 export interface LoginDto {
   email: string;
   password: string;
+  /** Authenticator code or recovery code, required once two-factor authentication is on. */
+  totpCode?: string;
 }
 
 export interface AuthTokens {
@@ -274,6 +276,9 @@ export class AuthService {
       );
       organizationId = org.id;
       userRole = membership.role;
+      if (!dto.organizationName?.trim()) {
+        await tx`UPDATE "organizations" SET "account_type" = 'PERSONAL' WHERE "id" = ${org.id}`;
+      }
 
       // 1. Issue short-lived session tokens
       const jti = randomUUID();
@@ -356,6 +361,7 @@ export class AuthService {
   }
 
   async login(dto: LoginDto): Promise<{
+    accountRestored: boolean;
     user: SafeUserRecord;
     organizations: { id: string; name: string; role: string }[];
     tokens: AuthTokens;
@@ -394,6 +400,19 @@ export class AuthService {
       );
     }
 
+    // Loaded lazily: the account module depends on this service.
+    const { verifySecondFactor, accountService } = await import('../account/account.service.js');
+    if (user.twoFactorEnabled) {
+      if (!dto.totpCode) {
+        throw new HttpException(401, 'TWO_FACTOR_REQUIRED', 'Enter the code from your authenticator app to finish signing in');
+      }
+      if (!(await verifySecondFactor(user.id, dto.totpCode))) {
+        throw new HttpException(401, 'INVALID_TWO_FACTOR_CODE', 'That code is not correct');
+      }
+    }
+    // Signing in during the 30-day deletion hold cancels the deletion.
+    const accountRestored = await accountService.cancelDeletion(user.id);
+
     const userOrgs = await dbStore.getUserOrganizations(user.id);
     const primaryOrg = userOrgs[0];
 
@@ -421,6 +440,7 @@ export class AuthService {
 
     const userSafe = sanitizeUser(user);
     return {
+      accountRestored,
       user: userSafe,
       organizations: userOrgs.map((o) => ({ id: o.org.id, name: o.org.name, role: o.role })),
       tokens: {
@@ -435,7 +455,9 @@ export class AuthService {
     idToken: string,
     clientIp?: string,
     expectedNonceHash?: string,
+    totpCode?: string,
   ): Promise<{
+    accountRestored?: boolean;
     user: SafeUserRecord;
     organizationId?: string;
     organizations: { id: string; name: string; role: string }[];
@@ -476,6 +498,22 @@ export class AuthService {
       throw new HttpException(400, 'GOOGLE_EMAIL_NOT_VERIFIED', 'Google account email is not verified');
     }
 
+    // A Google sign-in obeys two-factor like a password sign-in. This runs before the nonce is spent,
+    // so the browser can send the same Google credential again together with the code.
+    const requireSecondFactor = async () => {
+      const known =
+        (await dbStore.findUserByGoogleId(payload.sub)) ?? (await dbStore.findUserByEmail(payload.email));
+      if (!known?.twoFactorEnabled) return;
+      if (!totpCode) {
+        throw new HttpException(401, 'TWO_FACTOR_REQUIRED', 'Enter the code from your authenticator app to finish signing in');
+      }
+      await this.checkRateLimit(`google_2fa_${known.id}`, 5, 60_000);
+      const { verifySecondFactor } = await import('../account/account.service.js');
+      if (!(await verifySecondFactor(known.id, totpCode))) {
+        throw new HttpException(401, 'INVALID_TWO_FACTOR_CODE', 'That code is not correct');
+      }
+    };
+
     // Validate nonce claim and atomically consume nonce
     if (expectedNonceHash) {
       if (!payload.nonce || typeof payload.nonce !== 'string') {
@@ -489,16 +527,19 @@ export class AuthService {
         throw new HttpException(401, 'INVALID_GOOGLE_NONCE', 'Google ID token nonce does not match browser session nonce');
       }
 
+      await requireSecondFactor();
       const consumed = await this.consumeGoogleNonce(expectedNonceHash);
       if (!consumed) {
         throw new HttpException(401, 'INVALID_GOOGLE_NONCE', 'Authentication nonce has already been consumed or expired');
       }
+    } else {
+      await requireSecondFactor();
     }
 
     const maxAttempts = 2;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        return await withTransaction(async (tx) => {
+        const signedIn = await withTransaction(async (tx) => {
           // 1. Check if user exists by google_id
           let user = await dbStore.findUserByGoogleId(payload.sub, tx);
 
@@ -590,6 +631,10 @@ export class AuthService {
             },
           };
         });
+        // Signing in during the 30-day deletion hold cancels the deletion.
+        const { accountService } = await import('../account/account.service.js');
+        const accountRestored = await accountService.cancelDeletion(signedIn.user.id);
+        return { ...signedIn, accountRestored };
       } catch (err: any) {
         if (attempt < maxAttempts && (err?.code === '23505' || String(err).includes('unique'))) {
           // Retry under concurrency conflict with a fresh transaction

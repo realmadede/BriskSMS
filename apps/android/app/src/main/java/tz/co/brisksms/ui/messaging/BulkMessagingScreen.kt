@@ -1,38 +1,57 @@
 package tz.co.brisksms.ui.messaging
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import tz.co.brisksms.core.storage.KeystoreSecureStorage
 import tz.co.brisksms.data.local.BriskDatabase
 import tz.co.brisksms.messaging.data.SmsDispatchEntity
+import tz.co.brisksms.messaging.dispatcher.SmsDispatcher
+import tz.co.brisksms.messaging.service.SmsGateRelayService
 import tz.co.brisksms.messaging.sim.SimManager
 import tz.co.brisksms.messaging.sim.SimSlotInfo
+import tz.co.brisksms.R
+import tz.co.brisksms.ui.components.*
 import tz.co.brisksms.ui.theme.BriskColors
-import tz.co.brisksms.ui.theme.BriskShapes
+import tz.co.brisksms.ui.theme.BriskMonoStyle
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
+private val GroupRadius = 22.dp
+
+private enum class DispatchFilter(val label: String) {
+    All("All"), Pending("Pending"), Delivered("Delivered"), Failed("Failed")
+}
+
+private fun statusTag(status: String): Pair<StatusKind, String> = when (status) {
+    "DELIVERED" -> StatusKind.Positive to "Delivered"
+    "SUBMITTED" -> StatusKind.Accent to "Submitted"
+    "FAILED" -> StatusKind.Negative to "Failed"
+    else -> StatusKind.Review to status.lowercase().replaceFirstChar { it.uppercase() }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun BulkMessagingScreen() {
     val context = LocalContext.current
-    val coroutineScope = rememberCoroutineScope()
     val db = remember { BriskDatabase.getInstance(context) }
     val secureStorage = remember { KeystoreSecureStorage(context) }
     val simManager = remember { SimManager(context) }
@@ -43,6 +62,8 @@ fun BulkMessagingScreen() {
     var simSlots by remember { mutableStateOf<List<SimSlotInfo>>(emptyList()) }
     var sim1SentToday by remember { mutableStateOf(0) }
     var sim2SentToday by remember { mutableStateOf(0) }
+    var filter by remember { mutableStateOf(DispatchFilter.All) }
+    var selected by remember { mutableStateOf<SmsDispatchEntity?>(null) }
 
     val startOfDay = remember {
         val cal = Calendar.getInstance().apply {
@@ -66,371 +87,236 @@ fun BulkMessagingScreen() {
     }
 
     val isManagedGateway = secureStorage.gatewayMode == "MANAGED_GATEWAY"
-    val timeFormatter = remember { SimpleDateFormat("HH:mm:ss dd/MM", Locale.getDefault()) }
+    val timeFormatter = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(BriskColors.CanvasBaseLight)
-            .padding(20.dp)
-    ) {
-        // Screen Header
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 4.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column {
-                Text(
-                    text = "Bulk Messaging",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = BriskColors.TextPrimaryLight
-                )
-                Text(
-                    text = "Product B: Cellular SMSGate Gateway",
-                    fontSize = 12.sp,
-                    color = BriskColors.TextSecondaryLight
-                )
-            }
+    val sim1 = simSlots.find { it.simNumber == 1 }
+    val sim2 = simSlots.find { it.simNumber == 2 }
 
-            Surface(
-                shape = BriskShapes.extraLarge,
-                color = if (secureStorage.isBulkMessagingEnabled)
-                    BriskColors.StatusVerified.copy(alpha = 0.15f)
-                else
-                    BriskColors.StatusRejected.copy(alpha = 0.15f)
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(6.dp)
-                            .background(
-                                if (secureStorage.isBulkMessagingEnabled) BriskColors.StatusVerified else BriskColors.StatusRejected,
-                                CircleShape
-                            )
-                    )
-                    Text(
-                        text = if (secureStorage.isBulkMessagingEnabled) "GATEWAY ON" else "OFFLINE",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (secureStorage.isBulkMessagingEnabled) BriskColors.StatusVerified else BriskColors.StatusRejected
-                    )
-                }
+    val filtered = remember(recentDispatches, filter) {
+        recentDispatches.filter {
+            when (filter) {
+                DispatchFilter.All -> true
+                DispatchFilter.Pending -> it.status != "DELIVERED" && it.status != "FAILED"
+                DispatchFilter.Delivered -> it.status == "DELIVERED"
+                DispatchFilter.Failed -> it.status == "FAILED"
             }
         }
+    }
+    val grouped = remember(filtered) { filtered.groupBy { dayLabel(it.createdAt) } }
 
-        Spacer(modifier = Modifier.height(12.dp))
+    val listState = rememberLazyListState()
+    val collapse = rememberTitleCollapse(listState)
 
-        // Gateway Mode & Endpoint Configuration Card
-        Card(
-            shape = BriskShapes.large,
-            colors = CardDefaults.cardColors(containerColor = BriskColors.SurfaceSolidLight),
-            modifier = Modifier.fillMaxWidth()
+    Box(modifier = Modifier.fillMaxSize().background(BriskColors.canvasBase())) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(
+                start = ScreenPadding,
+                end = ScreenPadding,
+                bottom = 16.dp + LocalBottomBarInset.current
+            )
         ) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                Row(
+            item(key = "title") {
+                LargeTitle(
+                    title = "Messaging",
+                    subtitle = "Bulk SMS sent through this phone's SIM cards",
+                    modifier = Modifier.padding(top = 24.dp, bottom = 16.dp).fadeWithCollapse(collapse),
+                    trailing = {
+                        StatusTag(
+                            kind = if (secureStorage.isBulkMessagingEnabled) StatusKind.Positive else StatusKind.Negative,
+                            text = if (secureStorage.isBulkMessagingEnabled) "Gateway on" else "Offline"
+                        )
+                    }
+                )
+            }
+
+            item(key = "gateway") {
+                BriskCard(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)
                 ) {
-                    Text(
-                        text = "GATEWAY OPERATING MODE",
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = BriskColors.TextTertiaryLight
-                    )
-                    Surface(
-                        shape = BriskShapes.extraLarge,
-                        color = BriskColors.ContrastPill
+                    KeyValueRow("Gateway mode", if (isManagedGateway) "Managed" else "External relay")
+                    if (!isManagedGateway) {
+                        HairlineDivider()
+                        KeyValueRow("Endpoint", secureStorage.smsGateBaseUrl, mono = true)
+                    }
+                }
+            }
+
+            item(key = "sims") {
+                Column(modifier = Modifier.padding(top = 24.dp)) {
+                    SectionLabel("SIM cards")
+                    Row(
+                        modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
+                        SimCard("SIM 1", sim1?.carrierName, sim1SentToday, Modifier.weight(1f).fillMaxHeight())
+                        SimCard("SIM 2", sim2?.carrierName, sim2SentToday, Modifier.weight(1f).fillMaxHeight())
+                    }
+                }
+            }
+
+            item(key = "queue") {
+                BriskCard(modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        Figure("Queued", "%,d".format(pendingCount), Modifier.weight(1f))
+                        Figure("In flight", "%,d".format(inFlightCount), Modifier.weight(1f))
+                        Figure("Message gap", "%.1fs".format(SmsGateRelayService.DEFAULT_DISPATCH_PACING_MS / 1000.0), Modifier.weight(1f))
+                    }
+                }
+            }
+
+            item(key = "filter") {
+                Column(modifier = Modifier.padding(top = 24.dp)) {
+                    GlassSegmented(
+                        options = DispatchFilter.values().map { it.label },
+                        selectedIndex = filter.ordinal,
+                        onSelect = { filter = DispatchFilter.values()[it] }
+                    )
+                }
+            }
+
+            if (filtered.isEmpty()) {
+                item(key = "empty") {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_message_square),
+                            contentDescription = null,
+                            tint = BriskColors.textTertiary(),
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
                         Text(
-                            text = if (isManagedGateway) "MANAGED VPS (Cloudflare)" else "EXTERNAL RELAY",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                            text = if (recentDispatches.isEmpty()) "No messages sent yet" else "No ${filter.label.lowercase()} messages",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = BriskColors.textPrimary()
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Messages sent through this phone appear here",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = BriskColors.textSecondary(),
+                            textAlign = TextAlign.Center
                         )
                     }
                 }
-
-                Spacer(modifier = Modifier.height(6.dp))
-
-                Text(
-                    text = "Endpoint: ${secureStorage.smsGateBaseUrl}",
-                    fontSize = 11.sp,
-                    color = BriskColors.TextSecondaryLight,
-                    maxLines = 1
-                )
+            } else {
+                grouped.forEach { (day, dayRows) ->
+                    item(key = "day_$day") { GroupedSectionHeader(day) }
+                    itemsIndexed(dayRows, key = { _, d -> d.id }) { index, dispatch ->
+                        DispatchRow(
+                            dispatch = dispatch,
+                            time = timeFormatter.format(Date(dispatch.createdAt)),
+                            shape = groupedShape(index, dayRows.size, GroupRadius),
+                            showDivider = index < dayRows.size - 1,
+                            onClick = { selected = dispatch },
+                            modifier = Modifier.animateItemPlacement()
+                        )
+                    }
+                }
             }
         }
 
-        Spacer(modifier = Modifier.height(14.dp))
+        GlassTopBar(title = "Messaging", progress = collapse.value, modifier = Modifier.align(Alignment.TopCenter))
+    }
 
-        // Active SIM Cards Row
-        Text(
-            text = "Active Cellular SIMs (Dual-SIM)",
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Bold,
-            color = BriskColors.TextPrimaryLight,
-            modifier = Modifier.padding(bottom = 6.dp)
+    selected?.let { dispatch ->
+        val stamp = remember { SimpleDateFormat("d MMM yyyy, HH:mm:ss", Locale.getDefault()) }
+        val (kind, label) = statusTag(dispatch.status)
+        DetailSheet(
+            title = maskPhoneNumber(dispatch.recipientPhone),
+            status = { StatusTag(kind = kind, text = label) },
+            body = dispatch.messageText,
+            details = buildList {
+                add("Created" to stamp.format(Date(dispatch.createdAt)))
+                add("SIM" to "SIM ${dispatch.simSlot}")
+                add("Attempts" to "%,d".format(dispatch.attempts))
+                dispatch.errorMessage?.let { add("Error" to it) }
+            },
+            onDismiss = { selected = null }
         )
+    }
+}
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            val sim1 = simSlots.find { it.simNumber == 1 }
-            val sim2 = simSlots.find { it.simNumber == 2 }
-
-            // SIM 1 Card
-            Card(
-                shape = BriskShapes.medium,
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                modifier = Modifier.weight(1f)
-            ) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = "SIM 1",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = BriskColors.AccentPrimary
-                        )
-                        Box(
-                            modifier = Modifier
-                                .size(6.dp)
-                                .background(
-                                    if (sim1 != null) BriskColors.StatusVerified else BriskColors.StatusReview,
-                                    CircleShape
-                                )
-                        )
-                    }
-                    Text(
-                        text = sim1?.carrierName ?: "Not Inserted",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = BriskColors.TextPrimaryLight
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "Sent today: $sim1SentToday",
-                        fontSize = 11.sp,
-                        color = BriskColors.TextSecondaryLight
-                    )
-                }
-            }
-
-            // SIM 2 Card
-            Card(
-                shape = BriskShapes.medium,
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                modifier = Modifier.weight(1f)
-            ) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = "SIM 2",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = BriskColors.AccentPrimary
-                        )
-                        Box(
-                            modifier = Modifier
-                                .size(6.dp)
-                                .background(
-                                    if (sim2 != null) BriskColors.StatusVerified else BriskColors.StatusReview,
-                                    CircleShape
-                                )
-                        )
-                    }
-                    Text(
-                        text = sim2?.carrierName ?: "Empty Slot",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = BriskColors.TextPrimaryLight
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "Sent today: $sim2SentToday",
-                        fontSize = 11.sp,
-                        color = BriskColors.TextSecondaryLight
-                    )
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(14.dp))
-
-        // Queue Status Metrics
-        Card(
-            shape = BriskShapes.large,
-            colors = CardDefaults.cardColors(containerColor = BriskColors.SurfaceSolidLight),
-            modifier = Modifier.fillMaxWidth()
-        ) {
+@Composable
+private fun DispatchRow(
+    dispatch: SmsDispatchEntity,
+    time: String,
+    shape: RoundedCornerShape,
+    showDivider: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val (kind, label) = statusTag(dispatch.status)
+    Surface(shape = shape, color = BriskColors.cardContainer(), modifier = modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.clickable(onClick = onClick)) {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(14.dp),
-                horizontalArrangement = Arrangement.SpaceBetween
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.Top
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "QUEUED",
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = BriskColors.TextTertiaryLight
+                        text = maskPhoneNumber(dispatch.recipientPhone),
+                        style = BriskMonoStyle,
+                        color = BriskColors.textPrimary(),
+                        maxLines = 1
                     )
+                    Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = "$pendingCount",
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (pendingCount > 0) BriskColors.StatusReview else BriskColors.TextPrimaryLight
-                    )
-                }
-                Column {
-                    Text(
-                        text = "IN FLIGHT",
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = BriskColors.TextTertiaryLight
-                    )
-                    Text(
-                        text = "$inFlightCount",
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = BriskColors.TextPrimaryLight
+                        text = dispatch.messageText,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = BriskColors.textSecondary(),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
+                Spacer(modifier = Modifier.width(12.dp))
                 Column(horizontalAlignment = Alignment.End) {
-                    Text(
-                        text = "RADIO PACING",
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = BriskColors.TextTertiaryLight
-                    )
-                    Text(
-                        text = "1.5s / SIM",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = BriskColors.StatusVerified
-                    )
+                    Text("SIM ${dispatch.simSlot} · $time", style = MaterialTheme.typography.labelSmall, color = BriskColors.textSecondary())
+                    Spacer(modifier = Modifier.height(6.dp))
+                    StatusTag(kind = kind, text = label)
                 }
             }
+            if (showDivider) HairlineDivider(modifier = Modifier.padding(start = 16.dp))
         }
+    }
+}
 
-        Spacer(modifier = Modifier.height(14.dp))
-
-        // Recent Dispatches Feed
+@Composable
+private fun SimCard(slot: String, carrierName: String?, sentToday: Int, modifier: Modifier = Modifier) {
+    BriskCard(modifier = modifier) {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = slot,
+                style = MaterialTheme.typography.labelMedium,
+                color = BriskColors.textSecondary(),
+                modifier = Modifier.weight(1f)
+            )
+            Icon(
+                painter = painterResource(if (carrierName != null) R.drawable.ic_circle_check else R.drawable.ic_triangle_alert),
+                contentDescription = null,
+                tint = if (carrierName != null) BriskColors.StatusVerified else BriskColors.StatusReview,
+                modifier = Modifier.size(16.dp)
+            )
+        }
+        Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = "Recent Cellular Dispatches",
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Bold,
-            color = BriskColors.TextPrimaryLight,
-            modifier = Modifier.padding(bottom = 6.dp)
+            text = carrierName ?: "No SIM",
+            style = MaterialTheme.typography.titleSmall,
+            color = if (carrierName != null) BriskColors.textPrimary() else BriskColors.textSecondary(),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
-
-        if (recentDispatches.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "No outbound cellular messages in dispatch log.",
-                    fontSize = 13.sp,
-                    color = BriskColors.TextSecondaryLight
-                )
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(recentDispatches) { dispatch ->
-                    Card(
-                        shape = BriskShapes.medium,
-                        colors = CardDefaults.cardColors(containerColor = Color.White),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = maskPhoneNumber(dispatch.recipientPhone),
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = BriskColors.TextPrimaryLight
-                                )
-
-                                val statusColor = when (dispatch.status) {
-                                    "DELIVERED" -> BriskColors.StatusVerified
-                                    "SUBMITTED" -> BriskColors.AccentPrimary
-                                    "FAILED" -> BriskColors.StatusRejected
-                                    else -> BriskColors.StatusReview
-                                }
-
-                                Surface(
-                                    shape = BriskShapes.extraLarge,
-                                    color = statusColor.copy(alpha = 0.15f)
-                                ) {
-                                    Text(
-                                        text = dispatch.status,
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = statusColor,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                                    )
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(4.dp))
-
-                            Text(
-                                text = dispatch.messageText,
-                                fontSize = 12.sp,
-                                color = BriskColors.TextSecondaryLight,
-                                maxLines = 1
-                            )
-
-                            Spacer(modifier = Modifier.height(4.dp))
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text(
-                                    text = "SIM ${dispatch.simSlot}",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = BriskColors.TextSecondaryLight
-                                )
-                                Text(
-                                    text = timeFormatter.format(Date(dispatch.createdAt)),
-                                    fontSize = 10.sp,
-                                    color = BriskColors.TextTertiaryLight
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = "%,d of %,d sent today".format(sentToday, SmsDispatcher.DEFAULT_SIM_DAILY_CAP),
+            style = MaterialTheme.typography.bodySmall,
+            color = BriskColors.textSecondary()
+        )
     }
 }
 

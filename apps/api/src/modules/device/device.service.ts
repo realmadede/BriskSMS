@@ -138,7 +138,7 @@ export class DeviceService {
     const qrPayload = JSON.stringify({
       token: rawToken,
       org: organizationId,
-      endpoint: process.env.API_BASE_URL || 'https://api.brisksms.co.tz/v1',
+      endpoint: process.env.API_BASE_URL || 'https://api.brisksms.app/v1',
       exp: pairingRecord.expiresAt.toISOString(),
     });
 
@@ -640,11 +640,17 @@ export class DeviceService {
           tx,
         );
 
+        const [account] = await tx`
+          SELECT "name", "account_type" FROM "organizations" WHERE "id" = ${device.organizationId} LIMIT 1
+        `;
+
         return {
           ok: true,
           result: {
             deviceId: device.id,
             organizationId: device.organizationId,
+            organizationName: String(account?.name ?? ''),
+            accountType: String(account?.account_type ?? 'ORGANIZATION'),
             deviceToken: rawDeviceToken,
             publicKeyFingerprint: parsedKey.fingerprint,
             keyAlgorithm: parsedKey.keyAlgorithm,
@@ -1535,6 +1541,12 @@ export class DeviceService {
     }
 
     return dbStore.revokeDevice(deviceId, organizationId, actorUserId);
+  }
+
+  /** The phone's own "Unpair this phone": authenticated by its device token, frees its plan slot. */
+  async disconnectDevice(deviceId: string, deviceToken: string): Promise<DeviceRecord> {
+    const device = await this.authenticateDeviceForCommandPlane(deviceId, deviceToken);
+    return dbStore.disconnectDevice(device.id, device.organizationId);
   }
 }
 

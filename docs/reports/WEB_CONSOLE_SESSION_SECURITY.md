@@ -127,7 +127,7 @@ In Login CSRF, an attacker crafts a malicious webpage that submits credentials f
 - Allowed origins are determined strictly from `ALLOWED_ORIGINS`, `CORS_ORIGIN`, and `FRONTEND_URL`.
 - **Wildcard Prohibition:** Wildcard entries (`*`) and string literal `'null'` are filtered out. Wildcard origins cannot be credentialed or accepted as authorized origins.
 - **Production Localhost Rejection:** In production mode, local development hosts (`localhost`, `127.0.0.1`) are excluded unless explicitly configured in environment variables.
-- **Deceptive Hostname Resistance:** Subdomain spoofing (`evil-console.brisksms.co.tz`), suffix appending (`localhost:4200.evil.com`), and path modifications fail exact Set lookup (`getAllowedOrigins().has(origin)`).
+- **Deceptive Hostname Resistance:** Subdomain spoofing (`evil-console.brisksms.app`), suffix appending (`localhost:4200.evil.com`), and path modifications fail exact Set lookup (`getAllowedOrigins().has(origin)`).
 
 ### 5.2 CORS Header Specification
 - **Credentialed CORS:** When `req.headers.origin` matches an authorized origin, the API returns:
@@ -240,7 +240,7 @@ apps/api/test/web-session-and-csrf.test.ts:
 ✓ Web Console Session Security & CSRF Protection > 7. CSRF Cryptographic Security & Malformed Token Defense > rejects oversized CSRF tokens exceeding 512 bytes [228.35ms]
 ✓ Web Console Session Security & CSRF Protection > 7. CSRF Cryptographic Security & Malformed Token Defense > enforces independent CSRF_SECRET in production and refuses to reuse JWT or encryption keys [261.95ms]
 ✓ Web Console Session Security & CSRF Protection > 8. Production Origin, Deceptive Hostnames & CORS Security > rejects deceptive origin suffix attacks (e.g. localhost:4200.evil.com) [247.19ms]
-✓ Web Console Session Security & CSRF Protection > 8. Production Origin, Deceptive Hostnames & CORS Security > rejects deceptive origin subdomain attacks (e.g. evil-console.brisksms.co.tz) [279.88ms]
+✓ Web Console Session Security & CSRF Protection > 8. Production Origin, Deceptive Hostnames & CORS Security > rejects deceptive origin subdomain attacks (e.g. evil-console.brisksms.app) [279.88ms]
 ✓ Web Console Session Security & CSRF Protection > 8. Production Origin, Deceptive Hostnames & CORS Security > rejects null origin from sandboxed iframes or local files [244.75ms]
 ✓ Web Console Session Security & CSRF Protection > 8. Production Origin, Deceptive Hostnames & CORS Security > rejects localhost/127.0.0.1 in production mode unless explicitly configured in ALLOWED_ORIGINS [260.75ms]
 ✓ Web Console Session Security & CSRF Protection > 8. Production Origin, Deceptive Hostnames & CORS Security > rejects wildcard "*" in CORS_ORIGIN from being accepted as an authorized origin [240.53ms]

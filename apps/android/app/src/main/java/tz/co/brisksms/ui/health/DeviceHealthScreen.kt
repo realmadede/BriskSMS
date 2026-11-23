@@ -7,20 +7,14 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.BatteryManager
 import android.os.Build
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -29,8 +23,13 @@ import tz.co.brisksms.core.network.DeviceTelemetryRequest
 import tz.co.brisksms.core.storage.KeystoreSecureStorage
 import tz.co.brisksms.data.local.BriskDatabase
 import tz.co.brisksms.security.KeystoreManager
+import tz.co.brisksms.BuildConfig
+import tz.co.brisksms.R
+import tz.co.brisksms.payment.CaptureCounters
+import tz.co.brisksms.payment.CaptureSource
+import tz.co.brisksms.payment.CaptureStats
+import tz.co.brisksms.ui.components.*
 import tz.co.brisksms.ui.theme.BriskColors
-import tz.co.brisksms.ui.theme.BriskShapes
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -46,13 +45,15 @@ fun DeviceHealthScreen() {
 
     var batteryPct by remember { mutableStateOf(100) }
     var isCharging by remember { mutableStateOf(false) }
-    var networkType by remember { mutableStateOf("DETECTING") }
+    var networkType by remember { mutableStateOf("Detecting") }
     var dbSizeBytes by remember { mutableStateOf(0L) }
     var queueDepth by remember { mutableStateOf(0) }
-    var lastSyncTime by remember { mutableStateOf("Pending report") }
+    var lastSyncTime by remember { mutableStateOf("Not sent yet") }
     var isReporting by remember { mutableStateOf(false) }
     var reportFeedback by remember { mutableStateOf<String?>(null) }
     var isReportError by remember { mutableStateOf(false) }
+    var smsStats by remember { mutableStateOf<CaptureStats?>(null) }
+    var notificationStats by remember { mutableStateOf<CaptureStats?>(null) }
 
     fun refreshHealth() {
         val ifilter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
@@ -70,12 +71,12 @@ fun DeviceHealthScreen() {
             val network = cm.activeNetwork
             val cap = cm.getNetworkCapabilities(network)
             when {
-                cap?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true -> "Wi-Fi Connected"
-                cap?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true -> "Cellular Mobile Data"
-                else -> "No Network"
+                cap?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true -> "Wi-Fi"
+                cap?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true -> "Mobile data"
+                else -> "No network"
             }
         } else {
-            "Network Available"
+            "Connected"
         }
 
         coroutineScope.launch {
@@ -95,202 +96,131 @@ fun DeviceHealthScreen() {
 
     LaunchedEffect(Unit) {
         refreshHealth()
+        smsStats = CaptureCounters.stats(context, CaptureSource.SMS)
+        notificationStats = CaptureCounters.stats(context, CaptureSource.NOTIFICATION)
     }
 
     val isBatteryLow = batteryPct < 20 && !isCharging
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(BriskColors.CanvasBaseLight)
-            .padding(20.dp)
-            .verticalScroll(rememberScrollState())
+    val formattedSize = if (dbSizeBytes > 1024 * 1024) {
+        "${dbSizeBytes / (1024 * 1024)} MB"
+    } else {
+        "${dbSizeBytes / 1024} KB"
+    }
+
+    CollapsingScreen(
+        title = "Device health",
+        subtitle = "Battery, network, storage and key security on this phone"
     ) {
-        // Top Header
-        Text(
-            text = "Device Health & Telemetry",
-            fontSize = 20.sp,
-            fontWeight = FontWeight.Bold,
-            color = BriskColors.TextPrimaryLight
-        )
-        Text(
-            text = "Hardware state, cryptographic isolation, and local storage",
-            fontSize = 12.sp,
-            color = BriskColors.TextSecondaryLight
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Battery Warning Banner if low
+        // Battery warning if low
         if (isBatteryLow) {
-            Card(
-                shape = BriskShapes.medium,
-                colors = CardDefaults.cardColors(containerColor = BriskColors.StatusRejected.copy(alpha = 0.1f)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier.padding(14.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+            BriskCard(modifier = Modifier.fillMaxWidth()) {
+                Row(verticalAlignment = Alignment.Top) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_triangle_alert),
+                        contentDescription = null,
+                        tint = BriskColors.StatusRejected,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
                     Text(
-                        text = "Warning: Battery level is critical ($batteryPct%) and device is unplugged. Connect to power to ensure uninterrupted background gateway relays.",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = BriskColors.StatusRejected
+                        text = "Battery at $batteryPct% and unplugged. Connect to power so the relay keeps running in the background.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = BriskColors.textPrimary()
                     )
                 }
             }
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(16.dp))
         }
 
-        // Hardware Keystore Card
-        Card(
-            shape = BriskShapes.large,
-            colors = CardDefaults.cardColors(containerColor = BriskColors.SurfaceSolidLight),
-            modifier = Modifier.fillMaxWidth()
+        // What the payment filter has done on this phone (counts only, never message text)
+        SectionLabel("Payment capture")
+        CaptureCard("Payment texts (SMS)", smsStats, visible = BuildConfig.SMS_PAYMENT_CAPTURE)
+        if (BuildConfig.SMS_PAYMENT_CAPTURE) Spacer(modifier = Modifier.height(12.dp))
+        CaptureCard("Messages-app notifications", notificationStats, visible = true)
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Hardware keystore
+        SectionLabel("Key security")
+        BriskCard(
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)
         ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "CRYPTOGRAPHIC ISOLATION",
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = BriskColors.TextTertiaryLight
-                    )
-                    Surface(
-                        shape = BriskShapes.extraLarge,
-                        color = if (isHardwareBacked) BriskColors.StatusVerified.copy(alpha = 0.15f) else BriskColors.StatusReview.copy(alpha = 0.15f)
-                    ) {
-                        Text(
-                            text = if (isHardwareBacked) "HARDWARE SECURE (TEE)" else "STANDARD KEYSTORE",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (isHardwareBacked) BriskColors.StatusVerified else BriskColors.StatusReview,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                        )
-                    }
-                }
-                Spacer(modifier = Modifier.height(6.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 44.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Text(
-                    text = "Asymmetric Key: EC P-256 (SHA256withECDSA)\nLocal Storage: AES-256-GCM Hardware-Backed Master Key",
-                    fontSize = 12.sp,
-                    color = BriskColors.TextSecondaryLight
+                    text = "Keystore",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = BriskColors.textSecondary(),
+                    modifier = Modifier.weight(1f)
+                )
+                StatusTag(
+                    kind = if (isHardwareBacked) StatusKind.Positive else StatusKind.Review,
+                    text = if (isHardwareBacked) "Hardware (TEE)" else "Standard"
+                )
+            }
+            HairlineDivider()
+            KeyValueRow("Signing key", "EC P-256 · SHA256withECDSA", mono = true)
+            HairlineDivider()
+            KeyValueRow("Local storage", "AES-256-GCM", mono = true)
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Live status
+        SectionLabel("Status")
+        BriskCard(
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)
+        ) {
+            KeyValueRow(
+                label = "Battery",
+                value = "$batteryPct%, ${if (isCharging) "charging" else "on battery"}",
+                valueColor = if (isBatteryLow) BriskColors.negativeInk() else BriskColors.textPrimary()
+            )
+            HairlineDivider()
+            KeyValueRow("Network", networkType)
+            HairlineDivider()
+            KeyValueRow("Local database", formattedSize)
+            HairlineDivider()
+            KeyValueRow("Waiting to upload", "%,d %s".format(queueDepth, if (queueDepth == 1) "record" else "records"))
+            HairlineDivider()
+            KeyValueRow("Last heartbeat", lastSyncTime)
+        }
+
+        if (reportFeedback != null) {
+            Row(
+                modifier = Modifier.padding(top = 12.dp),
+                verticalAlignment = Alignment.Top
+            ) {
+                Icon(
+                    painter = painterResource(if (isReportError) R.drawable.ic_circle_x else R.drawable.ic_circle_check),
+                    contentDescription = null,
+                    tint = if (isReportError) BriskColors.StatusRejected else BriskColors.StatusVerified,
+                    modifier = Modifier
+                        .padding(top = 1.dp)
+                        .size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = reportFeedback ?: "",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = BriskColors.textPrimary()
                 )
             }
         }
 
-        Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.height(24.dp))
 
-        // Hardware Status Details
-        Card(
-            shape = BriskShapes.large,
-            colors = CardDefaults.cardColors(containerColor = Color.White),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                // Battery Row
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(text = "Battery Status", fontSize = 13.sp, color = BriskColors.TextSecondaryLight)
-                    Text(
-                        text = "$batteryPct% ${if (isCharging) "(Charging)" else "(Discharging)"}",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isBatteryLow) BriskColors.StatusRejected else BriskColors.TextPrimaryLight
-                    )
-                }
-
-                Divider(modifier = Modifier.padding(vertical = 10.dp), color = BriskColors.BorderHairlineLight)
-
-                // Network Row
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(text = "Network Interface", fontSize = 13.sp, color = BriskColors.TextSecondaryLight)
-                    Text(
-                        text = networkType,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = BriskColors.TextPrimaryLight
-                    )
-                }
-
-                Divider(modifier = Modifier.padding(vertical = 10.dp), color = BriskColors.BorderHairlineLight)
-
-                // Storage Row
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(text = "Local SQLite Size", fontSize = 13.sp, color = BriskColors.TextSecondaryLight)
-                    val formattedSize = if (dbSizeBytes > 1024 * 1024) {
-                        "${dbSizeBytes / (1024 * 1024)} MB"
-                    } else {
-                        "${dbSizeBytes / 1024} KB"
-                    }
-                    Text(
-                        text = formattedSize,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = BriskColors.TextPrimaryLight
-                    )
-                }
-
-                Divider(modifier = Modifier.padding(vertical = 10.dp), color = BriskColors.BorderHairlineLight)
-
-                // Queue Depth
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(text = "Total Pending Queue", fontSize = 13.sp, color = BriskColors.TextSecondaryLight)
-                    Text(
-                        text = "$queueDepth records",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (queueDepth > 0) BriskColors.StatusReview else BriskColors.StatusVerified
-                    )
-                }
-
-                Divider(modifier = Modifier.padding(vertical = 10.dp), color = BriskColors.BorderHairlineLight)
-
-                // Telemetry Timestamp
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(text = "Last Telemetry Report", fontSize = 13.sp, color = BriskColors.TextSecondaryLight)
-                    Text(
-                        text = lastSyncTime,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = BriskColors.TextPrimaryLight
-                    )
-                }
-            }
-        }
-
-        if (reportFeedback != null) {
-            Text(
-                text = reportFeedback ?: "",
-                color = if (isReportError) BriskColors.StatusRejected else BriskColors.StatusVerified,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(top = 10.dp)
-            )
-        }
-
-        Spacer(modifier = Modifier.height(20.dp))
-
-        // Force Telemetry Button
-        Button(
+        PrimaryPillButton(
+            text = "Send heartbeat",
+            icon = R.drawable.ic_activity,
+            loading = isReporting,
             onClick = {
                 isReporting = true
                 reportFeedback = null
@@ -316,29 +246,47 @@ fun DeviceHealthScreen() {
                         val fmt = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
                         lastSyncTime = fmt.format(Date())
                         isReportError = false
-                        reportFeedback = "Telemetry & background sync workers triggered"
+                        reportFeedback = "Heartbeat sent and background sync started"
                     } else {
                         isReportError = true
-                        reportFeedback = "Upload error: ${res.exceptionOrNull()?.message}"
+                        reportFeedback = "Heartbeat failed: ${res.exceptionOrNull()?.message}"
                     }
                     isReporting = false
                 }
-            },
-            enabled = !isReporting,
-            shape = BriskShapes.extraLarge,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = BriskColors.ContrastPill,
-                contentColor = Color.White
-            ),
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(48.dp)
-        ) {
-            if (isReporting) {
-                CircularProgressIndicator(color = Color.White, modifier = Modifier.size(20.dp))
-            } else {
-                Text(text = "Send Health Heartbeat Now", fontWeight = FontWeight.SemiBold)
             }
+        )
+    }
+}
+
+@Composable
+private fun CaptureCard(title: String, stats: CaptureStats?, visible: Boolean) {
+    if (!visible || stats == null) return
+    BriskCard(
+        modifier = Modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleSmall,
+            color = BriskColors.textPrimary(),
+            modifier = Modifier.padding(vertical = 12.dp)
+        )
+        HairlineDivider()
+        KeyValueRow("Kept as payments", "%,d".format(stats.kept))
+        HairlineDivider()
+        KeyValueRow("Dropped: not a payment", "%,d".format(stats.notAPayment))
+        HairlineDivider()
+        KeyValueRow("Dropped: money going out", "%,d".format(stats.outgoingMoney))
+        if (title.contains("SMS")) {
+            HairlineDivider()
+            KeyValueRow("Dropped: personal numbers", "%,d".format(stats.personalNumber))
+            HairlineDivider()
+            KeyValueRow("Dropped: other senders", "%,d".format(stats.otherSender))
         }
+        HairlineDivider()
+        KeyValueRow(
+            "Last kept",
+            stats.lastKeptAt?.let { SimpleDateFormat("d MMM, HH:mm", Locale.getDefault()).format(Date(it)) } ?: "None yet"
+        )
     }
 }

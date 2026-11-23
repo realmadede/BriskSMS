@@ -128,7 +128,7 @@ Phase 8: External Carrier Onboarding, Live Staging, Penetration Testing & Produc
   - Hardware-backed EC P-256 `KeystoreManager` + Keystore AES-256-GCM `KeystoreSecureStorage` and `EvidenceEncryptor`.
   - Room SQLite offline queues (`BriskDatabase`, `OfflineEvidenceEntity`, `SmsDispatchEntity`) + `PendingSmsJobResultStore`.
   - Play-Store compliant Mode 1 `BriskNotificationListenerService` with strict package whitelist (`PaymentProviderRegistry`) and hardware Keystore AES-256-GCM encryption (`EvidenceEncryptor`); carrier regex parsing remains exclusively server-side in `packages/parser-engine`.
-  - Foreground relay `SmsGateRelayService`, `SimManager` (400/day SIM cap failover + pacing), `OutboundSmsJobCoordinator`, `BootCompletedReceiver`, `EvidenceUploadWorker`, `TelemetryWorker`, `DeviceCommandProcessor`, and Jetpack Compose screens (`PairingScreen` with ML Kit QR scanner, `OverviewScreen`, `DashboardScreen`, `PaymentIntelligenceScreen`, `BulkMessagingScreen`, `DeviceHealthScreen`, `SettingsScreen`).
+  - Foreground relay `SmsGateRelayService`, `SimManager` (400/day SIM cap failover + pacing), `OutboundSmsJobCoordinator`, `BootCompletedReceiver`, `EvidenceUploadWorker`, `TelemetryWorker`, `DeviceCommandProcessor`, and Jetpack Compose screens (`PairingScreen` with ML Kit QR scanner, `OverviewScreen`, `PaymentIntelligenceScreen`, `BulkMessagingScreen`, `DeviceHealthScreen`, `SettingsScreen`).
   - Verified with **10 JVM unit test classes (41 `@Test` methods)**, Kotlin debug compilation, `assembleDebug`, and R8 Full Mode `assembleRelease` APK generation under Gradle `8.14.3` + Temurin JDK `17`.
 - **Remaining / Deferred:**
   - Android instrumented on-device tests (e.g., Airplane Mode offline resilience test on hardware) and physical Tanzanian SIM radio/battery-exemption validation.
@@ -177,7 +177,7 @@ Phase 8: External Carrier Onboarding, Live Staging, Penetration Testing & Produc
 
 ### Full Repository Hard Audit & SaaS Production-Readiness (COMPLETED — 2026-11-16)
 - Audited all **17 subsystems** across the monorepo and completed findings **`AUD-01` through `AUD-30`** (`webhook_endpoints.secret` AES-256-GCM encryption migration `20261116010000`, fail-closed paid subscription verification including standalone callback-settled STK transactions, `PLATFORM_ADMIN_SECRET` catalog gate, OAuth `bsk_at_` scope & human-session guards, password reset + invitation acceptance + workspace switching, campaign queue dispatch/cancel + gateway retry worker + maintenance sweepers, operational developer/audit/outbox endpoints, Web Console dynamic QR + full workflow controls, Android `BuildConfig`/`WIPE_AND_REVOKE`/boot sync/vector icons/R8 hardening, dead-code removal, and multi-target `Dockerfile`).
-- Post-edit verification: **543/543 workspace tests passing across 41 files** (`bun run test` on PostgreSQL + Redis), `bun run typecheck` + `bun run build` exit `0`, **15 migrations** applied (`STRICT_MIGRATION_CHECKSUMS=true`), and **10 Android JUnit test classes (`47 @Test`s) + `assembleDebug` + `assembleRelease`** passing.
+- Post-edit verification: **543/543 workspace tests passing across 41 files** (`bun run test` on PostgreSQL + Redis), `bun run typecheck` + `bun run build` exit `0`, **15 migrations** applied (`STRICT_MIGRATION_CHECKSUMS=true`), and **10 Android JUnit test classes (`41 @Test`s) + `assembleDebug` + `assembleRelease`** passing.
 
 ---
 
@@ -187,4 +187,4 @@ Phase 8: External Carrier Onboarding, Live Staging, Penetration Testing & Produc
   1. **Git Commit, Sign & Push:** Commit working-tree changes with registered SSH key and run remote GitHub Actions CI (`verify` + `android-verify`).
   2. **External Credentials & Carrier Contracts:** Provision Google Cloud OAuth Client IDs, Resend verified domain/API key, official MNO STK agreements/verifiers (`MPESA`, `MIXX`, `AIRTEL_MONEY`, `HALOPESA`), and SMSGate gateway hardware.
   3. **Live Hardware & Browser Testing:** Physical Android device + Tanzanian SIM field trials and interactive Playwright browser E2E verification.
-  4. **Infrastructure & Compliance:** Private VPC Redis isolation (no internal Redis TLS), edge reverse-proxy CSP & `X-Forwarded-For` sanitization (`TRUST_PROXY=true`), Multi-AZ PostgreSQL PITR drills, pre-existing local `_prisma_migrations` checksum drift note (`20261112000000`), independent penetration test, and PDPC RCMIS registration.
+  4. **Infrastructure & Compliance:** Private VPC Redis isolation (`rediss://` TLS supported), edge reverse-proxy CSP & `X-Forwarded-For` sanitization (`TRUST_PROXY=true`), Multi-AZ PostgreSQL PITR drills, pre-existing local `_prisma_migrations` checksum drift note (`20261112000000`), independent penetration test, and PDPC RCMIS registration.

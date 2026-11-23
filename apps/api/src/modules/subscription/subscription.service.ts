@@ -15,6 +15,11 @@ import {
 import { entitlementService } from './entitlement.service.js';
 import { SqlExecutor, sql, withTransaction } from '@brisksms/db';
 
+/** Platform setting holding the organization whose verified payments fund BriskSMS's own subscriptions. */
+export const BILLING_WORKSPACE_SETTING = 'BILLING_ORGANIZATION_ID';
+/** Platform setting holding the text that tells a customer where and how to pay BriskSMS. */
+export const BILLING_INSTRUCTIONS_SETTING = 'BILLING_PAYMENT_INSTRUCTIONS';
+
 export class SubscriptionService {
   async getOrganizationSubscription(
     organizationId: string,
@@ -56,32 +61,12 @@ export class SubscriptionService {
     dto: CheckoutSubscriptionDto,
   ): Promise<OrganizationSubscriptionDto> {
     return withTransaction(async (tx) => {
-      const plan = await dbStore.getPlanByCode(dto.planCode, tx);
-      if (!plan || !plan.isPublic) {
-        throw new PlanNotFoundError(dto.planCode);
-      }
-
-      const currentVersion = await dbStore.getActivePlanVersion(plan.id, tx);
-      if (!currentVersion) {
-        throw new PlanNotFoundError(`${dto.planCode} (no active version)`);
-      }
-
-      const prices = await dbStore.getPlanPrices(currentVersion.id, tx);
-      const matchedPrice = prices.find(
-        (p) =>
-          p.currency.toUpperCase() === dto.currency.toUpperCase() &&
-          p.billingInterval === dto.billingInterval &&
-          p.isActive,
+      const { plan, version: currentVersion, price: matchedPrice } = await this.resolvePlanPrice(
+        dto.planCode,
+        dto.currency,
+        dto.billingInterval,
+        tx,
       );
-
-      if (!matchedPrice) {
-        throw new BriskError(
-          'PRICE_NOT_FOUND',
-          `No active price configured for plan '${dto.planCode}' with currency '${dto.currency}' and interval '${dto.billingInterval}'.`,
-          422,
-          { planCode: dto.planCode, currency: dto.currency, billingInterval: dto.billingInterval },
-        );
-      }
 
       // Serialize concurrent subscription checkouts for the same organization
       await tx`
@@ -110,7 +95,17 @@ export class SubscriptionService {
         verifiedPaymentProviderRef = 'FREE_TIER';
       } else if (dto.paymentMethodRef && dto.paymentMethodRef.trim().length > 0) {
         const refNorm = dto.paymentMethodRef.trim();
-        // Verify settled/verified payment evidence inside the same organization and currency,
+        // Subscription money is paid to BriskSMS, so the evidence must live in the billing workspace,
+        // never in the paying customer's own workspace.
+        const billingOrganizationId = await dbStore.getPlatformSetting(BILLING_WORKSPACE_SETTING, tx);
+        if (!billingOrganizationId) {
+          throw new BriskError(
+            'BILLING_NOT_CONFIGURED',
+            'Paid plans cannot be activated yet because the platform billing workspace is not configured.',
+            503,
+          );
+        }
+        // Verify settled/verified payment evidence inside the billing workspace and currency,
         // locking matching rows FOR UPDATE and excluding customer-invoice or disputed claims.
         const verifiedStkRows = await tx<{
           id: string;
@@ -119,7 +114,7 @@ export class SubscriptionService {
         }>`
           SELECT s."id", s."provider_reference", s."settled_payment_id"
           FROM "stk_push_transactions" s
-          WHERE s."organization_id" = ${organizationId}
+          WHERE s."organization_id" = ${billingOrganizationId}
             AND s."status" = 'SUCCESS'::"StkPushStatus"
             AND s."invoice_id" IS NULL
             AND s."currency" = ${matchedPrice.currency}
@@ -144,7 +139,7 @@ export class SubscriptionService {
             ? await tx<{ id: string; reference: string }>`
                 SELECT np."id", np."reference"
                 FROM "normalized_payments" np
-                WHERE np."organization_id" = ${organizationId}
+                WHERE np."organization_id" = ${billingOrganizationId}
                   AND np."state" = 'VERIFIED'::"TransactionState"
                   AND np."currency" = ${matchedPrice.currency}
                   AND np."amount_cents" >= ${matchedPrice.amountCents.toString()}::bigint
@@ -231,88 +226,154 @@ export class SubscriptionService {
         );
       }
 
-      const subId = existingSub?.id ?? randomUUID();
-      const subscriptionRecord: OrganizationSubscriptionRecord = {
-        id: subId,
+      await this.persistSubscription(tx, {
         organizationId,
-        planVersionId: currentVersion.id,
+        actorId,
+        plan,
+        version: currentVersion,
+        price: matchedPrice,
+        existingSub,
         status,
-        currency: matchedPrice.currency,
-        unitPriceCents: matchedPrice.amountCents,
-        billingInterval: matchedPrice.billingInterval,
-        currentPeriodStart: periodStart,
-        currentPeriodEnd: periodEnd,
-        trialEndsAt,
-        canceledAt: null,
-        cancelAtPeriodEnd: false,
-        createdAt: existingSub?.createdAt ?? now,
-        updatedAt: now,
-      };
-
-      const savedSub = await dbStore.saveSubscription(subscriptionRecord, tx);
-
-      // Persist immutable subscription history event
-      await tx`
-        INSERT INTO "subscription_history" (
-          "id", "organization_id", "subscription_id", "plan_version_id",
-          "event_type", "previous_status", "new_status", "unit_price_cents",
-          "currency", "billing_interval", "actor_id", "metadata"
-        )
-        VALUES (
-          ${randomUUID()},
-          ${organizationId},
-          ${savedSub.id},
-          ${currentVersion.id},
-          ${existingSub ? 'UPGRADED' : 'CREATED'},
-          ${existingSub ? existingSub.status : null}::"SubscriptionStatus",
-          ${status}::"SubscriptionStatus",
-          ${matchedPrice.amountCents.toString()}::bigint,
-          ${matchedPrice.currency},
-          ${matchedPrice.billingInterval}::"BillingInterval",
-          ${actorId},
-          ${JSON.stringify({ planCode: plan.code, versionNumber: currentVersion.versionNumber })}::jsonb
-        )
-      `;
-
-      // Generate immutable snapshot billing invoice reflecting real payment settlement status
-      const invoiceNumber = `INV-SUB-${Date.now().toString(36).toUpperCase()}-${randomUUID().substring(0, 4).toUpperCase()}`;
-      const invoice: SubscriptionBillingInvoiceRecord = {
-        id: randomUUID(),
-        organizationId,
-        subscriptionId: savedSub.id,
-        invoiceNumber,
-        amountCents: matchedPrice.amountCents,
-        currency: matchedPrice.currency,
         periodStart,
         periodEnd,
+        trialEndsAt,
         isPaid,
         paidAt,
         paymentProviderRef: verifiedPaymentProviderRef,
-        createdAt: now,
-      };
-      await dbStore.createSubscriptionInvoice(invoice, tx);
-
-      await dbStore.recordAudit(
-        {
-          organizationId,
-          actorId,
-          actorType: 'USER',
-          action: 'SUBSCRIPTION_CHECKOUT_COMPLETED',
-          resourceType: 'SUBSCRIPTION',
-          resourceId: savedSub.id,
-          metadata: {
-            planCode: plan.code,
-            versionNumber: currentVersion.versionNumber,
-            currency: matchedPrice.currency,
-            amountCents: matchedPrice.amountCents.toString(),
-            invoiceNumber,
-          },
-        },
-        tx,
-      );
+      });
 
       return (await this.getOrganizationSubscription(organizationId, tx))!;
     });
+  }
+
+  /** Finds the public plan, its active version and the active price for a currency and interval. */
+  async resolvePlanPrice(planCode: string, currency: string, billingInterval: BillingInterval, tx: SqlExecutor) {
+    const plan = await dbStore.getPlanByCode(planCode, tx);
+    if (!plan || !plan.isPublic) {
+      throw new PlanNotFoundError(planCode);
+    }
+
+    const version = await dbStore.getActivePlanVersion(plan.id, tx);
+    if (!version) {
+      throw new PlanNotFoundError(`${planCode} (no active version)`);
+    }
+
+    const prices = await dbStore.getPlanPrices(version.id, tx);
+    const price = prices.find(
+      (p) => p.currency.toUpperCase() === currency.toUpperCase() && p.billingInterval === billingInterval && p.isActive,
+    );
+
+    if (!price) {
+      throw new BriskError(
+        'PRICE_NOT_FOUND',
+        `No active price configured for plan '${planCode}' with currency '${currency}' and interval '${billingInterval}'.`,
+        422,
+        { planCode, currency, billingInterval },
+      );
+    }
+
+    return { plan, version, price };
+  }
+
+  /** Saves the subscription, its history event, the billing snapshot invoice and the audit entry. */
+  async persistSubscription(
+    tx: SqlExecutor,
+    p: {
+      organizationId: string;
+      actorId: string;
+      actorType?: 'USER' | 'SYSTEM';
+      plan: { code: string };
+      version: { id: string; versionNumber: number };
+      price: { currency: string; amountCents: bigint; billingInterval: BillingInterval };
+      existingSub: OrganizationSubscriptionRecord | null;
+      status: SubscriptionStatus;
+      periodStart: Date;
+      periodEnd: Date;
+      trialEndsAt: Date | null;
+      isPaid: boolean;
+      paidAt: Date | null;
+      paymentProviderRef: string | null;
+    },
+  ): Promise<void> {
+    const now = new Date();
+    const subscriptionRecord: OrganizationSubscriptionRecord = {
+      id: p.existingSub?.id ?? randomUUID(),
+      organizationId: p.organizationId,
+      planVersionId: p.version.id,
+      status: p.status,
+      currency: p.price.currency,
+      unitPriceCents: p.price.amountCents,
+      billingInterval: p.price.billingInterval,
+      currentPeriodStart: p.periodStart,
+      currentPeriodEnd: p.periodEnd,
+      trialEndsAt: p.trialEndsAt,
+      canceledAt: null,
+      cancelAtPeriodEnd: false,
+      createdAt: p.existingSub?.createdAt ?? now,
+      updatedAt: now,
+    };
+
+    const savedSub = await dbStore.saveSubscription(subscriptionRecord, tx);
+
+    // Persist immutable subscription history event
+    await tx`
+      INSERT INTO "subscription_history" (
+        "id", "organization_id", "subscription_id", "plan_version_id",
+        "event_type", "previous_status", "new_status", "unit_price_cents",
+        "currency", "billing_interval", "actor_id", "metadata"
+      )
+      VALUES (
+        ${randomUUID()},
+        ${p.organizationId},
+        ${savedSub.id},
+        ${p.version.id},
+        ${p.existingSub ? 'UPGRADED' : 'CREATED'},
+        ${p.existingSub ? p.existingSub.status : null}::"SubscriptionStatus",
+        ${p.status}::"SubscriptionStatus",
+        ${p.price.amountCents.toString()}::bigint,
+        ${p.price.currency},
+        ${p.price.billingInterval}::"BillingInterval",
+        ${p.actorId},
+        ${JSON.stringify({ planCode: p.plan.code, versionNumber: p.version.versionNumber })}::jsonb
+      )
+    `;
+
+    // Generate immutable snapshot billing invoice reflecting real payment settlement status
+    const invoiceNumber = `INV-SUB-${Date.now().toString(36).toUpperCase()}-${randomUUID().substring(0, 4).toUpperCase()}`;
+    const invoice: SubscriptionBillingInvoiceRecord = {
+      id: randomUUID(),
+      organizationId: p.organizationId,
+      subscriptionId: savedSub.id,
+      invoiceNumber,
+      amountCents: p.price.amountCents,
+      currency: p.price.currency,
+      periodStart: p.periodStart,
+      periodEnd: p.periodEnd,
+      isPaid: p.isPaid,
+      paidAt: p.paidAt,
+      paymentProviderRef: p.paymentProviderRef,
+      createdAt: now,
+    };
+    await dbStore.createSubscriptionInvoice(invoice, tx);
+
+    await dbStore.recordAudit(
+      {
+        organizationId: p.organizationId,
+        actorId: p.actorId,
+        actorType: p.actorType ?? 'USER',
+        action: 'SUBSCRIPTION_CHECKOUT_COMPLETED',
+        resourceType: 'SUBSCRIPTION',
+        resourceId: savedSub.id,
+        metadata: {
+          planCode: p.plan.code,
+          versionNumber: p.version.versionNumber,
+          currency: p.price.currency,
+          amountCents: p.price.amountCents.toString(),
+          invoiceNumber,
+        },
+      },
+      tx,
+    );
   }
 
   async cancelSubscription(

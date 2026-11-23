@@ -261,6 +261,9 @@ export async function resetTestDatabaseState(): Promise<void> {
       "payment_reference_claim_collisions",
       "payment_reference_claims",
       "stk_push_transactions",
+      "billing_checkout_requests",
+      "credit_purchases",
+      "credit_packs",
       "payment_verifications",
       "normalized_payments",
       "raw_payment_evidence",
@@ -285,6 +288,8 @@ export async function resetTestDatabaseState(): Promise<void> {
       "subscription_plans",
       "commercial_products",
       "feature_definitions",
+      "platform_settings",
+      "platform_audit_logs",
       "organizations",
       "users"
     RESTART IDENTITY CASCADE;

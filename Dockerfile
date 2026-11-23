@@ -44,4 +44,4 @@ USER bun
 EXPOSE 4200
 HEALTHCHECK --interval=10s --timeout=5s --retries=5 \
   CMD bun -e "fetch('http://127.0.0.1:' + (process.env.WEB_PORT || 4200) + '/').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
-CMD ["bun", "run", "apps/web/src/server.ts"]
+CMD ["bun", "run", "apps/web/server.ts"]

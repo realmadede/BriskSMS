@@ -50,10 +50,10 @@ Static analysis of the BriskSMS codebase (`apps/*`, `packages/*`) catalogs the s
 | `ENCRYPTION_MASTER_KEY` | `apps/api`, `apps/worker`, `packages/db` | **Required** | **YES (CRITICAL)** | Dev fallback | **Fatal boot termination** if missing, < 32 chars, or in `INSECURE_DEFAULT_KEYS`. | 32-byte key: 64 hexadecimal characters (`/^[0-9a-fA-F]{64}$/`) or ≥ 32-character string. | AES-256-GCM master key used to encrypt device secrets, webhook secrets, and gateway credentials at rest. |
 | `JWT_ACCESS_SECRET` | `apps/api` | **Required** | **YES (CRITICAL)** | Dev fallback | **Fatal boot termination** in production if missing or weak. | High-entropy string ≥ 32 characters (prefer 64 hex characters). | HMAC-SHA256 signing secret for short-lived merchant JWT access tokens (15-minute expiry). |
 | `CSRF_SECRET` | `apps/api` | **Required** | **YES (CRITICAL)** | Dev fallback | **Fatal boot termination** if missing, < 32 chars, in `INSECURE_DEFAULT_KEYS`, or matches `JWT_ACCESS_SECRET` / `ENCRYPTION_MASTER_KEY`. | High-entropy string ≥ 32 characters (prefer 64 hex characters). Strictly distinct from other secrets. | HMAC-SHA256 signing secret for double-submit CSRF cookie tokens with embedded timestamp verification. |
-| `ALLOWED_ORIGINS` | `apps/api` | **Required** | No | Localhost origins | In production, requests from unlisted origins return `403 CSRF_ORIGIN_MISMATCH`. Wildcard `*` strictly rejected. | Comma-separated list of fully qualified HTTPS origins (e.g., `https://staging-console.brisksms.com`). | Authorized browser origins permitted to communicate with API session endpoints. |
+| `ALLOWED_ORIGINS` | `apps/api` | **Required** | No | Localhost origins | In production, requests from unlisted origins return `403 CSRF_ORIGIN_MISMATCH`. Wildcard `*` strictly rejected. | Comma-separated list of fully qualified HTTPS origins (e.g., `https://staging-console.brisksms.app`). | Authorized browser origins permitted to communicate with API session endpoints. |
 | `CORS_ORIGIN` | `apps/api` | Optional | No | None | Merged with `ALLOWED_ORIGINS`. | Comma-separated list of HTTPS origins. | Alternative/legacy environment variable merged with `ALLOWED_ORIGINS`. |
-| `FRONTEND_URL` | `apps/api` | **Required** | No | None | Merged into allowed CORS origins; falls back to localhost in dev. | Fully qualified HTTPS URL (e.g., `https://staging-console.brisksms.com`). | Canonical base URL of the merchant web console for links and redirect validations. |
-| `API_BASE_URL` | `apps/api`, `apps/worker` | **Required** | No | `http://localhost:3000` | Falls back to localhost in development. | Fully qualified HTTPS URL (e.g., `https://staging-api.brisksms.com`). | Public canonical URL of the BriskSMS API embedded in Android QR pairing payloads and webhook callbacks. |
+| `FRONTEND_URL` | `apps/api` | **Required** | No | None | Merged into allowed CORS origins; falls back to localhost in dev. | Fully qualified HTTPS URL (e.g., `https://staging-console.brisksms.app`). | Canonical base URL of the merchant web console for links and redirect validations. |
+| `API_BASE_URL` | `apps/api`, `apps/worker` | **Required** | No | `http://localhost:3000` | Falls back to localhost in development. | Fully qualified HTTPS URL (e.g., `https://staging-api.brisksms.app`). | Public canonical URL of the BriskSMS API embedded in Android QR pairing payloads and webhook callbacks. |
 | `ALLOW_PRIVATE_GATEWAY_NETWORKS` | `apps/api` | **PROHIBITED** | No | `false` | When not `'true'`, SSRF filter strictly blocks loopback (127.0.0.1, ::1), link-local (169.254.x), and private subnets (10.x, 172.16-31.x, 192.168.x). | Must be omitted or `'false'` in staging/production. | SSRF guard toggle. Must remain `false` in staging to protect private cloud infrastructure. |
 | `PROMOTIONAL_CURFEW_ENABLED` | `apps/api`, `apps/worker` | Optional | No | `true` | When not `'false'`, promotional curfew is strictly enforced. | Boolean string: `'true'` or `'false'`. | TCRA commercial messaging curfew toggle. When true, promotional SMS are held between curfew hours. |
 | `PROMOTIONAL_CURFEW_START_HOUR_EAT` | `apps/api`, `apps/worker` | Optional | No | `20` (8:00 PM) | Falls back to 20. | Integer between 0 and 23. | Commercial curfew start hour in East Africa Time (UTC+3). Outbound promotional SMS held after this hour. |
@@ -68,7 +68,7 @@ Static analysis of the BriskSMS codebase (`apps/*`, `packages/*`) catalogs the s
 | `GOOGLE_CLIENT_SECRET` | `apps/api` | Optional | **YES** | None | Not required for pure ID token signature verification. | Alphanumeric client secret string. | Client secret for Google OAuth authorization code exchange flows. |
 | `GOOGLE_NONCE_TTL_SECONDS` | `apps/api` | Optional | No | `300` (5 min) | Falls back to 300 seconds if unset, invalid, < 30, or > 900. | Positive integer in seconds between 30 and 900 (e.g. 300). | Lifespan of server-issued Google OpenID Connect nonces before automatic expiration. Synchronized across Redis TTL and browser cookie `Max-Age`. |
 | `RESEND_API_KEY` | `apps/api` | Required for Email | **YES** | None | When unset, email verification dispatch logs warning and fails safely. | String starting with `re_`. | Bearer API token for transactional email dispatch via Resend REST API. |
-| `RESEND_FROM_EMAIL` | `apps/api` | Optional | No | `BriskSMS <verify@brisksms.com>` | Falls back to default BriskSMS verification address. | Valid RFC 5322 email string (e.g. `BriskSMS <verify@brisksms.com>`). | Default sender header for transactional verification and security notification emails. |
+| `RESEND_FROM_EMAIL` | `apps/api` | Optional | No | `BriskSMS <verify@brisksms.app>` | Falls back to default BriskSMS verification address. | Valid RFC 5322 email string (e.g. `BriskSMS <verify@brisksms.app>`). | Default sender header for transactional verification and security notification emails. |
 | `EMAIL_VERIFICATION_EXPIRY_HOURS` | `apps/api` | Optional | No | `24` | Falls back to 24 hours. | Positive integer in hours (e.g. 24). | Token expiration lifetime for `email_verification_tokens`. |
 
 ### Client-Side / Documentation Variables (Not Consumed by Backend Services):
@@ -123,9 +123,9 @@ Below is the verified template for staging deployments. **Never commit actual va
 # ------------------------------------------------------------------------------
 NODE_ENV=production
 PORT=3000
-API_BASE_URL=https://staging-api.brisksms.com
-FRONTEND_URL=https://staging-console.brisksms.com
-ALLOWED_ORIGINS=https://staging-console.brisksms.com
+API_BASE_URL=https://staging-api.brisksms.app
+FRONTEND_URL=https://staging-console.brisksms.app
+ALLOWED_ORIGINS=https://staging-console.brisksms.app
 
 # ------------------------------------------------------------------------------
 # 2. Persistent Storage (PostgreSQL 16+)
@@ -178,7 +178,7 @@ GOOGLE_NONCE_TTL_SECONDS=300
 # 8. Transactional Email Delivery (Resend Provider)
 # ------------------------------------------------------------------------------
 RESEND_API_KEY=re_REPLACE_WITH_STAGING_RESEND_KEY
-RESEND_FROM_EMAIL=BriskSMS Staging <verify@staging.brisksms.com>
+RESEND_FROM_EMAIL=BriskSMS Staging <verify@staging.brisksms.app>
 EMAIL_VERIFICATION_EXPIRY_HOURS=24
 ```
 

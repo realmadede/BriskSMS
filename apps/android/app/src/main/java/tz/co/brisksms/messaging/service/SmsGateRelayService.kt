@@ -40,7 +40,7 @@ import java.time.Instant
 /**
  * Android Foreground Cellular Gateway Relay Service (SMSGate Compatible)
  * Runs as a foreground service maintaining carrier connectivity and executing outbound dispatches.
- * Supports GatewayMode.MANAGED_GATEWAY (Private VPS behind Cloudflare) & GatewayMode.EXTERNAL_RELAY.
+ * Supports GatewayMode.MANAGED_GATEWAY (private managed gateway) & GatewayMode.EXTERNAL_RELAY.
  */
 class SmsGateRelayService : Service() {
 
@@ -48,7 +48,7 @@ class SmsGateRelayService : Service() {
         private const val TAG = "SmsGateRelayService"
         private const val NOTIFICATION_ID = 2001
         private const val CHANNEL_ID = "brisksms_cellular_gateway"
-        private const val DEFAULT_DISPATCH_PACING_MS = 1500L // Internal engineering default delay between dispatches
+        const val DEFAULT_DISPATCH_PACING_MS = 1500L // Delay between consecutive dispatches, shown on the Messaging screen
         const val ACTION_START = "tz.co.brisksms.messaging.START_GATEWAY"
         const val ACTION_STOP = "tz.co.brisksms.messaging.STOP_GATEWAY"
     }
@@ -413,7 +413,7 @@ class SmsGateRelayService : Service() {
             "No active SIM cards"
         }
 
-        val modeLabel = if (secureStorage.gatewayMode == "MANAGED_GATEWAY") "VPS (Cloudflare)" else "External Relay"
+        val modeLabel = if (secureStorage.gatewayMode == "MANAGED_GATEWAY") "Managed" else "External Relay"
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("BriskSMS Cellular Gateway")

@@ -38,6 +38,7 @@ import {
   TestStkAdapter,
 } from '../src/modules/stk-push/index.js';
 import { stkPushService } from '../src/modules/stk-push/stk-push.service.js';
+import { grantDeveloperPlan } from './helpers/developer-plan.js';
 
 describe('P0.2 Integrated Payment-Reference Claim Boundary (Companion, Manual, STK)', () => {
   const router = createApp();
@@ -216,6 +217,7 @@ describe('P0.2 Integrated Payment-Reference Claim Boundary (Companion, Manual, S
       tokenHash: `tok_b_${deviceB}`,
     });
 
+    await grantDeveloperPlan(orgA);
     const createdKeyA = await apiKeyService.createApiKey(orgA, {
       organizationId: orgA,
       name: 'Alpha STK Key',
@@ -223,6 +225,7 @@ describe('P0.2 Integrated Payment-Reference Claim Boundary (Companion, Manual, S
     });
     apiKeyA = createdKeyA.plainTextSecret;
 
+    await grantDeveloperPlan(orgB);
     const createdKeyB = await apiKeyService.createApiKey(orgB, {
       organizationId: orgB,
       name: 'Beta STK Key',
@@ -699,12 +702,12 @@ describe('P0.2 Integrated Payment-Reference Claim Boundary (Companion, Manual, S
 
     it('12. enforces separation of duties against device pairing user and permits independent finance user', async () => {
       const pairingUser = await authService.register({
-        email: `pairer-${randomUUID().slice(0, 6)}@brisksms.co.tz`,
+        email: `pairer-${randomUUID().slice(0, 6)}@brisksms.app`,
         password: 'StrongPassword123!',
         fullName: 'Pairing Admin',
       });
       const financeUser = await authService.register({
-        email: `finance-${randomUUID().slice(0, 6)}@brisksms.co.tz`,
+        email: `finance-${randomUUID().slice(0, 6)}@brisksms.app`,
         password: 'StrongPassword123!',
         fullName: 'Finance Auditor',
       });
@@ -797,7 +800,7 @@ describe('P0.2 Integrated Payment-Reference Claim Boundary (Companion, Manual, S
 
     it('13. requires externalVerificationRef >= 6 chars and notes >= 10 chars on HTTP POST /v1/reconciliation/verify', async () => {
       const reg = await authService.register({
-        email: `fin-http-${randomUUID().slice(0, 6)}@brisksms.co.tz`,
+        email: `fin-http-${randomUUID().slice(0, 6)}@brisksms.app`,
         password: 'StrongPassword123!',
         fullName: 'HTTP Finance User',
         organizationName: 'HTTP Verify Org',

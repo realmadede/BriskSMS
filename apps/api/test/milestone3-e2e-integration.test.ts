@@ -32,6 +32,7 @@ import {
   processSmsCampaignJob,
   processSmsDeliveryRetryJob,
 } from '@brisksms/worker';
+import { grantDeveloperPlan } from './helpers/developer-plan.js';
 
 describe('BriskSMS Milestone 3: End-to-End Product Integration & Commercial Readiness', () => {
   let authService: AuthService;
@@ -380,6 +381,7 @@ describe('BriskSMS Milestone 3: End-to-End Product Integration & Commercial Read
       });
 
       // 1. Generate scoped API Key
+      await grantDeveloperPlan(orgId);
       const keyResult = await apiKeyService.createApiKey(orgId, {
         organizationId: orgId,
         name: 'Zapier Automation Key',
@@ -468,6 +470,7 @@ describe('BriskSMS Milestone 3: End-to-End Product Integration & Commercial Read
       assert.equal(invoicesB.length, 0);
 
       // Tenant A creates API key
+      await grantDeveloperPlan(orgA.id);
       const keyA = await apiKeyService.createApiKey(orgA.id, {
         organizationId: orgA.id,
         name: 'Alpha Key',

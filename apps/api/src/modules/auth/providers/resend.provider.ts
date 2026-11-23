@@ -11,7 +11,7 @@ export class ResendEmailProvider implements EmailProvider {
     defaultFrom?: string,
   ) {
     this.apiKey = apiKey;
-    this.defaultFrom = defaultFrom || process.env.RESEND_FROM_EMAIL || 'BriskSMS <verify@brisksms.com>';
+    this.defaultFrom = defaultFrom || process.env.RESEND_FROM_EMAIL || 'BriskSMS <verify@brisksms.app>';
   }
 
   async sendEmail(options: SendEmailOptions): Promise<EmailDeliveryResult> {

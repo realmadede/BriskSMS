@@ -1392,6 +1392,58 @@ export class PostgresStore {
     }, existingTx);
   }
 
+  /**
+   * The phone itself asked to be removed. Same end state as an administrator revoke (the device stops
+   * counting against the plan and its token stops working), but no user is the actor, so the user-keyed
+   * columns stay empty and the audit row names the device.
+   */
+  async disconnectDevice(deviceId: string, organizationId: string): Promise<DeviceRecord> {
+    assertTenantContext({ organizationId });
+    return withTransaction(async (tx) => {
+      const rows = await tx`
+        UPDATE "devices"
+        SET
+          "status" = 'REVOKED'::"DeviceStatus",
+          "revoked_at" = NOW(),
+          "revocation_reason" = 'Unpaired from the phone',
+          "updated_at" = NOW()
+        WHERE "id" = ${deviceId} AND "organization_id" = ${organizationId}
+        RETURNING *
+      `;
+      if (!rows[0]) {
+        throw new Error('Device not found in organization');
+      }
+
+      await tx`
+        UPDATE "device_commands"
+        SET
+          "status" = 'CANCELLED'::"DeviceCommandStatus",
+          "cancelled_at" = NOW(),
+          "cancellation_reason" = 'Device unpaired',
+          "lease_token" = NULL,
+          "lease_expires_at" = NULL,
+          "updated_at" = NOW()
+        WHERE "organization_id" = ${organizationId}
+          AND "device_id" = ${deviceId}
+          AND "status" IN ('PENDING', 'DELIVERED')
+      `;
+
+      await this.recordAudit(
+        {
+          organizationId,
+          actorId: deviceId,
+          actorType: 'DEVICE',
+          action: 'DEVICE_DISCONNECTED',
+          resourceType: 'DEVICE',
+          resourceId: deviceId,
+        },
+        tx,
+      );
+
+      return mapDeviceRow(rows[0]);
+    });
+  }
+
   // --- Dynamic Subscription & Commercial Catalog ---
   async getFeatureDefinitions(tx: SqlExecutor = sql): Promise<FeatureDefinitionRecord[]> {
     const rows = await tx`SELECT * FROM "feature_definitions" ORDER BY "key" ASC`;
@@ -1412,7 +1464,85 @@ export class PostgresStore {
     `;
   }
 
-  async getPublicCatalog(tx: SqlExecutor = sql): Promise<
+  async recordPlatformAudit(
+    data: {
+      adminUserId: string;
+      ipAddress?: string | null;
+      action: string;
+      targetType?: string | null;
+      targetId?: string | null;
+      targetOrganizationId?: string | null;
+      reason?: string | null;
+      previousState?: Record<string, unknown> | null;
+      newState?: Record<string, unknown> | null;
+    },
+    tx: SqlExecutor = sql,
+  ): Promise<void> {
+    await tx`
+      INSERT INTO "platform_audit_logs" (
+        "admin_user_id", "ip_address", "action", "target_type", "target_id",
+        "target_organization_id", "reason", "previous_state", "new_state"
+      ) VALUES (
+        ${data.adminUserId}, ${data.ipAddress ?? null}, ${data.action}, ${data.targetType ?? null},
+        ${data.targetId ?? null}, ${data.targetOrganizationId ?? null}, ${data.reason ?? null},
+        ${data.previousState ? JSON.stringify(data.previousState) : null}::jsonb,
+        ${data.newState ? JSON.stringify(data.newState) : null}::jsonb
+      )
+    `;
+  }
+
+  async listPlatformAudit(
+    opts: { limit: number; action?: string },
+    tx: SqlExecutor = sql,
+  ): Promise<
+    Array<{
+      id: string;
+      adminUserId: string;
+      ipAddress: string | null;
+      action: string;
+      targetType: string | null;
+      targetId: string | null;
+      targetOrganizationId: string | null;
+      reason: string | null;
+      previousState: unknown;
+      newState: unknown;
+      createdAt: string;
+    }>
+  > {
+    const rows = await tx`
+      SELECT * FROM "platform_audit_logs"
+      WHERE (${opts.action ?? null}::text IS NULL OR "action" = ${opts.action ?? null})
+      ORDER BY "created_at" DESC
+      LIMIT ${opts.limit}
+    `;
+    return rows.map((r) => ({
+      id: r.id,
+      adminUserId: r.admin_user_id,
+      ipAddress: r.ip_address ?? null,
+      action: r.action,
+      targetType: r.target_type ?? null,
+      targetId: r.target_id ?? null,
+      targetOrganizationId: r.target_organization_id ?? null,
+      reason: r.reason ?? null,
+      previousState: typeof r.previous_state === 'string' ? JSON.parse(r.previous_state) : (r.previous_state ?? null),
+      newState: typeof r.new_state === 'string' ? JSON.parse(r.new_state) : (r.new_state ?? null),
+      createdAt: new Date(r.created_at).toISOString(),
+    }));
+  }
+
+  async getPlatformSetting(key: string, tx: SqlExecutor = sql): Promise<string | null> {
+    const rows = await tx`SELECT "value" FROM "platform_settings" WHERE "key" = ${key}`;
+    return rows[0] ? String(rows[0].value) : null;
+  }
+
+  async setPlatformSetting(key: string, value: string, tx: SqlExecutor = sql): Promise<void> {
+    await tx`
+      INSERT INTO "platform_settings" ("key", "value") VALUES (${key}, ${value})
+      ON CONFLICT ("key") DO UPDATE SET "value" = EXCLUDED."value", "updated_at" = now()
+    `;
+  }
+
+  async getPublicCatalog(tx: SqlExecutor = sql, includePrivate = false): Promise<
     Array<{
       product: CommercialProductRecord;
       plans: Array<{
@@ -1450,7 +1580,7 @@ export class PostgresStore {
 
       const planRows = await tx`
         SELECT * FROM "subscription_plans"
-        WHERE "product_id" = ${product.id} AND "is_public" = true
+        WHERE "product_id" = ${product.id} AND ("is_public" = true OR ${includePrivate})
         ORDER BY "created_at" ASC
       `;
 

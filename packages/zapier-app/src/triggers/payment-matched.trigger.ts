@@ -11,7 +11,7 @@ export const paymentMatchedTrigger = {
     type: 'hook',
     performSubscribe: async (z: ZapierZ, bundle: ZapierBundle) => {
       const response = await z.request({
-        url: 'https://api.brisksms.com/v1/developer/webhooks',
+        url: 'https://api.brisksms.app/v1/developer/webhooks',
         method: 'POST',
         headers: {
           Authorization: `Bearer ${bundle.authData.access_token}`,
@@ -31,7 +31,7 @@ export const paymentMatchedTrigger = {
     },
     performUnsubscribe: async (z: ZapierZ, bundle: ZapierBundle<{ id: string }>) => {
       const response = await z.request({
-        url: `https://api.brisksms.com/v1/developer/webhooks/${bundle.inputData.id}`,
+        url: `https://api.brisksms.app/v1/developer/webhooks/${bundle.inputData.id}`,
         method: 'DELETE',
         headers: {
           Authorization: `Bearer ${bundle.authData.access_token}`,
@@ -48,7 +48,7 @@ export const paymentMatchedTrigger = {
     },
     performList: async (z: ZapierZ, bundle: ZapierBundle) => {
       const response = await z.request({
-        url: 'https://api.brisksms.com/v1/reconciliation/payments?state=MATCHED&limit=5',
+        url: 'https://api.brisksms.app/v1/reconciliation/payments?state=MATCHED&limit=5',
         method: 'GET',
         headers: {
           Authorization: `Bearer ${bundle.authData.access_token}`,

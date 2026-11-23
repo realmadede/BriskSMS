@@ -51,13 +51,13 @@ class EvidenceUploadAndPairingPolicyTest {
     @Test
     fun pairingUrlValidator_enforcesHttpsAndStripsV1Suffix() {
         assertEquals(
-            "https://api.brisksms.co.tz",
-            PairingUrlValidator.normalizeAndValidateHttpsBaseUrl("https://api.brisksms.co.tz/v1/")
+            "https://api.brisksms.app",
+            PairingUrlValidator.normalizeAndValidateHttpsBaseUrl("https://api.brisksms.app/v1/")
         )
 
         var threwCleartext = false
         try {
-            PairingUrlValidator.normalizeAndValidateHttpsBaseUrl("http://insecure.brisksms.co.tz")
+            PairingUrlValidator.normalizeAndValidateHttpsBaseUrl("http://insecure.brisksms.app")
         } catch (_: IllegalArgumentException) {
             threwCleartext = true
         }

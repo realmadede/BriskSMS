@@ -17,6 +17,7 @@ import { WebhookService } from '../src/modules/developer/webhook.service.js';
 import { DeveloperActionService } from '../src/modules/developer/developer-action.service.js';
 import { MessagingService } from '../src/modules/messaging/messaging.service.js';
 import { MessagingProvider } from '../src/modules/messaging/interfaces/messaging-provider.interface.js';
+import { grantDeveloperPlan } from './helpers/developer-plan.js';
 
 describe('Developer Platform & Zapier Webhook Automation', () => {
   let apiKeyService: ApiKeyService;
@@ -73,6 +74,7 @@ describe('Developer Platform & Zapier Webhook Automation', () => {
 
   describe('Scoped API Keys (ApiKeyService)', () => {
     it('creates API key starting with bsk_live_ and validates scopes', async () => {
+      await grantDeveloperPlan(orgId);
       const result = await apiKeyService.createApiKey(orgId, {
         organizationId: orgId,
         name: 'Zapier Inbound Webhook Trigger',
@@ -93,6 +95,7 @@ describe('Developer Platform & Zapier Webhook Automation', () => {
     });
 
     it('rejects revoked API keys immediately', async () => {
+      await grantDeveloperPlan(orgId);
       const result = await apiKeyService.createApiKey(orgId, {
         organizationId: orgId,
         name: 'Temporary Script',
@@ -159,6 +162,7 @@ describe('Developer Platform & Zapier Webhook Automation', () => {
 
   describe('Developer Send Action (DeveloperActionService)', () => {
     it('dispatches SMS using scoped API key (Google Sheets / Zapier Action)', async () => {
+      await grantDeveloperPlan(orgId);
       const keyResult = await apiKeyService.createApiKey(orgId, {
         organizationId: orgId,
         name: 'Zapier Cellular Action',
@@ -185,6 +189,7 @@ describe('Developer Platform & Zapier Webhook Automation', () => {
     });
 
     it('rejects dispatch when API key lacks sms:send scope', async () => {
+      await grantDeveloperPlan(orgId);
       const keyResult = await apiKeyService.createApiKey(orgId, {
         organizationId: orgId,
         name: 'Read-Only Key',
@@ -250,6 +255,7 @@ describe('Developer Platform & Zapier Webhook Automation', () => {
     }
 
     it('authenticates POST /v1/messages/send using x-api-key header', async () => {
+      await grantDeveloperPlan(orgId);
       const keyResult = await apiKeyService.createApiKey(orgId, {
         organizationId: orgId,
         name: 'Zapier Key',
@@ -270,6 +276,7 @@ describe('Developer Platform & Zapier Webhook Automation', () => {
     });
 
     it('authenticates POST /v1/messages/send using Authorization: Bearer <key>', async () => {
+      await grantDeveloperPlan(orgId);
       const keyResult = await apiKeyService.createApiKey(orgId, {
         organizationId: orgId,
         name: 'Bearer Key',
@@ -289,6 +296,7 @@ describe('Developer Platform & Zapier Webhook Automation', () => {
     });
 
     it('supports alias POST /v1/developer/messages/send with recipient property', async () => {
+      await grantDeveloperPlan(orgId);
       const keyResult = await apiKeyService.createApiKey(orgId, {
         organizationId: orgId,
         name: 'Alias Key',
@@ -321,6 +329,7 @@ describe('Developer Platform & Zapier Webhook Automation', () => {
     });
 
     it('rejects dispatch with 403 when API key lacks sms:send scope', async () => {
+      await grantDeveloperPlan(orgId);
       const keyResult = await apiKeyService.createApiKey(orgId, {
         organizationId: orgId,
         name: 'Wrong Scope Key',
@@ -367,6 +376,7 @@ describe('Developer Platform & Zapier Webhook Automation', () => {
     });
 
     it('rejects dispatch with 401 when revoked API key is provided', async () => {
+      await grantDeveloperPlan(orgId);
       const keyResult = await apiKeyService.createApiKey(orgId, {
         organizationId: orgId,
         name: 'Revoked Key',
@@ -400,6 +410,7 @@ describe('Developer Platform & Zapier Webhook Automation', () => {
     });
 
     it('rejects dispatch with 400 VALIDATION_ERROR when recipient or message is missing', async () => {
+      await grantDeveloperPlan(orgId);
       const keyResult = await apiKeyService.createApiKey(orgId, {
         organizationId: orgId,
         name: 'Valid Key',
@@ -438,6 +449,7 @@ describe('Developer Platform & Zapier Webhook Automation', () => {
       });
       await messagingService.purchaseCredits(otherOrgId, 50, 'SEED_OTHER');
 
+      await grantDeveloperPlan(orgId);
       const keyResult = await apiKeyService.createApiKey(orgId, {
         organizationId: orgId,
         name: 'Tenant Isolation Key',
@@ -470,6 +482,7 @@ describe('Developer Platform & Zapier Webhook Automation', () => {
     });
 
     it('validates Idempotency-Key format and rejects invalid formats with 400 VALIDATION_ERROR', async () => {
+      await grantDeveloperPlan(orgId);
       const keyResult = await apiKeyService.createApiKey(orgId, {
         organizationId: orgId,
         name: 'Idempotency Validation Key',
@@ -493,6 +506,7 @@ describe('Developer Platform & Zapier Webhook Automation', () => {
     });
 
     it('prevents duplicate SMS dispatch and credit deduction on repeated requests with same Idempotency-Key header', async () => {
+      await grantDeveloperPlan(orgId);
       const keyResult = await apiKeyService.createApiKey(orgId, {
         organizationId: orgId,
         name: 'Idempotency Test Key',
@@ -545,6 +559,7 @@ describe('Developer Platform & Zapier Webhook Automation', () => {
     });
 
     it('rejects duplicate request with 409 DUPLICATE_IDEMPOTENCY when same key is reused with different parameters', async () => {
+      await grantDeveloperPlan(orgId);
       const keyResult = await apiKeyService.createApiKey(orgId, {
         organizationId: orgId,
         name: 'Idempotency Conflict Key',
@@ -601,11 +616,13 @@ describe('Developer Platform & Zapier Webhook Automation', () => {
         apiToken: 'enc_token_ngo_123',
       });
 
+      await grantDeveloperPlan(orgId);
       const keyOrg1 = await apiKeyService.createApiKey(orgId, {
         organizationId: orgId,
         name: 'Org1 Key',
         scopes: [ApiKeyScope.SMS_SEND],
       });
+      await grantDeveloperPlan(otherOrgId);
       const keyOrg2 = await apiKeyService.createApiKey(otherOrgId, {
         organizationId: otherOrgId,
         name: 'Org2 Key',

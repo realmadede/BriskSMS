@@ -41,12 +41,12 @@ describe('Milestone 2.4: SMSGate Protocol Verification, Webhook Security & Crede
 
     it('should resolve custom reverse-proxy /api/v1 paths cleanly without double-appending', () => {
       assert.equal(
-        provider.resolveEndpoint('https://gateway.brisksms.com/api/v1'),
-        'https://gateway.brisksms.com/api/v1/messages',
+        provider.resolveEndpoint('https://gateway.brisksms.app/api/v1'),
+        'https://gateway.brisksms.app/api/v1/messages',
       );
       assert.equal(
-        provider.resolveEndpoint('https://gateway.brisksms.com/api/v1/'),
-        'https://gateway.brisksms.com/api/v1/messages',
+        provider.resolveEndpoint('https://gateway.brisksms.app/api/v1/'),
+        'https://gateway.brisksms.app/api/v1/messages',
       );
     });
 

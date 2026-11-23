@@ -206,6 +206,19 @@ export function registerDeviceRoutes(router: Router): void {
     };
   });
 
+  // The phone unpairs itself (device token), so its plan slot is freed
+  router.post('/v1/devices/:id/disconnect', async (req: RouteRequest): Promise<ApiResponse> => {
+    const deviceId = req.params.id || '';
+    const deviceToken = extractDeviceBearerToken(req);
+    await authService.checkRateLimit(`dev_disc_${deviceId}`, 10, 60_000);
+
+    const device = await deviceService.disconnectDevice(deviceId, deviceToken);
+    return {
+      success: true,
+      data: { deviceId: device.id, status: device.status },
+    };
+  });
+
   // Revoke device
   router.post('/v1/devices/:id/revoke', async (req: RouteRequest): Promise<ApiResponse> => {
     const body = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, unknown>;

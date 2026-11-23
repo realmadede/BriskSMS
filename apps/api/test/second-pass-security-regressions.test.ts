@@ -16,12 +16,14 @@ import {
 } from '@brisksms/shared';
 import { createApp } from '../src/app.js';
 import { dbStore } from '../src/core/store.js';
+import { BILLING_WORKSPACE_SETTING } from '../src/modules/subscription/subscription.service.js';
 import { authService } from '../src/modules/auth/auth.service.js';
 import { organizationService } from '../src/modules/organization/organization.service.js';
 import { OAuthService } from '../src/modules/oauth/oauth.service.js';
 import { WebhookService } from '../src/modules/developer/webhook.service.js';
 import { SmsGateProvider } from '../src/modules/messaging/providers/smsgate.provider.js';
 import { smsGateKeyService } from '../src/modules/messaging/services/smsgate-key.service.js';
+import { grantDeveloperPlan } from './helpers/developer-plan.js';
 
 const oauthService = new OAuthService();
 const webhookService = new WebhookService();
@@ -91,7 +93,7 @@ describe('Second-Pass Independent Security & Integrity Regressions', () => {
 
   it('1. Blocks OAuth bsk_at_ privilege escalation, multi-org switching, and missing scopes across all controllers', async () => {
     const owner = await authService.register({
-      email: 'dual-org-owner@brisksms.co.tz',
+      email: 'dual-org-owner@brisksms.app',
       password: 'Password123!',
       fullName: 'Dual Org Owner',
       organizationName: 'Org Alpha',
@@ -103,6 +105,7 @@ describe('Second-Pass Independent Security & Integrity Regressions', () => {
     });
     const orgBeta = orgBetaCreated.organization.id;
 
+    await grantDeveloperPlan(orgAlpha);
     // Issue bsk_at_ token scoped strictly to Org Alpha with ONLY PAYMENTS_READ
     const client = await oauthService.registerClient({
       organizationId: orgAlpha,
@@ -178,7 +181,7 @@ describe('Second-Pass Independent Security & Integrity Regressions', () => {
     for (const [method, url, body] of [
       ['POST', '/v1/organizations', { name: 'Illegal OAuth Org' }],
       ['GET', '/v1/organizations', undefined],
-      ['POST', `/v1/organizations/${orgAlpha}/invitations`, { email: 'evil@brisksms.co.tz', fullName: 'Evil', role: UserRole.OWNER }],
+      ['POST', `/v1/organizations/${orgAlpha}/invitations`, { email: 'evil@brisksms.app', fullName: 'Evil', role: UserRole.OWNER }],
       ['GET', '/v1/developer/api-keys', undefined],
       ['POST', '/v1/developer/api-keys', { name: 'Escalate Key', scopes: [ApiKeyScope.PAYMENTS_WRITE] }],
       ['POST', '/v1/oauth/clients', { name: 'Nested Client', redirectUris: ['https://evil.example/cb'] }],
@@ -197,7 +200,7 @@ describe('Second-Pass Independent Security & Integrity Regressions', () => {
 
   it('2. Prevents single-payment replay and concurrent double-spend on subscription checkout', async () => {
     const reg = await authService.register({
-      email: 'sub-replay@brisksms.co.tz',
+      email: 'sub-replay@brisksms.app',
       password: 'Password123!',
       fullName: 'Sub Owner',
       organizationName: 'Replay Defense Org',
@@ -205,6 +208,7 @@ describe('Second-Pass Independent Security & Integrity Regressions', () => {
     const orgId = reg.organizationId!;
     const stkId = randomUUID();
     const providerRef = `MPESA_SUB_REF_${Date.now()}`;
+    await dbStore.setPlatformSetting(BILLING_WORKSPACE_SETTING, orgId);
 
     await sql`
       INSERT INTO "stk_push_transactions" (
@@ -284,7 +288,7 @@ describe('Second-Pass Independent Security & Integrity Regressions', () => {
 
     // Corrupt ciphertext fail-closed behavior in WebhookService
     const reg = await authService.register({
-      email: 'webhook-corrupt@brisksms.co.tz',
+      email: 'webhook-corrupt@brisksms.app',
       password: 'Password123!',
       fullName: 'Webhook Owner',
       organizationName: 'Corrupt Webhook Org',
@@ -327,7 +331,7 @@ describe('Second-Pass Independent Security & Integrity Regressions', () => {
 
   it('4. SmsGateKeyService fails closed with DatabaseUnavailableError during PostgreSQL outage', async () => {
     const reg = await authService.register({
-      email: 'smsgate-failclosed@brisksms.co.tz',
+      email: 'smsgate-failclosed@brisksms.app',
       password: 'Password123!',
       fullName: 'Gateway Owner',
       organizationName: 'Gateway FailClosed Org',

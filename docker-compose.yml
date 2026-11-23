@@ -95,7 +95,7 @@ services:
       WEB_PORT: ${WEB_PORT:-4200}
     ports:
       - "${WEB_PORT:-4200}:4200"
-    command: ["bun", "run", "apps/web/src/server.ts"]
+    command: ["bun", "run", "apps/web/server.ts"]
     profiles: ["app", "full"]
 
   # Product B: Private Dedicated Gateway Service (Mode B)

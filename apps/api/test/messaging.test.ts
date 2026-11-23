@@ -82,16 +82,16 @@ describe('Product B: BriskSMS Cellular Gateway & Messaging Engine', () => {
 
     it('should resolve and normalize endpoint URLs safely', () => {
       assert.equal(
-        provider.resolveEndpoint('https://gateway.brisksms.com/api/v1'),
-        'https://gateway.brisksms.com/api/v1/messages',
+        provider.resolveEndpoint('https://gateway.brisksms.app/api/v1'),
+        'https://gateway.brisksms.app/api/v1/messages',
       );
       assert.equal(
         provider.resolveEndpoint('https://api.sms-gate.app/3rdparty/v1/'),
         'https://api.sms-gate.app/3rdparty/v1/messages',
       );
       assert.equal(
-        provider.resolveEndpoint('https://gateway.brisksms.com/api/3rdparty/v1/messages'),
-        'https://gateway.brisksms.com/api/3rdparty/v1/messages',
+        provider.resolveEndpoint('https://gateway.brisksms.app/api/3rdparty/v1/messages'),
+        'https://gateway.brisksms.app/api/3rdparty/v1/messages',
       );
       assert.throws(() => provider.resolveEndpoint('javascript:alert(1)'), /Invalid gateway URL scheme/);
       assert.throws(() => provider.resolveEndpoint('ftp://insecure.gateway/'), /Invalid gateway URL scheme/);
@@ -130,7 +130,7 @@ describe('Product B: BriskSMS Cellular Gateway & Messaging Engine', () => {
         const result = await provider.sendMessage(
           {
             mode: GatewayMode.MANAGED_GATEWAY,
-            baseUrl: 'https://gateway.brisksms.com/api/v1',
+            baseUrl: 'https://gateway.brisksms.app/api/v1',
             apiToken: 'smsgate_secret_key',
             defaultSimSlot: 2,
           },
@@ -145,7 +145,7 @@ describe('Product B: BriskSMS Cellular Gateway & Messaging Engine', () => {
 
         assert.equal(result.status, 'DISPATCHED');
         assert.equal(result.providerMessageId, 'msg_smsgate_verified_01');
-        assert.equal(interceptedUrl, 'https://gateway.brisksms.com/api/v1/messages');
+        assert.equal(interceptedUrl, 'https://gateway.brisksms.app/api/v1/messages');
         assert.equal(interceptedHeaders['Authorization'], 'Bearer smsgate_secret_key');
         assert.equal(interceptedHeaders['X-Idempotency-Key'], 'idem_test_998811');
 
@@ -232,13 +232,13 @@ describe('Product B: BriskSMS Cellular Gateway & Messaging Engine', () => {
     it('should configure Mode B (Managed BriskSMS Gateway) with default SIM 1', async () => {
       const config = await messagingService.updateGatewayConfig(orgId, {
         gatewayMode: GatewayMode.MANAGED_GATEWAY,
-        gatewayBaseUrl: 'https://gateway.brisksms.com/api/v1',
+        gatewayBaseUrl: 'https://gateway.brisksms.app/api/v1',
         apiToken: 'bsk_priv_token_9999',
         defaultSimSlot: 1,
       });
 
       assert.equal(config.gatewayMode, GatewayMode.MANAGED_GATEWAY);
-      assert.equal(config.gatewayBaseUrl, 'https://gateway.brisksms.com/api/v1');
+      assert.equal(config.gatewayBaseUrl, 'https://gateway.brisksms.app/api/v1');
       assert.equal(config.defaultSimSlot, 1);
     });
 

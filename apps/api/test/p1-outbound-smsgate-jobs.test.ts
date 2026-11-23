@@ -98,7 +98,7 @@ describe('P1: Android Outbound SMSGate Job Acquisition & Delivery Integrity', ()
     await dbStore.reset();
 
     const regA = await authService.register({
-      email: `smsgate-a-${randomUUID().slice(0, 6)}@brisksms.co.tz`,
+      email: `smsgate-a-${randomUUID().slice(0, 6)}@brisksms.app`,
       password: 'StrongPassword123!',
       fullName: 'Org A Admin',
       organizationName: 'Arusha Fiber Co',
@@ -114,7 +114,7 @@ describe('P1: Android Outbound SMSGate Job Acquisition & Delivery Integrity', ()
     await messagingService.purchaseCredits(orgAId, 50, `TOPUP-A-${randomUUID().slice(0, 6)}`);
 
     const regB = await authService.register({
-      email: `smsgate-b-${randomUUID().slice(0, 6)}@brisksms.co.tz`,
+      email: `smsgate-b-${randomUUID().slice(0, 6)}@brisksms.app`,
       password: 'StrongPassword123!',
       fullName: 'Org B Admin',
       organizationName: 'Mwanza Net Ltd',

@@ -38,7 +38,7 @@ The following table documents every environment variable referenced in the Brisk
 | `ENCRYPTION_MASTER_KEY` | `apps/api`, `apps/worker`, `packages/db` | **Required** | **YES (CRITICAL)** | Fallback in dev/test | **Fatal boot termination** in production if missing, < 32 chars, or in `INSECURE_DEFAULT_KEYS`. | 32-byte (or 64-hex char) AES-256-GCM master key used to encrypt device secrets, webhook secrets, and gateway credentials at rest. |
 | `JWT_ACCESS_SECRET` | `apps/api` | **Required** | **YES (CRITICAL)** | Dev fallback | Dev fallback in dev/test; required in production. | HMAC-SHA256 signing secret for short-lived merchant JWT access tokens (15-minute expiry). |
 | `CSRF_SECRET` | `apps/api` | **Required** | **YES (CRITICAL)** | Dev fallback | **Fatal error in production** if missing, < 32 chars, in `INSECURE_DEFAULT_KEYS`, or matches `JWT_ACCESS_SECRET` / `ENCRYPTION_MASTER_KEY`. | HMAC-SHA256 signing secret for double-submit CSRF cookie tokens with embedded timestamp verification. |
-| `ALLOWED_ORIGINS` | `apps/api` | **Required in Prod** | No | Localhost origins | In production, requests from unlisted origins return `403 CSRF_ORIGIN_MISMATCH`. Wildcard `*` strictly rejected. | Comma-separated list of authorized browser web console origins (e.g., `https://console.brisksms.com`). |
+| `ALLOWED_ORIGINS` | `apps/api` | **Required in Prod** | No | Localhost origins | In production, requests from unlisted origins return `403 CSRF_ORIGIN_MISMATCH`. Wildcard `*` strictly rejected. | Comma-separated list of authorized browser web console origins (e.g., `https://console.brisksms.app`). |
 | `CORS_ORIGIN` | `apps/api` | Optional | No | None | Merged with `ALLOWED_ORIGINS`. | Legacy/alternative comma-separated list of allowed CORS origins. |
 | `FRONTEND_URL` | `apps/api` | **Required in Prod** | No | None | Merged with `ALLOWED_ORIGINS`. | Canonical URL of the merchant web console for email links and CORS validation. |
 | `API_BASE_URL` | `apps/api`, `apps/worker` | **Required in Prod** | No | `http://localhost:3000` | Fallback to localhost. | Public canonical URL of the BriskSMS API used in webhook payloads and companion app pairing codes. |
@@ -57,13 +57,15 @@ The following table documents every environment variable referenced in the Brisk
 | `GOOGLE_CLIENT_ID` | `apps/api` | Required for Google SSO | No | None | Rejects Google Sign-In tokens when unset or audience mismatches. | Expected OAuth 2.0 `aud`/`azp` Client ID for Google ID token verification. |
 | `GOOGLE_NONCE_TTL_SECONDS` | `apps/api` | Optional | No | `300` | Clamped/validated to `30..900` seconds (fallback `300`). | Server-issued OpenID Connect `bsk_g_nonce` lifetime. |
 | `RESEND_API_KEY` | `apps/api` | Required for Email | **YES** | None | Logs configuration error and returns failure cleanly when unset. | Bearer API key for Resend transactional verification emails. |
-| `RESEND_FROM_EMAIL` | `apps/api` | Optional | No | `BriskSMS <verify@brisksms.com>` | Fallback to default verified address. | Sender identity for verification emails. |
+| `RESEND_FROM_EMAIL` | `apps/api` | Optional | No | `BriskSMS <verify@brisksms.app>` | Fallback to default verified address. | Sender identity for verification emails. |
 | `EMAIL_VERIFICATION_EXPIRY_HOURS` | `apps/api` | Optional | No | `24` | Fallback to 24 hours. | Lifetime of single-use `bsk_ev_...` verification tokens. |
 | `DISPATCH_PENDING_GRACE_SECONDS` / `DISPATCH_RECOVERY_INTERVAL_MS` | `apps/worker` | Optional | No | `60` / `30000` (or `10000`) | Safe integer defaults. | Stale `PENDING` SMSGate dispatch grace window and worker recovery sweep cadence. |
+| `HISTORY_RETENTION_DAYS` | `apps/worker` | Optional | No | `90` | A value that is not a number falls back to 90; values below 30 are raised to 30. | How long finished outbound SMS jobs and device commands are kept before `MaintenanceRunner` deletes them in small batches. |
 | `MAINTENANCE_INTERVAL_MS` / `MAINTENANCE_RETENTION_DAYS` | `apps/worker` | Optional | No | `3600000` / `30` | Safe integer defaults. | `MaintenanceRunner` cleanup schedule and retention window. |
 | `BRISKSMS_SILENT_LOGS` | `packages/db`, Tests | Optional | No | `false` | Fallback to standard logging. | When `'true'`, suppresses error logs on stdout/stderr during test runs. |
 | `CLIENT_ID` / `CLIENT_SECRET` | `packages/zapier-app` | Optional | **YES (`CLIENT_SECRET`)** | `brisksms_zapier_client` | Public client flow unless confidential secret set. | OAuth credentials for `@brisksms/zapier-app`. |
 | `BRISKSMS_API_KEY` / `BRISKSMS_DEVICE_TOKEN` / `BRISKSMS_SESSION_TOKEN` | CLI / Docs | Optional | **YES** | None | Client-side REST integration / helper env vars only (not required by API boot). | Sample env vars used by client helpers and REST developer portal snippets. |
+| `APP_RELEASE_VERSION_CODE` / `_VERSION_NAME` / `_APK_URL` / `_APK_SHA256` / `_NOTES` / `_MIN_SUPPORTED_VERSION_CODE` | `apps/api` | Optional | No | None (no release published) | Unset `APP_RELEASE_VERSION_CODE` means no update is offered. Once it is set, a missing name, a non-`https` or unparsable APK URL, a checksum that is not 64 hex characters, notes over 1000 characters, or a minimum above the version code makes `GET /v1/app/releases/latest` answer `503 APP_RELEASE_CONFIG_INVALID`. | Describes the newest direct-download APK. The Android `direct` build reads it to offer an in-app update; the `play` build never calls it. |
 
 ---
 
@@ -131,7 +133,7 @@ flowchart TD
 ### 3.3 Asynchronous Queues & Background Processing (Redis 7+ & BullMQ)
 
 #### `REDIS_URL`
-- **Format:** `redis://[:password@]host:port[/db]` (raw TCP `net.Socket` or Unix domain socket). Internal in-transit TLS (`rediss://`) is **NOT** implemented in `packages/db/src/redis.ts`, so Redis must run inside a private VPC subnet or localhost.
+- **Format:** `redis://[:password@]host:port[/db]` (raw TCP `net.Socket` or Unix domain socket) or `rediss://[:password@]host:port[/db]` (TLS via `tls.connect` in `packages/db/src/redis.ts`). Redis must still run inside a private VPC subnet or localhost.
 - **Staging Requirements:**
   - In staging/production, password authentication is mandatory.
   - Prefix/namespace separation is maintained via BullMQ queue configurations (`staging:bullmq:events`, `staging:bullmq:outbox`).

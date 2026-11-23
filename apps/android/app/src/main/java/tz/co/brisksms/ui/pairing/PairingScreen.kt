@@ -8,21 +8,22 @@ import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
@@ -39,7 +40,18 @@ import tz.co.brisksms.security.DevicePairingCoordinator
 import tz.co.brisksms.security.KeystoreManager
 import tz.co.brisksms.security.PairingCompletionPayload
 import tz.co.brisksms.security.PairingStateSink
+import tz.co.brisksms.R
+import tz.co.brisksms.ui.components.BriskCard
+import tz.co.brisksms.ui.components.BriskMark
+import tz.co.brisksms.ui.components.HairlineDivider
+import tz.co.brisksms.ui.components.PerforatedDivider
+import tz.co.brisksms.ui.components.PrimaryPillButton
+import tz.co.brisksms.ui.components.ScreenPadding
+import tz.co.brisksms.ui.components.SecondaryPillButton
+import tz.co.brisksms.ui.components.StatusKind
+import tz.co.brisksms.ui.components.StatusTag
 import tz.co.brisksms.ui.theme.BriskColors
+import tz.co.brisksms.ui.theme.BriskMonoStyle
 import tz.co.brisksms.ui.theme.BriskShapes
 import tz.co.brisksms.worker.TelemetryWorker
 import java.util.concurrent.TimeUnit
@@ -92,6 +104,8 @@ fun PairingScreen(
                     secureStorage.deviceToken = result.deviceToken
                     secureStorage.deviceId = result.deviceId
                     secureStorage.organizationId = result.organizationId
+                    secureStorage.organizationName = result.organizationName.ifBlank { null }
+                    secureStorage.accountType = result.accountType.ifBlank { null }
                     secureStorage.isPaired = true
                     secureStorage.isRevoked = false
                 }
@@ -220,6 +234,17 @@ fun PairingScreen(
         }
     }
 
+    LaunchedEffect(Unit) {
+        if (tz.co.brisksms.BuildConfig.DEBUG) {
+            val debugPayload = (context as? android.app.Activity)?.intent?.getStringExtra("debug_pair_payload")
+            if (!debugPayload.isNullOrBlank()) {
+                (context as? android.app.Activity)?.intent?.removeExtra("debug_pair_payload")
+                inputPayload = debugPayload
+                startPairingFlow(debugPayload)
+            }
+        }
+    }
+
     // Full-screen camera viewfinder if active
     if (isScanningActive) {
         BackHandler(enabled = true) {
@@ -239,111 +264,94 @@ fun PairingScreen(
     }
 
     // Default Enrollment / Manual Entry View
+    val fieldColors = OutlinedTextFieldDefaults.colors(
+        focusedContainerColor = BriskColors.cardContainer(),
+        unfocusedContainerColor = BriskColors.cardContainer(),
+        disabledContainerColor = BriskColors.cardContainer()
+    )
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(BriskColors.canvasBase())
             .systemBarsPadding()
             .imePadding()
-            .padding(24.dp)
-            .verticalScroll(rememberScrollState()),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = ScreenPadding, vertical = 24.dp)
     ) {
-        // Security Badge
-        Surface(
-            shape = BriskShapes.extraLarge,
-            color = if (isHardwareSecured) BriskColors.StatusVerified.copy(alpha = 0.15f) else BriskColors.StatusReview.copy(alpha = 0.15f),
-            modifier = Modifier.padding(bottom = 16.dp)
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(8.dp)
-                        .background(
-                            if (isHardwareSecured) BriskColors.StatusVerified else BriskColors.StatusReview,
-                            CircleShape
-                        )
-                )
-                Text(
-                    text = if (isHardwareSecured) "Hardware Keystore (TEE/StrongBox)" else "Standard Keystore",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = if (isHardwareSecured) BriskColors.StatusVerified else BriskColors.StatusReview
-                )
-            }
+        // Brand and key security
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            BriskMark(size = 28.dp)
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "BriskSMS",
+                style = MaterialTheme.typography.titleMedium,
+                color = BriskColors.textPrimary(),
+                modifier = Modifier.weight(1f)
+            )
+            StatusTag(
+                kind = if (isHardwareSecured) StatusKind.Positive else StatusKind.Review,
+                text = if (isHardwareSecured) "Hardware keystore" else "Standard keystore"
+            )
         }
 
-        Text(
-            text = "Pair Business Relay",
-            fontSize = 24.sp,
-            fontWeight = FontWeight.Bold,
-            color = BriskColors.TextPrimaryLight,
-            modifier = Modifier.padding(bottom = 8.dp)
-        )
+        Spacer(modifier = Modifier.height(32.dp))
 
         Text(
-            text = "Scan the QR code from the BriskSMS Web Console to authorize this Android handset as a secure gateway node.",
-            fontSize = 14.sp,
-            color = BriskColors.TextSecondaryLight,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+            text = "Pair this phone",
+            style = MaterialTheme.typography.headlineSmall,
+            color = BriskColors.textPrimary()
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = "Scan the QR code from the BriskSMS web console to authorize this phone as your business relay",
+            style = MaterialTheme.typography.bodyMedium,
+            color = BriskColors.textSecondary()
         )
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // Primary Action: Camera QR Scanner Button
-        Button(
-            onClick = {
-                val hasPermission = ContextCompat.checkSelfPermission(
-                    context,
-                    Manifest.permission.CAMERA
-                ) == PackageManager.PERMISSION_GRANTED
+        // Pairing slip
+        BriskCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(0.dp)) {
+            PairingCodeTarget(
+                modifier = Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .padding(top = 24.dp, bottom = 16.dp)
+            )
+            PerforatedDivider()
+            PrimaryPillButton(
+                text = "Scan QR code",
+                icon = R.drawable.ic_scan_line,
+                enabled = !isEnrolling,
+                onClick = {
+                    val hasPermission = ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.CAMERA
+                    ) == PackageManager.PERMISSION_GRANTED
 
-                if (hasPermission) {
-                    errorMessage = null
-                    isScanningActive = true
-                } else {
-                    cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
-                }
-            },
-            enabled = !isEnrolling,
-            shape = BriskShapes.extraLarge,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Color(0xFFE5853B), // BriskSMS Contrast Pill / Primary Accent
-                contentColor = Color.White
-            ),
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(52.dp)
-        ) {
-            Text(
-                text = "Scan Dashboard QR Code",
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Bold
+                    if (hasPermission) {
+                        errorMessage = null
+                        isScanningActive = true
+                    } else {
+                        cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                    }
+                },
+                modifier = Modifier.padding(16.dp)
             )
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(24.dp))
 
-        // Separator
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Divider(modifier = Modifier.weight(1f), color = BriskColors.BorderHairlineLight)
+        // Manual entry
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            HairlineDivider(modifier = Modifier.weight(1f))
             Text(
-                text = "OR ENTER MANUALLY",
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                color = BriskColors.TextTertiaryLight,
+                text = "Or enter the code",
+                style = MaterialTheme.typography.labelMedium,
+                color = BriskColors.textSecondary(),
                 modifier = Modifier.padding(horizontal = 12.dp)
             )
-            Divider(modifier = Modifier.weight(1f), color = BriskColors.BorderHairlineLight)
+            HairlineDivider(modifier = Modifier.weight(1f))
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -351,9 +359,11 @@ fun PairingScreen(
         OutlinedTextField(
             value = inputPayload,
             onValueChange = { inputPayload = it },
-            label = { Text("Pairing Token or QR JSON") },
-            placeholder = { Text("bsk_pair_... or {\"token\":...}") },
+            label = { Text("Pairing code or QR JSON") },
+            placeholder = { Text("bsk_pair_…", style = BriskMonoStyle) },
+            textStyle = BriskMonoStyle.copy(color = BriskColors.textPrimary()),
             shape = BriskShapes.medium,
+            colors = fieldColors,
             singleLine = false,
             maxLines = 3,
             modifier = Modifier.fillMaxWidth()
@@ -364,24 +374,33 @@ fun PairingScreen(
         OutlinedTextField(
             value = deviceLabel,
             onValueChange = { deviceLabel = it },
-            label = { Text("Device Label (Optional)") },
-            placeholder = { Text("e.g. Dar Office Gateway #1") },
+            label = { Text("Device label (optional)") },
+            placeholder = { Text("Dar office gateway 1") },
             shape = BriskShapes.medium,
+            colors = fieldColors,
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
         )
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(4.dp))
 
-        // Advanced Configuration toggle
+        // Custom server toggle
         TextButton(
             onClick = { isAdvancedOpen = !isAdvancedOpen },
-            modifier = Modifier.align(Alignment.Start)
+            contentPadding = PaddingValues(horizontal = 0.dp),
+            colors = ButtonDefaults.textButtonColors(contentColor = BriskColors.accentInk())
         ) {
             Text(
-                text = if (isAdvancedOpen) "Hide Server Options" else "Custom Server Options",
-                fontSize = 12.sp,
-                color = BriskColors.TextSecondaryLight
+                text = if (isAdvancedOpen) "Hide custom server" else "Use a custom server",
+                style = MaterialTheme.typography.labelMedium
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Icon(
+                painter = painterResource(R.drawable.ic_chevron_down),
+                contentDescription = null,
+                modifier = Modifier
+                    .size(16.dp)
+                    .rotate(if (isAdvancedOpen) 180f else 0f)
             )
         }
 
@@ -389,9 +408,11 @@ fun PairingScreen(
             OutlinedTextField(
                 value = customEndpoint,
                 onValueChange = { customEndpoint = it },
-                label = { Text("Custom API Base URL") },
-                placeholder = { Text("https://api.brisksms.co.tz") },
+                label = { Text("API base URL") },
+                placeholder = { Text("https://api.brisksms.app", style = BriskMonoStyle) },
+                textStyle = BriskMonoStyle.copy(color = BriskColors.textPrimary()),
                 shape = BriskShapes.medium,
+                colors = fieldColors,
                 singleLine = true,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -400,32 +421,83 @@ fun PairingScreen(
         }
 
         if (errorMessage != null) {
-            Text(
-                text = errorMessage ?: "",
-                color = BriskColors.StatusRejected,
-                fontSize = 13.sp,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(vertical = 8.dp)
-            )
+            Row(
+                modifier = Modifier.padding(vertical = 8.dp),
+                verticalAlignment = Alignment.Top
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_circle_x),
+                    contentDescription = null,
+                    tint = BriskColors.StatusRejected,
+                    modifier = Modifier
+                        .padding(top = 1.dp)
+                        .size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = errorMessage ?: "",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = BriskColors.textPrimary()
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        OutlinedButton(
-            onClick = {
-                startPairingFlow(inputPayload)
-            },
-            enabled = !isEnrolling && inputPayload.isNotBlank(),
-            shape = BriskShapes.extraLarge,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(48.dp)
-        ) {
-            if (isEnrolling) {
-                CircularProgressIndicator(color = BriskColors.ContrastPill, modifier = Modifier.size(22.dp))
-            } else {
-                Text(text = "Connect with Token", fontWeight = FontWeight.SemiBold)
+        SecondaryPillButton(
+            text = "Connect with code",
+            onClick = { startPairingFlow(inputPayload) },
+            enabled = inputPayload.isNotBlank(),
+            loading = isEnrolling
+        )
+    }
+}
+
+/**
+ * The pairing slip's visual: a QR code inside scan brackets with the BriskSMS mark at its center.
+ * Illustrative only; the real code is generated by the web console.
+ */
+@Composable
+private fun PairingCodeTarget(modifier: Modifier = Modifier) {
+    val ink = BriskColors.textPrimary()
+    val paper = BriskColors.cardContainer()
+    val bracket = BriskColors.textTertiary()
+    val modules = remember {
+        val random = java.util.Random(20261117L)
+        BooleanArray(21 * 21) { random.nextInt(100) < 45 }
+    }
+
+    Box(modifier = modifier.size(144.dp), contentAlignment = Alignment.Center) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val stroke = 2.dp.toPx()
+            val arm = 20.dp.toPx()
+            val lo = stroke / 2
+            val hi = size.width - stroke / 2
+            listOf(
+                Triple(lo, lo, 1f to 1f),
+                Triple(hi, lo, -1f to 1f),
+                Triple(lo, hi, 1f to -1f),
+                Triple(hi, hi, -1f to -1f)
+            ).forEach { (x, y, dir) ->
+                drawLine(bracket, Offset(x, y), Offset(x + dir.first * arm, y), stroke, cap = StrokeCap.Round)
+                drawLine(bracket, Offset(x, y), Offset(x, y + dir.second * arm), stroke, cap = StrokeCap.Round)
+            }
+
+            val cell = 5.dp.toPx()
+            val origin = (size.width - cell * 21) / 2
+            fun isFinder(r: Int, c: Int) = (r < 8 && c < 8) || (r < 8 && c > 12) || (r > 12 && c < 8)
+            fun isCenter(r: Int, c: Int) = r in 7..13 && c in 7..13
+            for (r in 0 until 21) for (c in 0 until 21) {
+                if (isFinder(r, c) || isCenter(r, c) || !modules[r * 21 + c]) continue
+                drawRect(ink, Offset(origin + c * cell, origin + r * cell), Size(cell, cell))
+            }
+            listOf(0 to 0, 0 to 14, 14 to 0).forEach { (r, c) ->
+                val topLeft = Offset(origin + c * cell, origin + r * cell)
+                drawRect(ink, topLeft, Size(cell * 7, cell * 7))
+                drawRect(paper, topLeft + Offset(cell, cell), Size(cell * 5, cell * 5))
+                drawRect(ink, topLeft + Offset(cell * 2, cell * 2), Size(cell * 3, cell * 3))
             }
         }
+        BriskMark(size = 28.dp)
     }
 }

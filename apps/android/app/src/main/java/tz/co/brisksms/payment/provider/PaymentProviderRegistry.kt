@@ -12,6 +12,14 @@ data class RegisteredPaymentApp(
     val description: String
 )
 
+enum class MessageVerdict(val senderIsSupported: Boolean) {
+    KEPT(true),
+    NOT_A_PAYMENT(true),
+    OUTGOING_MONEY(true),
+    PERSONAL_NUMBER(false),
+    OTHER_SENDER(false)
+}
+
 /**
  * Registry of Authorized Tanzanian Financial Notification Sources
  * Distinguishes verified Google Play Store application package identifiers from provisional aliases.
@@ -75,8 +83,20 @@ object PaymentProviderRegistry {
         "\\b(Umetuma|Umefanya malipo|Umelipa|Umetoa|Imetumwa|You have sent|You paid|Debit of|Withdrawn)\\b",
         RegexOption.IGNORE_CASE
     )
+    // The same incoming-credit phrases the server parser accepts, so nothing the server would reject is uploaded
     private val INCOMING_CREDIT_PATTERN = Regex(
-        "\\b(Umepokea|Umelipwa|You have received|have received|Credit of|Imethibitishwa|Confirmed)\\b",
+        "\\b(Umepokea|You have received|have received|Credit of)\\b",
+        RegexOption.IGNORE_CASE
+    )
+
+    // A payment message carries an amount and a transaction reference. These only check that each is present;
+    // reading the values stays on the server. Reference shapes: a leading code such as "QA12BC34DE Imethibitishwa",
+    // or a labelled one such as "Kumbukumbu namba: 987654", "Ref: FT2631589402" or "Transaction ID: AM88990011".
+    private val AMOUNT_PATTERN = Regex("\\b(?:Tsh|TZS)\\s*\\d", RegexOption.IGNORE_CASE)
+    private val REFERENCE_PATTERN = Regex(
+        "(?-i:^[A-Z0-9]{8,12})\\s+(?:Imethibitishwa|Confirmed)\\b|" +
+            "\\b(?:Kumbukumbu|Reference|Ref|Txn|Trans(?:action)?\\s*(?:ID|No)|Namba ya muamala)(?![A-Za-z])" +
+            "(?:\\s+(?:namba|no)(?![A-Za-z]))?\\.?\\s*(?::|ni)?\\s*[A-Za-z0-9.]+",
         RegexOption.IGNORE_CASE
     )
 
@@ -94,18 +114,29 @@ object PaymentProviderRegistry {
         return PERSONAL_PHONE_PATTERN.matches(trimmed)
     }
 
+    private fun isSupportedSender(name: String): Boolean {
+        return FINANCIAL_SENDER_SHORTCODES.any { code ->
+            name.equals(code, ignoreCase = true) || name.contains(code, ignoreCase = true)
+        }
+    }
+
     fun isFinancialShortcode(title: String, body: String): Boolean {
         val cleanTitle = title.trim()
         if (cleanTitle.isEmpty() || isPersonalPhoneSender(cleanTitle)) {
             return false
         }
-        val matchesSender = FINANCIAL_SENDER_SHORTCODES.any { code ->
-            cleanTitle.equals(code, ignoreCase = true) || cleanTitle.contains(code, ignoreCase = true)
-        }
-        if (!matchesSender) {
+        if (!isSupportedSender(cleanTitle)) {
             return false
         }
         return !OUTGOING_TRANSFER_PATTERN.containsMatchIn(body)
+    }
+
+    /** An incoming credit that also carries an amount and a transaction reference. */
+    fun looksLikePaymentMessage(body: String): Boolean {
+        val text = body.trim()
+        return INCOMING_CREDIT_PATTERN.containsMatchIn(text) &&
+            AMOUNT_PATTERN.containsMatchIn(text) &&
+            REFERENCE_PATTERN.containsMatchIn(text)
     }
 
     fun isEligibleNotificationSource(packageName: String, title: String, body: String): Boolean {
@@ -115,7 +146,27 @@ object PaymentProviderRegistry {
         if (isAuthorizedPackage(packageName)) {
             return !OUTGOING_TRANSFER_PATTERN.containsMatchIn(body)
         }
-        return isFinancialShortcode(title, body) && INCOMING_CREDIT_PATTERN.containsMatchIn(body)
+        return classifyMessage(title, body) == MessageVerdict.KEPT
+    }
+
+    /**
+     * An incoming SMS is kept only when its sender is a supported shortcode (never a personal number)
+     * and its text looks like an incoming payment.
+     */
+    fun isEligibleSmsSource(sender: String, body: String): Boolean {
+        return classifyMessage(sender, body) == MessageVerdict.KEPT
+    }
+
+    /** Why a text was kept or dropped. Only the verdict is ever counted, never the text. */
+    fun classifyMessage(sender: String, body: String): MessageVerdict {
+        val name = sender.trim()
+        return when {
+            isPersonalPhoneSender(name) -> MessageVerdict.PERSONAL_NUMBER
+            !isSupportedSender(name) -> MessageVerdict.OTHER_SENDER
+            OUTGOING_TRANSFER_PATTERN.containsMatchIn(body) -> MessageVerdict.OUTGOING_MONEY
+            !looksLikePaymentMessage(body) -> MessageVerdict.NOT_A_PAYMENT
+            else -> MessageVerdict.KEPT
+        }
     }
 
     fun getAppInfo(packageName: String): RegisteredPaymentApp? {

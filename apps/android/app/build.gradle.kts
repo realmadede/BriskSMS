@@ -33,11 +33,28 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "1.0.0"
-        buildConfigField("String", "DEFAULT_API_BASE_URL", "\"https://api.brisksms.com\"")
+        buildConfigField("String", "DEFAULT_API_BASE_URL", "\"https://api.brisksms.app\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary = true
+        }
+    }
+
+    // play: no SMS permissions, payment texts are read from the Messages app notification.
+    // direct: also receives payment SMS from supported shortcodes (RECEIVE_SMS), for download from the website,
+    // and updates itself (REQUEST_INSTALL_PACKAGES). play updates through Google Play only.
+    flavorDimensions += "distribution"
+    productFlavors {
+        create("play") {
+            dimension = "distribution"
+            buildConfigField("boolean", "SMS_PAYMENT_CAPTURE", "false")
+            buildConfigField("boolean", "SELF_UPDATE", "false")
+        }
+        create("direct") {
+            dimension = "distribution"
+            buildConfigField("boolean", "SMS_PAYMENT_CAPTURE", "true")
+            buildConfigField("boolean", "SELF_UPDATE", "true")
         }
     }
 

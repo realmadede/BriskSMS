@@ -14,7 +14,7 @@ import {
 import { dbStore } from '../src/core/store.js';
 import { AuthService } from '../src/modules/auth/auth.service.js';
 import { MessagingService } from '../src/modules/messaging/messaging.service.js';
-import { SubscriptionService } from '../src/modules/subscription/subscription.service.js';
+import { SubscriptionService, BILLING_WORKSPACE_SETTING } from '../src/modules/subscription/subscription.service.js';
 import { CatalogService } from '../src/modules/subscription/catalog.service.js';
 import { ReconciliationService } from '../src/modules/reconciliation/reconciliation.service.js';
 import { IngestionService } from '../src/modules/ingestion/ingestion.service.js';
@@ -110,6 +110,7 @@ describe('Milestone 1: Concurrency Safety, Ledger Separation & Financial Invaria
     // Purchase 500 SMS credits
     await messagingService.purchaseCredits(orgId, 500, 'SMS-PACK-500');
 
+    await dbStore.setPlatformSetting(BILLING_WORKSPACE_SETTING, orgId);
     // Seed verified STK settlement backing the subscription checkout paymentMethodRef
     await sql`
       INSERT INTO "stk_push_transactions" (

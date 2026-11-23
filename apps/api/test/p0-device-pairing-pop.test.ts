@@ -84,7 +84,7 @@ describe('P0: Android Device Pairing Proof-of-Possession & Adversarial Hardening
     delete process.env.PAIRING_CHALLENGE_TTL_SECONDS;
 
     const regA = await authService.register({
-      email: `owner-a-${randomUUID().slice(0, 6)}@brisksms.co.tz`,
+      email: `owner-a-${randomUUID().slice(0, 6)}@brisksms.app`,
       password: 'StrongPassword123!',
       fullName: 'Owner A',
       organizationName: 'Org Alpha Co',
@@ -98,7 +98,7 @@ describe('P0: Android Device Pairing Proof-of-Possession & Adversarial Hardening
     });
 
     const regB = await authService.register({
-      email: `owner-b-${randomUUID().slice(0, 6)}@brisksms.co.tz`,
+      email: `owner-b-${randomUUID().slice(0, 6)}@brisksms.app`,
       password: 'StrongPassword123!',
       fullName: 'Owner B',
       organizationName: 'Org Beta Co',
@@ -186,6 +186,8 @@ describe('P0: Android Device Pairing Proof-of-Possession & Adversarial Hardening
     assert.ok(enrolled.deviceToken.startsWith('bsk_dev_'));
     assert.equal(enrolled.publicKeyFingerprint, keys.fingerprint);
     assert.equal(enrolled.keyAlgorithm, 'EC_P256');
+    assert.equal(enrolled.organizationName, 'Org Alpha Co');
+    assert.equal(enrolled.accountType, 'ORGANIZATION');
 
     const storedDevice = await dbStore.getDeviceById(enrolled.deviceId, orgAId);
     assert.ok(storedDevice);
@@ -838,5 +840,90 @@ describe('P0: Android Device Pairing Proof-of-Possession & Adversarial Hardening
         }),
       (err: any) => err.code === 'PUBLIC_KEY_ALREADY_REGISTERED' && err.statusCode === 409,
     );
+  });
+
+  it('11. tells the phone when the paired account is personal so it can show the account name instead of an ID', async () => {
+    await sql`UPDATE "organizations" SET "account_type" = 'PERSONAL' WHERE "id" = ${orgAId}`;
+    const tokenRes = await deviceService.createPairingToken(orgAId, adminAId);
+    const keys = generateTestP256KeyPair();
+    const chRes = await makeHttpRequest('POST', '/v1/devices/pairing-challenge', {}, {
+      enrollmentToken: tokenRes.pairingToken,
+      publicKeyPem: keys.publicKeyBase64Der,
+      organizationId: orgAId,
+      keyAlgorithm: 'EC_P256',
+      signatureAlgorithm: 'SHA256_ECDSA',
+    });
+    const ch = chRes.json.data;
+
+    const pairRes = await makeHttpRequest('POST', '/v1/devices/pair', {}, {
+      enrollmentToken: tokenRes.pairingToken,
+      challengeId: ch.challengeId,
+      enrollmentId: ch.enrollmentId,
+      organizationId: ch.organizationId,
+      challengeSignature: signChallenge(keys, tokenRes.pairingToken, ch),
+      publicKeyPem: keys.publicKeyBase64Der,
+      deviceModel: 'Pixel 8',
+      manufacturer: 'Google',
+      androidVersion: '14',
+      appVersion: '1.0.0',
+      ingestionMode: DeviceIngestionMode.NOTIFICATION_LISTENER,
+    });
+
+    assert.equal(pairRes.statusCode, 200);
+    assert.equal(pairRes.json.data.accountType, 'PERSONAL');
+    assert.equal(pairRes.json.data.organizationName, 'Org Alpha Co');
+  });
+
+  it('12. lets a phone unpair itself with its own token, which frees its plan slot', async () => {
+    const tokenRes = await deviceService.createPairingToken(orgAId, adminAId);
+    const keys = generateTestP256KeyPair();
+    const chRes = await makeHttpRequest('POST', '/v1/devices/pairing-challenge', {}, {
+      enrollmentToken: tokenRes.pairingToken,
+      publicKeyPem: keys.publicKeyBase64Der,
+      organizationId: orgAId,
+      keyAlgorithm: 'EC_P256',
+      signatureAlgorithm: 'SHA256_ECDSA',
+    });
+    const ch = chRes.json.data;
+    const pairRes = await makeHttpRequest('POST', '/v1/devices/pair', {}, {
+      enrollmentToken: tokenRes.pairingToken,
+      challengeId: ch.challengeId,
+      enrollmentId: ch.enrollmentId,
+      organizationId: ch.organizationId,
+      challengeSignature: signChallenge(keys, tokenRes.pairingToken, ch),
+      publicKeyPem: keys.publicKeyBase64Der,
+      deviceModel: 'Pixel 8',
+      manufacturer: 'Google',
+      androidVersion: '14',
+      appVersion: '1.0.0',
+      ingestionMode: DeviceIngestionMode.NOTIFICATION_LISTENER,
+    });
+    const { deviceId, deviceToken } = pairRes.json.data;
+
+    // The plan counts ACTIVE devices, and this phone is one of them while it is paired.
+    const activeCount = async () => (await dbStore.getOrgDevices(orgAId)).filter((d) => d.status === 'ACTIVE').length;
+    assert.equal(await activeCount(), 1);
+
+    // Another device's token, or none, cannot unpair this one.
+    const wrong = await makeHttpRequest('POST', `/v1/devices/${deviceId}/disconnect`, { Authorization: 'Bearer bsk_dev_wrong' });
+    assert.equal(wrong.statusCode, 401);
+    assert.equal((await dbStore.getDeviceById(deviceId, orgAId))!.status, 'ACTIVE');
+
+    const ok = await makeHttpRequest('POST', `/v1/devices/${deviceId}/disconnect`, { Authorization: `Bearer ${deviceToken}` });
+    assert.equal(ok.statusCode, 200);
+    assert.equal(ok.json.data.status, 'REVOKED');
+    assert.equal((await dbStore.getDeviceById(deviceId, orgAId))!.status, 'REVOKED');
+
+    // The slot is free again, and the token no longer works.
+    assert.equal(await activeCount(), 0);
+    const next = await deviceService.createPairingToken(orgAId, adminAId);
+    assert.ok(next.pairingToken);
+    const again = await makeHttpRequest('POST', `/v1/devices/${deviceId}/disconnect`, { Authorization: `Bearer ${deviceToken}` });
+    assert.equal(again.statusCode, 403);
+    assert.equal(again.json.error.code, 'DEVICE_REVOKED');
+
+    const audits = await sql`SELECT "action", "actor_type" FROM "audit_logs" WHERE "organization_id" = ${orgAId} AND "action" = 'DEVICE_DISCONNECTED'`;
+    assert.equal(audits.length, 1);
+    assert.equal(audits[0]?.actor_type, 'DEVICE');
   });
 });

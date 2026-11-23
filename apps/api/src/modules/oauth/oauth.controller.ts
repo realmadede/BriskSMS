@@ -7,10 +7,13 @@ import {
 import { OAuthService } from './oauth.service.js';
 import { authService } from '../auth/auth.service.js';
 import { dbStore } from '../../core/store.js';
-import { ApiKeyScope, UserRole } from '@brisksms/shared';
+import { ApiKeyScope, FeatureKey, UserRole } from '@brisksms/shared';
 import { sql } from '@brisksms/db';
+import { entitlementService } from '../subscription/entitlement.service.js';
 
 const oauthService = new OAuthService();
+// OAuth is how the Zapier app connects, so a Zapier-only plan needs it as much as an API plan does
+const OAUTH_FEATURES = [FeatureKey.ZAPIER_INTEGRATION, FeatureKey.API_ACCESS];
 
 async function assertDeveloperAccess(orgId: string, userId: string): Promise<void> {
   const membership = await dbStore.getMembership(orgId, userId);
@@ -36,6 +39,7 @@ export function registerOAuthRoutes(router: Router): void {
     const body = req.body as Record<string, any>;
     const orgId = resolveAuthorizedTenantOrgId(req, body.organizationId);
     await assertDeveloperAccess(orgId, userId);
+    await entitlementService.assertAnyFeatureEnabled(orgId, OAUTH_FEATURES);
 
     if (!body.name || !body.redirectUris || !Array.isArray(body.redirectUris) || body.redirectUris.length === 0) {
       throw new HttpException(400, 'VALIDATION_ERROR', 'name and redirectUris array are required');
@@ -121,6 +125,7 @@ export function registerOAuthRoutes(router: Router): void {
     // Ensure authenticated session belongs to the client's organization
     resolveAuthorizedTenantOrgId(req, client.organizationId);
     await assertDeveloperAccess(client.organizationId, userId);
+    await entitlementService.assertAnyFeatureEnabled(client.organizationId, OAUTH_FEATURES);
 
     const allowedScopes = new Set<string>(Object.values(ApiKeyScope));
     const parsedScopes = rawScope ? rawScope.split(/[\s,]+/).filter(Boolean) : [];

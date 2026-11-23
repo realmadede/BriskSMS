@@ -16,11 +16,11 @@ Welcome to the **BriskSMS** engineering repository. This document defines the op
    - Differentiate strictly between verified facts, assumptions, and recommendations.
 
 3. **Product Boundaries (Non-Negotiable):**
-   - **Android & Web Only:** Android client for notification ingestion and Model B SMSGate relay; Web application (`apps/web`, currently lightweight Glisse HTML/CSS/JS portal served via `server.ts`, with Angular 19+ SPA planned) for administration. No iOS/Swift development.
+   - **Android & Web Only:** Android client (Kotlin + Jetpack Compose, two build flavors: `play` and `direct`) for payment-text capture and Model B SMSGate relay; Web application (`apps/web`, currently lightweight Glisse HTML/CSS/JS portal served via `server.ts`, with Angular 19+ SPA planned) for administration. No iOS/Swift development.
    - **Product Separation:** Product A (Payment Intelligence) and Product B (Bulk Messaging) are independently monetized and logically separate. Payment reconciliation must **never** require bulk messaging credits.
    - **Non-Custodial:** BriskSMS never holds customer funds, operates an escrow, or acts as a payment clearing house.
    - **No Automated Guesswork:** Financial decisions require deterministic rule matching. Uncertain matches must be routed to `REVIEW_REQUIRED` (human review). AI must never make authoritative payment settlement decisions.
-   - **Scoped SMS Processing:** Only authorized payment notifications from supported providers/banks may be processed. Personal messages must never be ingested or persisted.
+   - **Scoped SMS Processing:** Only authorized payment notifications from supported providers/banks may be processed. Personal messages must never be ingested or persisted. The `play` flavor requests no SMS permissions and reads payment texts only from the Messages app notification; the `direct` flavor (website download) additionally receives payment SMS from supported shortcodes via `RECEIVE_SMS`. Both apply the same provider/sender filter before anything is stored.
 
 ---
 
@@ -63,7 +63,7 @@ All AI agents (Google Antigravity, Claude Code, Cursor, Copilot, etc.) and contr
   2. [Step 2 description] → verify: [command / test / check]
   3. [Step 3 description] → verify: [command / test / check]
   ```
-- Run test suites (`bun run test`, `bun run typecheck`, `bun run build`, or Android `./gradlew testDebugUnitTest`), linters, or manual verification commands in your execution environment after each change. Do not declare a task complete until verification criteria pass.
+- Run test suites (`bun run test`, `bun run typecheck`, `bun run build`; for Android, from `apps/android`: `./gradlew testPlayDebugUnitTest testDirectDebugUnitTest` and `./gradlew lintPlayDebug lintDirectDebug`; `assembleDebug` builds both flavors), linters, or manual verification commands in your execution environment after each change. These are the same commands the CI jobs run (see §6.6). Do not declare a task complete until verification criteria pass.
 
 ### 2.5. Summary of Working Behavior
 These guidelines are functioning correctly when:
@@ -84,8 +84,12 @@ BriskSMS/
 ├── AGENTS.md                          # Universal agent instructions and repository governance
 ├── README.md                          # Repository overview and developer onboarding
 ├── LICENSE                            # Proprietary license (BriskSMS Team)
-├── package.json                       # Root workspace configuration
+├── TASKS.md                           # Open work checklist, ordered, collected from docs/
+├── package.json                       # Root workspace configuration (Bun workspaces, build/test/db scripts)
+├── bun.lock / tsconfig.json           # Locked dependencies and root TypeScript project references
+├── Dockerfile                         # Container image build
 ├── docker-compose.yml                 # Local development PostgreSQL and Redis
+├── .github/workflows/ci.yml           # CI: `verify` (typecheck, build, migrate, tests) and `android-verify` (unit tests, lint)
 ├── docs/                              # System specifications and documentation
 │   ├── android/                       # Android companion & SMSGate integration specs
 │   ├── architecture/                  # System architecture, monorepo, topology, & carrier readiness
@@ -102,15 +106,16 @@ BriskSMS/
 │   ├── deployment/                    # Cloudflare, Docker, CI/CD, and infrastructure ops
 │   └── CONTRIBUTING.md                # Contribution workflow and pull request rules
 ├── apps/
-│   ├── api/                           # Custom TypeScript/Bun HTTP Router backend (modular monolith)
-│   ├── worker/                        # Background queue consumer & recovery runner (`workers.ts`)
-│   ├── web/                           # Static Glisse web portal & console (`server.ts`, HTML/JS)
-│   └── android/                       # Kotlin + Jetpack Compose background relay application
+│   ├── api/                           # Custom TypeScript/Bun HTTP Router backend (modular monolith: src/core + src/modules/{account,admin,app-release,auth,developer,device,ingestion,messaging,oauth,organization,reconciliation,stk-push,subscription})
+│   ├── worker/                        # Background queue consumer & recovery runner (`src/workers.ts`, started via `main.ts`)
+│   ├── web/                           # Static Glisse web portal & console (`server.ts`, `src/*.html`, `main.ts`)
+│   └── android/                       # Kotlin + Jetpack Compose companion app (Gradle; flavors `play` and `direct`)
+│       └── app/src/{main,direct,test} # Shared code, direct-only SMS capture, JVM unit tests
 └── packages/
     ├── shared/                        # Shared TypeScript DTOs, enums, errors, and crypto/phone/currency utils
     ├── parser-engine/                 # Provider parsing, normalization, and hashing engine
     ├── ui/                            # Liquid Glass design system & optical refraction (Glisse)
-    ├── db/                            # Prisma schema, migrations, Bun.SQL client, Redis, and queues
+    ├── db/                            # Prisma schema + migrations (`prisma/`), Bun.SQL client, Redis, queues, migrate/seed CLI
     ├── zapier-app/                    # Official BriskSMS Zapier Platform integration app
     └── config/                        # Shared ESLint, Prettier, and TypeScript configs
 ```

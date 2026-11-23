@@ -50,7 +50,7 @@ describe('Milestone 2: Backend Device Authentication & Evidence Ingestion Endpoi
 
     // 3. Setup User A
     const userA = await dbStore.createUser({
-      email: 'merchant-a@brisksms.co.tz',
+      email: 'merchant-a@brisksms.app',
       passwordHash: 'scrypt:salt:hash',
       fullName: 'Merchant Admin A',
     });

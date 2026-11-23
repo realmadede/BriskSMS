@@ -15,7 +15,7 @@ BriskSMS balances the tactile warmth and editorial prestige of modern luxury pro
 
 ### Core Visual Attributes:
 1. **Warm Bone/Sand Atmosphere:** Reject sterile, cold grey SaaS backgrounds in favor of an ambient gradient transitioning from Bone (`#EAE6DF`) to Sand (`#DCD6CB`), framed by ultra-fine hairline strokes.
-2. **Bold Geometric Typography:** High-impact geometric grotesque typography (Plus Jakarta Sans / Inter Display) featuring tight letter spacing and distinct hierarchy.
+2. **Geometric Typography:** Geometric grotesque typography (Plus Jakarta Sans / Inter Display), weights 400 to 600 only, sentence case, with hierarchy from size and color instead of weight.
 3. **Pill Action Architecture:** High-contrast pill buttons utilizing Warm Ochre (`#C2B28F`) for primary actions and Deep Obsidian (`#121212`) for high-contrast secondary actions.
 4. **Selective Liquid Glass (Glisse Material):** Diffuse, hardware-accelerated translucent glass with specular rim reflections and optical refraction, reserved strictly for floating and focal surfaces.
 5. **Architectural Separation:**
@@ -38,6 +38,7 @@ All colors are defined as design tokens. Hardcoding raw hex values in components
 | `color-surface-solid` | `#F5F3EF` | Solid opaque surface for dense tables | Base |
 | `color-accent-primary`| `#C2B28F` | Warm Ochre / Sand Gold primary CTA pill | 3.5:1 (Pill background) |
 | `color-accent-hover`  | `#B2A27E` | Darkened Ochre hover state | 3.9:1 |
+| `color-accent-ink`    | `#6E5F3D` | Ochre used as text, links and focus rings on light surfaces (Ochre itself is ~2:1 as text) | **5.0:1 (WCAG AA)** |
 | `color-contrast-pill` | `#121212` | Deep Obsidian high-contrast action pill | 12.4:1 |
 | `color-text-primary`  | `#121212` | Primary headlines, titles, and amounts | **12.4:1 (WCAG AAA)** |
 | `color-text-secondary`| `#666666` | Secondary body text and labels | **4.8:1 (WCAG AA)** |
@@ -57,6 +58,8 @@ All colors are defined as design tokens. Hardcoding raw hex values in components
 | `color-text-secondary`| `#A0A0A8` | Secondary labels (6.2:1) |
 | `color-accent-primary`| `#D4C5A2` | Brightened Ochre for dark contrast |
 | `color-border-hairline`| `rgba(255, 255, 255, 0.12)` | Hairline stroke in dark mode |
+| `color-surface-raised` | `#2A2A2F` | Selected / raised surface step (e.g. active nav indicator) |
+| `color-status-rejected`| `#F07171` | Crimson as text on dark surfaces (`#D32F2F` is ~3.4:1 there) |
 
 ---
 
@@ -65,7 +68,7 @@ All colors are defined as design tokens. Hardcoding raw hex values in components
 BriskSMS utilizes **Plus Jakarta Sans** (with **Inter Display** as native fallback).
 
 ### Fluid Type Scale (CSS Clamp):
-- **Display Hero (`type-display`):** `clamp(40px, 6vw + 1rem, 76px)` | Weight: 700 | Tracking: `-0.035em` | Line Height: `1.05`
+- **Display Hero (`type-display`):** `clamp(40px, 6vw + 1rem, 76px)` | Weight: 600 | Tracking: `-0.035em` | Line Height: `1.05`
 - **Heading 1 (`type-h1`):** `clamp(28px, 3.5vw + 0.5rem, 44px)` | Weight: 600 | Tracking: `-0.025em` | Line Height: `1.15`
 - **Heading 2 (`type-h2`):** `clamp(22px, 2.5vw + 0.5rem, 32px)` | Weight: 600 | Tracking: `-0.02em` | Line Height: `1.2`
 - **Heading 3 (`type-h3`):** `clamp(18px, 1.5vw + 0.5rem, 24px)` | Weight: 600 | Tracking: `-0.015em` | Line Height: `1.3`
@@ -88,7 +91,9 @@ BriskSMS utilizes **Plus Jakarta Sans** (with **Inter Display** as native fallba
 - **Elevations & Ambient Shadows:**
   - `shadow-diffuse`: `0 8px 32px -4px rgba(45, 40, 30, 0.06), 0 1px 2px rgba(45, 40, 30, 0.04)`
   - `shadow-floating`: `0 16px 48px -8px rgba(45, 40, 30, 0.12), 0 2px 6px rgba(45, 40, 30, 0.06)`
+  - `shadow-button`: `0 2px 6px rgba(25, 20, 15, 0.14)` (primary pills; neutral, never an Ochre glow)
   - `shadow-glass-inset`: `inset 0 0 0 0.5px var(--brisk-border-hairline)`
+  - On the public pages these are the CSS variables `--shadow-diffuse`, `--shadow-floating` and `--shadow-button` in `apps/web/src/assets/css/site.css`. Resting cards use diffuse, hover states and floating objects use floating. Do not write one-off `box-shadow` values.
 
 ---
 
@@ -179,6 +184,16 @@ Every status indicator must display **both** an explicit symbol/icon and text:
   Modifier.briskGlass(cornerRadius = 18.dp)
   ```
 - Uses `RenderEffect.createBlurEffect()` on Android 12+ (API 31+) and translucent surface fallbacks on older Android releases (API 26–30).
+- Current implementation (`apps/android/app/src/main/java/tz/co/brisksms/ui/`):
+  - `theme/BriskTheme.kt` wraps the app (`MainActivity`) and maps every Material 3 color role to tokens, so no baseline purple can leak into fields, dialogs or focus states.
+  - Plus Jakarta Sans 400/500/600 is bundled in `res/font`; figures use tabular numerals; IDs, endpoints and references use `BriskMonoStyle`.
+  - Icons are Lucide SVGs converted to vector drawables (`res/drawable/ic_*.xml`) with a 1.5 stroke; licenses in `apps/android/THIRD_PARTY_NOTICES.md`.
+  - Shared building blocks live in `components/BriskComponents.kt` (`BriskCard`, `StatusTag`, `KeyValueRow`, pill buttons, `PerforatedDivider`).
+  - The five-tab bar is `GlassTabBar` (`components/GlassTabBar.kt`): a floating Liquid Glass capsule with a specular top rim, a neutral diffuse shadow and a glass lens that slides to the selected tab in 200ms. The fill is translucent without a backdrop blur (API 26 to 30 fallback; a real blur needs API 31+ and is not implemented), so a canvas-coloured fade sits behind it and scrolling screens add `LocalBottomBarInset` to their bottom padding.
+  - Android cards, dialogs and grouped lists use a 22dp radius (`BriskShapes.large`); the 18px `radius-card` above stays the web value. Android lens and sheet motion uses a stiff spring (damping 0.85, medium stiffness, about 200 to 250ms to settle) with a light haptic tick on selection, which replaces the 200ms ease-out rule on this platform.
+  - Payments and Messaging are lazy lists built from these pieces; Device health, Settings and Overview use `CollapsingScreen` (large title, collapsing top bar, static sections), and `DetailSheet` is the shared bottom sheet. The Payments screen (`ui/payment/PaymentIntelligenceScreen.kt`) is the reference for the iOS 26 structure: a 34sp large title that fades into a solid compact `GlassTopBar` on scroll, a `GlassSegmented` filter, per-day grouped inset lists (`groupedShape`, rows solid, no glass on the list) and a detail `ModalBottomSheet`. The top bar and sheet are opaque because there is no backdrop blur below Android 12. Glass material on Android is gradients and transforms only so it looks the same from API 26 up: `glassBrush` (lit from above, denser toward the lower edge) for the tab bar body, `GlassLens` (raised capsule with its own sheen, rim and shadow) for the tab bar and segmented control, and `rememberLensStretch` (the lens widens about 8% while it travels). Real backdrop blur needs API 31 and is deliberately not used.
+  - The receipt tear line (`PerforatedDivider`) is the app's signature detail and is used only on the pairing slip and the Overview "Today" card.
+  - Launcher icon (`res/mipmap-anydpi-v26/ic_launcher.xml`) and the in-app mark (`ic_brisk_mark.xml`) are drawn from the web mark `apps/web/src/assets/brand/favicon.svg`; there is one logo across platforms.
 
 ---
 
@@ -215,6 +230,10 @@ When generating or modifying UI code, automated agents must strictly avoid the f
 5. **No Constant Looping Animations or Disorienting Keyframes:**
    - ❌ Banned: `animate-pulse`, continuous border rotation, or bouncing elements on static cards.
    - ✅ Required: Functional micro-transitions ($\le 200\text{ms}$, ease-out) that strictly respect `prefers-reduced-motion`.
+   - **Public marketing exception (approved, `apps/web/src/index.html` and `developers.html` only):** the landing page may run slow ambient loops: drifting Ochre/Sand/white radial blobs (`.drift`), the supported-provider marquee, the Stage 02 relay `live-dot` pulse and phone float, the integrations code rain and the hero CTA shine. Both public pages may use the 450ms letter roll on button and nav-link hover. Both share one header (`apps/web/src/partials/header.html`, inserted by `server.ts`), a glass bar that condenses into a floating pill on scroll, and the shared interaction layer in `apps/web/src/assets/{css,js}/site.*`. That layer covers a dot cursor with a trailing ring that opens over clickable elements, secondary hero/CTA buttons pulled up to 12px toward the pointer, and "venom" on the primary Ochre buttons (header, hero, final CTA), where an SVG goo filter lets a chain of Ochre droplets stretch out of the pill toward the pointer. Keep venom to at most 3 buttons per viewport (the §5.3 filter budget). The pointer layer only switches on for a fine hovering pointer, and gives the native cursor and plain solid buttons back over inputs and code, on touch devices and under reduced motion. Blobs and code rain pause while off-screen, the marquee pauses on hover, and every one of them stops under `prefers-reduced-motion`. Pseudo-element animations need their own reduced-motion rule, because `*` does not match `::after`. The landing page also has a code-generated hero illustration (inline SVG, a payment slip matched to an invoice, 10s loop that pauses off-screen and shows its finished state under reduced motion, hidden below 1100px), a scroll-driven rail with numbered nodes on the payment journey, and numbered step circles with drawn connectors in "A clearer workflow". All three use only palette tokens and neutral shadows. None of this may appear in the merchant console (`console.html`) or the Android app, where rule #1 and rule #5 apply in full.
+   - **Setup guide exception (approved 22 November 2026 at the product owner's request, `apps/web/src/getting-started.html` only):** a 12s hero illustration loop (pairing code, scan, phone going Active) that pauses off-screen and shows its finished state under reduced motion; one-shot scroll reveals staggered within a group; a step number that pops in with a connector line that draws; hover lifts of at most 3px; the on-page link that marks the section being read. No drifting blobs, cursor layer, venom buttons or code rain. All of it stops under `prefers-reduced-motion`, and content stays fully visible without JavaScript or if the script fails to start (a 2.5s safety timer removes the hidden start state). The merchant console and Android app are still excluded.
+   - **Shadows and gradients:** shadows are neutral and come from the three elevation tokens in §4. A colored shadow or glow is banned. The one carve-out is the venom droplet filter on the primary Ochre buttons, which is part of the approved exception above. A gradient is allowed only as a neutral tone shift (e.g. the card surface), a mask or scrim, or inside the approved ambient effects (blobs, code rain, hero shine). Never a hue-to-hue gradient on a surface, text or border.
+   - **Type:** weights above 600 are banned, as are uppercase or wide-tracked labels (write labels in sentence case in the markup, not only through `text-transform`), negative tracking on text below about 20px, and exclamation marks in interface text.
 6. **No Abstract AI Art Tropes:**
    - ❌ Banned: Stock 3D glass robots, floating AI brains, circuit board textures, or generic futuristic blobs.
    - ✅ Required: Authentic financial data tables, device telemetry feeds, and provider badges (Vodacom, Mixx, Airtel, HaloPesa, CRDB, NMB).
@@ -226,7 +245,7 @@ When designing, refactoring, or auditing any UI screen (Angular Web or Jetpack C
 2. **Pass 2 — Color:** Verify all colors map to official tokens (`color-canvas-base`, `color-accent-primary`, etc.). Strip ungrounded dark neutrals and unapproved hex values.
 3. **Pass 3 — Icons:** Ensure icons are uniform, sized to 20px/24px with 1.5px stroke width. Eliminate purely decorative or mismatched icon sets.
 4. **Pass 4 — Copy:** Audit text for clarity and tone. Eliminate marketing fluff. Format financial currency strictly as `TZS` or `Tsh` with comma grouping (e.g., `TZS 50,000`).
-5. **Pass 5 — Typography:** Enforce the Plus Jakarta Sans / Inter Display type scale. Restrict font weights to 400 (body), 500 (metadata/captions), and 600 (headers). Enable `font-variant-numeric: tabular-nums` on all amounts.
+5. **Pass 5 — Typography:** Enforce the Plus Jakarta Sans / Inter Display type scale. Restrict font weights to 400 (body), 500 (metadata/captions), and 600 (headers and display); 700 and above are not used. Sentence-case all labels. Enable `font-variant-numeric: tabular-nums` on all amounts.
 6. **Pass 6 — Layout:** Validate alignment, responsive viewport stacking across breakpoints, and container max-widths. Ensure dense tables remain scannable without excessive whitespace.
 7. **Pass 7 — Details:** Refine micro-geometry: 0.5px hairline borders, pill radii (`9999px`) on action buttons, card radii (`18px`), and accessible high-contrast focus rings.
 8. **Pass 8 — Visuals:** Ensure focal elements (Liquid Glass cards, device health pills) have purpose. Check that Glisse glass is applied only to floating/focal elements and never to dense data tables.

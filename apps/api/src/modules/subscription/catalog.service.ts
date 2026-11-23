@@ -8,8 +8,8 @@ import {
 import { dbStore, SubscriptionPlanRecord, PlanVersionRecord } from '../../core/store.js';
 
 export class CatalogService {
-  async getPublicCatalog(): Promise<CommercialProductDto[]> {
-    const rawCatalog = await dbStore.getPublicCatalog();
+  async getPublicCatalog(includePrivate = false): Promise<CommercialProductDto[]> {
+    const rawCatalog = await dbStore.getPublicCatalog(undefined, includePrivate);
 
     return rawCatalog.map(({ product, plans }) => ({
       id: product.id,

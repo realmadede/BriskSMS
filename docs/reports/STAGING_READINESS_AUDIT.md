@@ -22,9 +22,9 @@ The BriskSMS monorepo is architecturally sound, thoroughly tested, and cryptogra
 
 Live staging deployment cannot proceed immediately until external administrative prerequisites and infrastructure configuration are established:
 1. **Push Local Commits to Remote:** Local branch is 13 commits ahead of `origin/main`. A controlled push is required to trigger remote CI verification on GitHub Actions.
-2. **Google Cloud OAuth 2.0 Web Client ID Provisioning:** Requires registering authorized JavaScript origins (`https://staging-console.brisksms.com`) and generating a real client ID.
-3. **Resend Domain Verification:** Requires configuring DKIM, SPF, and DMARC DNS records for `staging.brisksms.com` to prevent transactional verification emails from landing in spam or being rejected.
-4. **Staging Network Infrastructure & Edge Proxy:** Requires provisioning a PostgreSQL 16+ instance, a private-VPC Redis 7+ instance (no in-transit TLS in client), a reverse proxy with TLS 1.3 certificates sanitizing `X-Forwarded-For`, and DNS records pointing to the staging edge.
+2. **Google Cloud OAuth 2.0 Web Client ID Provisioning:** Requires registering authorized JavaScript origins (`https://staging-console.brisksms.app`) and generating a real client ID.
+3. **Resend Domain Verification:** Requires configuring DKIM, SPF, and DMARC DNS records for `staging.brisksms.app` to prevent transactional verification emails from landing in spam or being rejected.
+4. **Staging Network Infrastructure & Edge Proxy:** Requires provisioning a PostgreSQL 16+ instance, a private-VPC Redis 7+ instance (`rediss://` TLS supported by client), a reverse proxy with TLS 1.3 certificates sanitizing `X-Forwarded-For`, and DNS records pointing to the staging edge.
 
 ---
 
@@ -34,10 +34,10 @@ Live staging deployment cannot proceed immediately until external administrative
 |---|---|---|---|
 | **Repository Baseline & CI** | `REQUIRES EXTERNAL CONFIGURATION` | Remote CI Run #19 passed on commit `c7b4a50` (259 tests). Fresh local test suite on HEAD `5f590ac` passes 342/342 tests. Commits `a80f998`..`5f590ac` not yet tested remotely. | Controlled fast-forward push of local commits `a80f998` through `5f590ac` to `origin/main`. |
 | **API Runtime (`apps/api`)** | `VERIFIED BY AUTOMATED TEST` | Fast modular HTTP monolith, fail-closed crypto validation on boot, healthcheck at `/v1/health`. | Staging container/process supervisor configuration. |
-| **Database Migrations (`packages/db`)** | `VERIFIED BY AUTOMATED TEST` | **6/6 sequential migrations** applied cleanly on fresh PostgreSQL 16 instance with foreign keys and indexes. | Provisioning staging PostgreSQL instance and connection string. |
-| **Redis Broker (`packages/db/src/redis.ts`)** | `VERIFIED BY AUTOMATED TEST` | Custom RESP client with atomic Lua rate limiter (`incrWithExpire`). Fails closed in production/staging. | **No in-transit TLS.** Staging Redis must run in private VPC / localhost. |
+| **Database Migrations (`packages/db`)** | `VERIFIED BY AUTOMATED TEST` | **15/15 sequential migrations** applied cleanly on fresh PostgreSQL 16 instance with foreign keys and indexes (see section 6). | Provisioning staging PostgreSQL instance and connection string. |
+| **Redis Broker (`packages/db/src/redis.ts`)** | `VERIFIED BY AUTOMATED TEST` | Custom RESP client with atomic Lua rate limiter (`incrWithExpire`). Fails closed in production/staging. | `rediss://` TLS supported; staging Redis must still run in private VPC / localhost. |
 | **Background Worker (`apps/worker`)** | `VERIFIED BY AUTOMATED TEST` | Runs `DispatchRecoveryRunner`, `MaintenanceRunner`, and BullMQ consumers. Safe multi-worker CAS recovery. | Provisioning staging worker process supervisor. |
-| **Web Console (`apps/web`)** | `VERIFIED BY AUTOMATED TEST` | Lightweight static server (`server.ts`) serving `index.html`, `developers.html`, and `console.html`. | DNS record `staging-console.brisksms.com` and reverse proxy. |
+| **Web Console (`apps/web`)** | `VERIFIED BY AUTOMATED TEST` | Lightweight static server (`server.ts`) serving `index.html`, `developers.html`, and `console.html`. | DNS record `staging-console.brisksms.app` and reverse proxy. |
 | **Google Sign-In & Nonce Protection** | `REQUIRES EXTERNAL CONFIGURATION` | RS256 JWKS verification, kid rotation, azp validation, server-issued nonces, anti-prefetch/anti-navigation. | Provisioning Google OAuth Client ID in Google Cloud Console. |
 | **Resend Email Verification** | `REQUIRES EXTERNAL CONFIGURATION` | URL fragment tokens (`#token=...`), anti-enumeration resend, DB connection starvation prevention. | Provisioning Resend API key and DNS records (DKIM/SPF/DMARC). |
 | **Session Security & CSRF** | `VERIFIED BY AUTOMATED TEST` | HttpOnly Lax/Strict cookies, HMAC-SHA256 CSRF tokens, strict Fetch Metadata and Origin checks. | Cloudflare/Nginx reverse proxy must sanitize `X-Forwarded-For`. |
@@ -188,16 +188,16 @@ Ambiguous Statuses (UNCERTAIN):
   - `style-src`: `'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com/gsi/style`.
   - `font-src`: `'self' https://fonts.gstatic.com`.
   - `frame-src`: `https://accounts.google.com/gsi/`.
-  - `connect-src`: `'self' https://staging-api.brisksms.com https://accounts.google.com/gsi/`.
+  - `connect-src`: `'self' https://staging-api.brisksms.app https://accounts.google.com/gsi/`.
   - `img-src`: `'self' data: https:` (for provider icons and avatars).
 - **Corrected Proxy CSP Header:**
   ```text
-  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com/gsi/style; font-src 'self' https://fonts.gstatic.com; frame-src https://accounts.google.com/gsi/; connect-src 'self' https://staging-api.brisksms.com https://accounts.google.com/gsi/; img-src 'self' data: https:;
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com/gsi/style; font-src 'self' https://fonts.gstatic.com; frame-src https://accounts.google.com/gsi/; connect-src 'self' https://staging-api.brisksms.app https://accounts.google.com/gsi/; img-src 'self' data: https:;
   ```
 
 ### Redis Transport & VPC Isolation
-- **Transport Implementation:** `packages/db/src/redis.ts` connects via `net.createConnection` (raw unencrypted TCP) or Unix domain sockets (`/tmp/brisksms-redis/redis.sock`).
-- **TLS Support:** `NOT IMPLEMENTED`. Native in-transit TLS (`rediss://` or `tls.connect`) is not supported by `BriskRedisClient`.
+- **Transport Implementation:** `packages/db/src/redis.ts` connects via `net.createConnection` (raw unencrypted TCP) or Unix domain sockets (`/tmp/brisksms-redis/redis.sock`) for `redis://` URLs.
+- **TLS Support:** `IMPLEMENTED` (AUD-30). `rediss://` URLs connect via `tls.connect` with SNI set to the Redis host.
 - **Private Network Invariant:** Redis MUST be deployed on the local host (Unix socket or localhost loopback) or inside a private VPC subnet inaccessible from the public internet. Transmitting unencrypted Redis traffic across public networks is strictly prohibited.
 
 ---
@@ -341,7 +341,7 @@ flowchart TD
 
         subgraph Data Layer
             PG[("PostgreSQL 16+<br/>15 Migrations Applied (:5432)")]
-            Redis[("Redis 7+<br/>Atomic Lua Broker (:6379)<br/>[No TLS: VPC Isolated]")]
+            Redis[("Redis 7+<br/>Atomic Lua Broker (:6379)<br/>[VPC Isolated, rediss:// capable]")]
         end
     end
 
@@ -370,8 +370,8 @@ Before BriskSMS staging deployment can be executed, the following gates must be 
 2. [x] **Fresh Automated Test Suite:** 532/532 workspace tests (39 files) + 52/52 Android unit `@Test`s (11 suites) passing (`VERIFIED BY AUTOMATED TEST`).
 3. [ ] **Remote CI Push Synchronization:** Commit & push working tree to `origin/main` and verify GitHub Actions green (`PENDING AUTHORIZATION`).
 4. [ ] **Reverse Proxy Header Sanitization:** Ensure proxy overwrites `X-Forwarded-For` with `$remote_addr` and set `TRUST_PROXY=true` (`REQUIRES EXTERNAL CONFIGURATION`).
-5. [ ] **Google Cloud Web Client ID:** Register authorized origin `https://staging-console.brisksms.com` (`REQUIRES EXTERNAL CONFIGURATION`).
-6. [ ] **Resend DNS Setup:** Configure DKIM, SPF, and DMARC for `staging.brisksms.com` (`REQUIRES EXTERNAL CONFIGURATION`).
+5. [ ] **Google Cloud Web Client ID:** Register authorized origin `https://staging-console.brisksms.app` (`REQUIRES EXTERNAL CONFIGURATION`).
+6. [ ] **Resend DNS Setup:** Configure DKIM, SPF, and DMARC for `staging.brisksms.app` (`REQUIRES EXTERNAL CONFIGURATION`).
 7. [ ] **Private VPC Redis:** Ensure Redis runs within private network without public exposure (`REQUIRES EXTERNAL CONFIGURATION`).
 8. [ ] **PostgreSQL 16 Deployment:** Apply all 15 migrations to staging database (`REQUIRES EXTERNAL CONFIGURATION`).
 9. [ ] **Android Companion Test:** Install debug APK and pair via QR Keystore handshake (`REQUIRES LIVE STAGING TEST`).

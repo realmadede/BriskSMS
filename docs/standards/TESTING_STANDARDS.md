@@ -2,7 +2,7 @@
 
 **Last Synced:** 2026-11-16  
 **Test Frameworks:** `bun test` with `node:test` & `node:assert/strict` (Backend, Worker, Web, Shared Packages), JUnit 4 (`4.13.2`) + Mockito/OkHttp MockWebServer (Android JVM Unit Tests), Playwright E2E *(Deferred Phase 7+/8)*  
-**Current Verified Baseline:** `532` passing tests across `39` workspace files (`bun run test`) + `11` Android unit test classes (`52` `@Test` methods)  
+**Current Verified Baseline:** `544` passing tests across `41` workspace files (`bun run test`, verified 2026-11-17 on PostgreSQL 18 with all 15 migrations) + `10` Android unit test classes (`41` `@Test` methods)  
 
 ---
 
@@ -44,7 +44,7 @@
 
 ## 4. Android & Web Verification Standards
 
-- **Android (`apps/android/`):** Run under Temurin JDK `17` via `./gradlew testDebugUnitTest compileDebugKotlin assembleDebug --offline --no-daemon` (covering all 11 JUnit classes / 52 `@Test` methods plus APK assembly). Physical device instrumented tests (`androidTest`) remain a Phase 8 hardware prerequisite.
+- **Android (`apps/android/`):** Run under Temurin JDK `17` via `./gradlew testDebugUnitTest compileDebugKotlin assembleDebug --offline --no-daemon` (covering all 10 JUnit classes / 41 `@Test` methods plus APK assembly). Physical device instrumented tests (`androidTest`) remain a Phase 8 hardware prerequisite.
 - **Web Portal (`apps/web/test/web-server.test.ts`):** Verify Node HTTP route status codes, security headers, `/assets/` encoded/unencoded path traversal blocking, XSS escaping, CSV/SpreadsheetML parsing honesty, and REST docs alignment.
 
 ---

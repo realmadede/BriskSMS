@@ -86,7 +86,7 @@ describe('Milestone 1: Redis/BullMQ Queues, Transactional Outbox & Operational O
     await redis.flushDb();
 
     const reg = await authService.register({
-      email: 'ops@brisksms.co.tz',
+      email: 'ops@brisksms.app',
       password: 'StrongPassword123!',
       fullName: 'Ops Engineer',
       organizationName: 'Ops Telecom',

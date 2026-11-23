@@ -25,7 +25,10 @@ data class PairingCompletionPayload(
     val deviceToken: String,
     val publicKeyFingerprint: String,
     val keyAlgorithm: String,
-    val syncIntervalSeconds: Int
+    val syncIntervalSeconds: Int,
+    /** For display only. Blank when the server did not send them. */
+    val organizationName: String = "",
+    val accountType: String = ""
 )
 
 class PairingApiException(

@@ -113,7 +113,7 @@ describe('Distributed Access-Token Revocation Consistency Suite', () => {
 
     // Register user on Instance A
     const regRes = await makeRequest(instanceA, 'POST', '/v1/auth/register', {}, {
-      email: 'user1@brisksms.co.tz',
+      email: 'user1@brisksms.app',
       password: 'SecurePassword123!',
       fullName: 'User One',
       organizationName: 'Brisk Enterprises',
@@ -127,14 +127,14 @@ describe('Distributed Access-Token Revocation Consistency Suite', () => {
       Authorization: `Bearer ${accessToken}`,
     });
     assert.equal(meA.statusCode, 200);
-    assert.equal(meA.json.data.user.email, 'user1@brisksms.co.tz');
+    assert.equal(meA.json.data.user.email, 'user1@brisksms.app');
 
     // Instance B (separate in-memory replica) authenticates same user with same token
     const meB = await makeRequest(instanceB, 'GET', '/v1/auth/me', {
       Authorization: `Bearer ${accessToken}`,
     });
     assert.equal(meB.statusCode, 200);
-    assert.equal(meB.json.data.user.email, 'user1@brisksms.co.tz');
+    assert.equal(meB.json.data.user.email, 'user1@brisksms.app');
   });
 
   it('2. Instance A revokes family via logout -> Instance B immediately rejects access token via shared Redis lookup', async () => {
@@ -145,7 +145,7 @@ describe('Distributed Access-Token Revocation Consistency Suite', () => {
 
     // Register on Instance A
     const regRes = await makeRequest(instanceA, 'POST', '/v1/auth/register', {}, {
-      email: 'logout_target@brisksms.co.tz',
+      email: 'logout_target@brisksms.app',
       password: 'SecurePassword123!',
       fullName: 'Logout User',
       organizationName: 'Brisk Org',
@@ -209,7 +209,7 @@ describe('Distributed Access-Token Revocation Consistency Suite', () => {
 
     // Step 1: Register -> Generates (T1, A1)
     const regRes = await makeRequest(instanceA, 'POST', '/v1/auth/register', {}, {
-      email: 'replay_victim@brisksms.co.tz',
+      email: 'replay_victim@brisksms.app',
       password: 'SecurePassword123!',
       fullName: 'Replay Victim',
       organizationName: 'Brisk Org',
@@ -265,7 +265,7 @@ describe('Distributed Access-Token Revocation Consistency Suite', () => {
 
     // Family 1 (User 1)
     const u1 = await makeRequest(instanceA, 'POST', '/v1/auth/register', {}, {
-      email: 'user_comp@brisksms.co.tz',
+      email: 'user_comp@brisksms.app',
       password: 'SecurePassword123!',
       fullName: 'Compromised User',
       organizationName: 'Org 1',
@@ -275,7 +275,7 @@ describe('Distributed Access-Token Revocation Consistency Suite', () => {
 
     // Family 2 (User 2)
     const u2 = await makeRequest(instanceA, 'POST', '/v1/auth/register', {}, {
-      email: 'user_safe@brisksms.co.tz',
+      email: 'user_safe@brisksms.app',
       password: 'SecurePassword123!',
       fullName: 'Safe User',
       organizationName: 'Org 2',
@@ -311,13 +311,13 @@ describe('Distributed Access-Token Revocation Consistency Suite', () => {
       Authorization: `Bearer ${token2}`,
     });
     assert.equal(resA2.statusCode, 200);
-    assert.equal(resA2.json.data.user.email, 'user_safe@brisksms.co.tz');
+    assert.equal(resA2.json.data.user.email, 'user_safe@brisksms.app');
 
     const resB2 = await makeRequest(instanceB, 'GET', '/v1/auth/me', {
       Authorization: `Bearer ${token2}`,
     });
     assert.equal(resB2.statusCode, 200);
-    assert.equal(resB2.json.data.user.email, 'user_safe@brisksms.co.tz');
+    assert.equal(resB2.json.data.user.email, 'user_safe@brisksms.app');
   });
 
   it('5. Replica with cold memory cache relies on shared Redis lookup without pub/sub', async () => {
@@ -326,7 +326,7 @@ describe('Distributed Access-Token Revocation Consistency Suite', () => {
 
     // Register on Instance A
     const regRes = await makeRequest(instanceA, 'POST', '/v1/auth/register', {}, {
-      email: 'cold_replica@brisksms.co.tz',
+      email: 'cold_replica@brisksms.app',
       password: 'SecurePassword123!',
       fullName: 'Cold User',
       organizationName: 'Brisk Org',
@@ -364,7 +364,7 @@ describe('Distributed Access-Token Revocation Consistency Suite', () => {
 
     // Register user
     const regRes = await makeRequest(instanceA, 'POST', '/v1/auth/register', {}, {
-      email: 'redis_outage_user@brisksms.co.tz',
+      email: 'redis_outage_user@brisksms.app',
       password: 'SecurePassword123!',
       fullName: 'Outage User',
       organizationName: 'Brisk Org',
@@ -374,7 +374,7 @@ describe('Distributed Access-Token Revocation Consistency Suite', () => {
 
     // Register second valid user
     const regRes2 = await makeRequest(instanceA, 'POST', '/v1/auth/register', {}, {
-      email: 'valid_survivor@brisksms.co.tz',
+      email: 'valid_survivor@brisksms.app',
       password: 'SecurePassword123!',
       fullName: 'Valid Survivor',
       organizationName: 'Brisk Org 2',
@@ -412,7 +412,7 @@ describe('Distributed Access-Token Revocation Consistency Suite', () => {
         Authorization: `Bearer ${validToken}`,
       });
       assert.equal(checkValid.statusCode, 200);
-      assert.equal(checkValid.json.data.user.email, 'valid_survivor@brisksms.co.tz');
+      assert.equal(checkValid.json.data.user.email, 'valid_survivor@brisksms.app');
     } finally {
       setSimulatedRedisOutage(false);
     }
@@ -423,7 +423,7 @@ describe('Distributed Access-Token Revocation Consistency Suite', () => {
     const instanceB = createApp({ tokenBlacklist: blacklistB });
 
     const regRes = await makeRequest(instanceB, 'POST', '/v1/auth/register', {}, {
-      email: 'fail_closed@brisksms.co.tz',
+      email: 'fail_closed@brisksms.app',
       password: 'SecurePassword123!',
       fullName: 'Fail Closed',
       organizationName: 'Brisk Org',
@@ -453,7 +453,7 @@ describe('Distributed Access-Token Revocation Consistency Suite', () => {
     const instanceA = createApp({ tokenBlacklist: new Set<string>() });
 
     const regRes = await makeRequest(instanceA, 'POST', '/v1/auth/register', {}, {
-      email: 'db_down_revoke@brisksms.co.tz',
+      email: 'db_down_revoke@brisksms.app',
       password: 'SecurePassword123!',
       fullName: 'DB Down',
       organizationName: 'Brisk Org',
@@ -489,7 +489,7 @@ describe('Distributed Access-Token Revocation Consistency Suite', () => {
     const instanceB = createApp({ tokenBlacklist: blacklistB });
 
     const regRes = await makeRequest(instanceA, 'POST', '/v1/auth/register', {}, {
-      email: 'redis_restart@brisksms.co.tz',
+      email: 'redis_restart@brisksms.app',
       password: 'SecurePassword123!',
       fullName: 'Restart User',
       organizationName: 'Brisk Org',
@@ -567,7 +567,7 @@ describe('Distributed Access-Token Revocation Consistency Suite', () => {
 
     // Create chain T1 -> T2 -> T3, A1, A2, A3
     const regRes = await makeRequest(instanceA, 'POST', '/v1/auth/register', {}, {
-      email: 'chain_test@brisksms.co.tz',
+      email: 'chain_test@brisksms.app',
       password: 'SecurePassword123!',
       fullName: 'Chain User',
       organizationName: 'Brisk Org',
@@ -610,7 +610,7 @@ describe('Distributed Access-Token Revocation Consistency Suite', () => {
     // Default createApp() without arguments uses default global tokenBlacklist
     const defaultApp = createApp();
     const regRes = await makeRequest(defaultApp, 'POST', '/v1/auth/register', {}, {
-      email: 'default_compat@brisksms.co.tz',
+      email: 'default_compat@brisksms.app',
       password: 'SecurePassword123!',
       fullName: 'Compat User',
       organizationName: 'Brisk Org',

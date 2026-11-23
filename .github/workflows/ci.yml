@@ -155,7 +155,7 @@ jobs:
         working-directory: apps/android
         run: |
           set -e -o pipefail
-          ./gradlew testDebugUnitTest --no-daemon --stacktrace 2>&1 | tee unit-tests.log || {
+          ./gradlew testPlayDebugUnitTest testDirectDebugUnitTest --no-daemon --stacktrace 2>&1 | tee unit-tests.log || {
             status=$?
             echo "## Android Unit Tests Failed" >> "$GITHUB_STEP_SUMMARY"
             echo '```text' >> "$GITHUB_STEP_SUMMARY"
@@ -187,7 +187,7 @@ jobs:
         working-directory: apps/android
         run: |
           set -e -o pipefail
-          ./gradlew lintDebug --no-daemon --stacktrace 2>&1 | tee lint.log || {
+          ./gradlew lintPlayDebug lintDirectDebug --no-daemon --stacktrace 2>&1 | tee lint.log || {
             status=$?
             echo "## Android Lint Failed" >> "$GITHUB_STEP_SUMMARY"
             echo '```text' >> "$GITHUB_STEP_SUMMARY"

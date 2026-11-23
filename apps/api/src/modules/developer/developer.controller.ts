@@ -9,7 +9,8 @@ import { ApiKeyService } from './api-key.service.js';
 import { WebhookService } from './webhook.service.js';
 import { DeveloperActionService } from './developer-action.service.js';
 import { dbStore } from '../../core/store.js';
-import { ApiKeyScope, BriskError, OutboxStatus, UserRole } from '@brisksms/shared';
+import { ApiKeyScope, BriskError, FeatureKey, OutboxStatus, UserRole } from '@brisksms/shared';
+import { entitlementService } from '../subscription/entitlement.service.js';
 import { BullQueue, DatabaseUnavailableError, QUEUE_NAMES, sql } from '@brisksms/db';
 import { authService } from '../auth/auth.service.js';
 import { MessagingService } from '../messaging/messaging.service.js';
@@ -58,6 +59,7 @@ export function registerDeveloperRoutes(router: Router): void {
     const body = req.body as Record<string, any>;
     const orgId = resolveAuthorizedTenantOrgId(req, body.organizationId);
     await assertDeveloperAccess(orgId, userId);
+    await entitlementService.assertFeatureEnabled(orgId, FeatureKey.API_ACCESS);
 
     if (!body.name || !body.scopes || !Array.isArray(body.scopes) || body.scopes.length === 0) {
       throw new HttpException(400, 'VALIDATION_ERROR', 'name and non-empty scopes array are required');
@@ -105,6 +107,7 @@ export function registerDeveloperRoutes(router: Router): void {
     const body = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, any>;
     const orgId = resolveAuthorizedTenantOrgId(req, body.organizationId || req.query.organizationId);
     await assertDeveloperAccess(orgId, userId);
+    await entitlementService.assertFeatureEnabled(orgId, FeatureKey.API_ACCESS);
 
     try {
       const result = await apiKeyService.rotateApiKey(orgId, keyId);
@@ -144,6 +147,7 @@ export function registerDeveloperRoutes(router: Router): void {
     const body = req.body as Record<string, any>;
     const orgId = resolveAuthorizedTenantOrgId(req, body.organizationId);
     await assertDeveloperAccess(orgId, userId);
+    await entitlementService.assertFeatureEnabled(orgId, FeatureKey.WEBHOOK_ACCESS);
     await authService.checkRateLimit(`dev_webhook_${orgId}`, 30, 60_000);
 
     if (!body.url || !body.subscribedEvents || !Array.isArray(body.subscribedEvents)) {

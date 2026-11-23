@@ -4,1868 +4,24 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>BriskSMS — Payment Intelligence & Business Messaging</title>
-  <link rel="icon" type="image/svg+xml" href="/assets/brand/favicon.svg">
+  <link rel="icon" type="image/svg+xml" href="assets/brand/favicon.svg?v=2">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-  <style>
-    :root {
-      --bg-canvas: #F4F1EA;
-      --bg-bone: #EAE6DF;
-      --bg-sand: #DCD6CB;
-      --bg-card: linear-gradient(180deg, #EBE7DE 0%, #E9E4DA 45%, #E0D9CB 100%);
-      --accent-sand: #C6B480;
-      --accent-sand-hover: #b8a674;
-      --color-dark: #0B0A09;
-      --color-dark-surface: #141311;
-      --text-main: #0B0A09;
-      --text-sub: #54514C;
-      --text-muted: #827E77;
-      --border-dark: #0B0A09;
-      --border-subtle: rgba(11, 10, 9, 0.12);
-      --font-stack: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-      --font-mono: 'JetBrains Mono', monospace;
-
-      /* Authentic Glisse Liquid Glass Tokens */
-      --glisse-blur: 20px;
-      --glisse-surface: rgba(255, 255, 255, 0.72);
-      --glisse-edge: rgba(11, 10, 9, 0.08);
-      --glisse-shadow: 0 16px 40px -10px rgba(35, 30, 24, 0.1), 0 2px 6px rgba(35, 30, 24, 0.04);
-    }
-
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-      -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
-    }
-
-    html {
-      scroll-behavior: smooth;
-      overflow-x: hidden;
-      max-width: 100vw;
-    }
-
-    body {
-      background-color: var(--bg-canvas);
-      font-family: var(--font-stack);
-      color: var(--text-main);
-      line-height: 1.55;
-      overflow-x: hidden;
-      max-width: 100vw;
-      padding-top: 72px;
-    }
-
-    /* Anchor target offset for fixed navigation bar */
-    [id] {
-      scroll-margin-top: 84px;
-    }
-
-
-    /* 3D DYNAMIC CHROME ATMOSPHERE (Across all website sections) */
-    .atmospheric-sphere {
-      position: absolute;
-      pointer-events: none;
-      z-index: 2;
-      will-change: transform;
-      filter: drop-shadow(0 16px 36px rgba(35, 28, 20, 0.14));
-    }
-    .sphere-platform {
-      right: 2%;
-      top: 60px;
-      width: 110px;
-      height: 110px;
-      opacity: 0.92;
-    }
-    .sphere-payment {
-      left: -20px;
-      top: 240px;
-      width: 150px;
-      height: 150px;
-      opacity: 0.85;
-      filter: blur(1.5px) drop-shadow(0 20px 40px rgba(35, 28, 20, 0.16));
-    }
-    .sphere-messaging {
-      right: -10px;
-      top: 320px;
-      width: 95px;
-      height: 95px;
-      opacity: 0.9;
-    }
-    .sphere-ledger {
-      left: 3%;
-      bottom: 80px;
-      width: 120px;
-      height: 120px;
-      opacity: 0.92;
-    }
-    .sphere-cta {
-      right: 6%;
-      bottom: 25px;
-      width: 80px;
-      height: 80px;
-      opacity: 0.95;
-    }
-
-    /* Container Utility */
-    .container {
-      width: 100%;
-      max-width: 1240px;
-      margin: 0 auto;
-      padding: 0 1.5rem;
-    }
-
-    /* Global Typography Styles */
-    .eyebrow {
-      font-size: 0.75rem;
-      font-weight: 700;
-      letter-spacing: 0.18em;
-      text-transform: uppercase;
-      color: var(--text-muted);
-      margin-bottom: 0.85rem;
-      display: block;
-      width: 100%;
-    }
-
-    .section-title {
-      font-size: clamp(2rem, 3.8vw, 3.1rem);
-      font-weight: 700;
-      line-height: 1.12;
-      letter-spacing: -0.035em;
-      color: var(--text-main);
-      margin-bottom: 1.25rem;
-      display: block;
-      width: 100%;
-    }
-
-    .section-desc {
-      font-size: clamp(0.95rem, 1.25vw, 1.05rem);
-      color: var(--text-sub);
-      line-height: 1.68;
-      max-width: 680px;
-    }
-
-    /* Kinetic Typography Engine (Scroll-Driven Word-by-Word Reveals) */
-    .kinetic-text {
-      display: block;
-      width: 100%;
-    }
-
-    .kinetic-word {
-      display: inline-block;
-      opacity: 0.12;
-      transform: translateY(8px);
-      transition: opacity 0.5s cubic-bezier(0.16, 1, 0.3, 1), transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
-      will-change: opacity, transform;
-    }
-
-    .kinetic-text.revealed .kinetic-word {
-      opacity: 1;
-      transform: translateY(0);
-    }
-
-
-    /* Scroll-Driven Dynamic Building Engine */
-    .scroll-build {
-      opacity: 0.15;
-      transform: translateY(28px);
-      transition: opacity 0.65s cubic-bezier(0.16, 1, 0.3, 1), transform 0.65s cubic-bezier(0.16, 1, 0.3, 1);
-      will-change: opacity, transform;
-    }
-
-    .scroll-build.built {
-      opacity: 1;
-      transform: translateY(0);
-    }
-/* Authentic Glisse Liquid Glass Material Classes */
-    .liquid-glass-nav {
-      background-color: var(--glisse-surface);
-      -webkit-backdrop-filter: blur(var(--glisse-blur)) saturate(1.4);
-      backdrop-filter: blur(var(--glisse-blur)) saturate(1.4);
-      border-bottom: 1px solid var(--glisse-edge);
-      box-shadow: 0 8px 32px -4px rgba(35, 30, 24, 0.05);
-      transition: all 0.3s ease;
-    }
-
-    .liquid-glass-pill {
-      background-color: rgba(255, 255, 255, 0.65);
-      -webkit-backdrop-filter: blur(14px) saturate(1.3);
-      backdrop-filter: blur(14px) saturate(1.3);
-      border: 1px solid rgba(11, 10, 9, 0.08);
-      box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.8), 0 4px 16px rgba(0, 0, 0, 0.05);
-      border-radius: 9999px;
-    }
-
-    /* Buttons */
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: 500;
-      cursor: pointer;
-      text-decoration: none;
-      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-      border: none;
-      white-space: nowrap;
-    }
-
-    .btn-sand {
-      background-color: var(--accent-sand);
-      color: var(--color-dark);
-      border-radius: 9999px;
-      padding: 0.65rem 1.6rem;
-      font-size: 0.885rem;
-      box-shadow: 0 4px 12px rgba(198, 180, 128, 0.25);
-    }
-
-    .btn-sand:hover {
-      background-color: var(--accent-sand-hover);
-      transform: translateY(-1px);
-    }
-
-    .btn-hero-sand {
-      background-color: var(--accent-sand);
-      color: var(--color-dark);
-      border-radius: 9999px;
-      min-width: 154px;
-      height: 48px;
-      padding: 0 1.85rem;
-      font-size: 0.95rem;
-      box-shadow: 0 4px 16px rgba(198, 180, 128, 0.35);
-    }
-
-    .btn-hero-sand:hover {
-      background-color: var(--accent-sand-hover);
-      transform: translateY(-1.5px);
-    }
-
-    .btn-hero-black {
-      background-color: var(--color-dark);
-      color: #FFFFFF;
-      border-radius: 9999px;
-      min-width: 154px;
-      height: 48px;
-      padding: 0 1.85rem;
-      font-size: 0.95rem;
-      box-shadow: 0 4px 16px rgba(11, 10, 9, 0.25);
-    }
-
-    .btn-hero-black:hover {
-      background-color: #242220;
-      transform: translateY(-1.5px);
-    }
-
-    .btn:active {
-      transform: scale(0.98);
-    }
-
-    /* 1. TOP NAVIGATION (Fixed Liquid Glass Bar) */
-    .top-nav-wrapper {
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      width: 100%;
-      z-index: 99999 !important;
-      background: #F4F1EA !important;
-      background: rgba(244, 241, 234, 0.98) !important;
-      -webkit-backdrop-filter: blur(28px) saturate(180%);
-      backdrop-filter: blur(28px) saturate(180%);
-      border-bottom: 1px solid rgba(11, 10, 9, 0.08);
-      box-shadow: 0 4px 24px -4px rgba(35, 30, 24, 0.06);
-    }
-
-    .top-nav {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 1.5rem;
-      height: 72px;
-    }
-
-    .nav-brand-group {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-      text-decoration: none;
-      color: var(--text-main);
-      flex-shrink: 0;
-      margin-right: 0.5rem;
-    }
-
-    .nav-wordmark {
-      font-size: 1.35rem;
-      font-weight: 800;
-      letter-spacing: -0.035em;
-      color: var(--text-main);
-      white-space: nowrap;
-    }
-
-    .nav-links {
-      display: flex;
-      align-items: center;
-      gap: clamp(0.75rem, 1.4vw, 1.4rem);
-      list-style: none;
-      margin: 0 auto;
-      padding: 0;
-      flex-shrink: 1;
-      min-width: 0;
-      justify-content: center;
-    }
-
-    .nav-links li {
-      flex-shrink: 0;
-    }
-
-    .nav-links a {
-      color: var(--text-main);
-      text-decoration: none;
-      font-size: 0.885rem;
-      font-weight: 500;
-      opacity: 0.85;
-      white-space: nowrap;
-      transition: opacity 0.2s ease, transform 0.2s ease;
-      position: relative;
-    }
-
-    .nav-links a:hover {
-      opacity: 1;
-      transform: translateY(-1px);
-    }
-
-    .nav-links a.active-link::after {
-      content: '';
-      position: absolute;
-      bottom: -6px;
-      left: 0;
-      width: 100%;
-      height: 2px;
-      background: var(--accent-sand);
-      border-radius: 2px;
-    }
-
-    .nav-actions {
-      display: flex;
-      gap: 0.65rem;
-      align-items: center;
-      flex-shrink: 0;
-      margin-left: 0.5rem;
-    }
-
-    .btn-console {
-      background: rgba(255, 255, 255, 0.78);
-      -webkit-backdrop-filter: blur(14px) saturate(1.4);
-      backdrop-filter: blur(14px) saturate(1.4);
-      border: 1px solid rgba(11, 10, 9, 0.12);
-      color: var(--text-main);
-      border-radius: 9999px;
-      padding: 0.55rem 1.25rem;
-      font-size: 0.875rem;
-      font-weight: 600;
-      white-space: nowrap;
-      transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
-      display: inline-flex;
-      align-items: center;
-      gap: 0.45rem;
-      text-decoration: none;
-      box-shadow: 0 2px 8px rgba(35, 30, 24, 0.04);
-      flex-shrink: 0;
-    }
-
-    .btn-console:hover {
-      background: #FFFFFF;
-      border-color: rgba(11, 10, 9, 0.25);
-      transform: translateY(-1px);
-      box-shadow: 0 4px 16px rgba(35, 30, 24, 0.08);
-      color: var(--text-main);
-    }
-
-    .btn-zapier {
-      background: #FF4F00;
-      color: #FFFFFF;
-      font-weight: 700;
-      border-radius: 9999px;
-      padding: 0.55rem 1.35rem;
-      font-size: 0.85rem;
-      text-decoration: none;
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-      box-shadow: 0 4px 14px rgba(255, 79, 0, 0.28);
-      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-    }
-
-    .btn-zapier:hover {
-      background: #E04500;
-      transform: translateY(-1.5px);
-      box-shadow: 0 6px 20px rgba(255, 79, 0, 0.38);
-      color: #FFFFFF;
-    }
-
-    .mobile-menu-btn {
-      display: none;
-      align-items: center;
-      justify-content: center;
-      width: 38px;
-      height: 38px;
-      background: rgba(255, 255, 255, 0.7);
-      border: 1px solid rgba(11, 10, 9, 0.12);
-      border-radius: 9999px;
-      color: var(--text-main);
-      cursor: pointer;
-      transition: all 0.2s ease;
-      flex-shrink: 0;
-    }
-
-    .mobile-menu-btn:hover {
-      background: #FFFFFF;
-      border-color: rgba(11, 10, 9, 0.25);
-    }
-
-    @media (max-width: 1280px) {
-      .nav-links .nav-secondary {
-        display: none !important;
-      }
-    }
-
-    @media (max-width: 1040px) {
-      .top-nav .nav-links {
-        display: none !important;
-      }
-      .mobile-menu-btn {
-        display: inline-flex;
-      }
-    }
-
-    @media (max-width: 640px) {
-      .nav-actions .btn-console {
-        display: none !important;
-      }
-    }
-
-    /* Mobile Nav Drawer */
-    .mobile-nav-drawer {
-      position: fixed;
-      inset: 0;
-      z-index: 999999;
-      display: none;
-    }
-    .mobile-nav-drawer.open {
-      display: block;
-    }
-    .mobile-nav-backdrop {
-      position: absolute;
-      inset: 0;
-      background: rgba(11, 10, 9, 0.45);
-      backdrop-filter: blur(8px);
-      -webkit-backdrop-filter: blur(8px);
-    }
-    .mobile-nav-panel {
-      position: absolute;
-      top: 0;
-      right: 0;
-      width: 310px;
-      max-width: 85vw;
-      height: 100%;
-      background: #F4F1EA;
-      padding: 1.5rem;
-      display: flex;
-      flex-direction: column;
-      box-shadow: -10px 0 30px rgba(0, 0, 0, 0.15);
-      transform: translateX(100%);
-      transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-    }
-    .mobile-nav-drawer.open .mobile-nav-panel {
-      transform: translateX(0);
-    }
-    .mobile-nav-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding-bottom: 1.25rem;
-      border-bottom: 1px solid rgba(11, 10, 9, 0.08);
-      margin-bottom: 1.5rem;
-    }
-    .mobile-nav-close {
-      background: none;
-      border: none;
-      font-size: 1.75rem;
-      line-height: 1;
-      color: var(--text-main);
-      cursor: pointer;
-      padding: 0.25rem 0.5rem;
-    }
-    .mobile-nav-links {
-      list-style: none;
-      padding: 0;
-      margin: 0;
-      display: flex;
-      flex-direction: column;
-      gap: 1.15rem;
-    }
-    .mobile-nav-links a {
-      color: var(--text-main);
-      text-decoration: none;
-      font-size: 1.05rem;
-      font-weight: 600;
-      display: block;
-      transition: color 0.2s ease;
-    }
-    .mobile-nav-links a:hover {
-      color: var(--accent-sand);
-    }
-    .mobile-nav-actions {
-      margin-top: auto;
-      display: flex;
-      flex-direction: column;
-      gap: 0.75rem;
-      padding-top: 1.5rem;
-      border-top: 1px solid rgba(11, 10, 9, 0.08);
-    }
-
-    /* 2. DYNAMIC HERO SECTION (Stitch Bezel Frame with 3D Chrome Motion) */
-    .hero-section {
-      padding: 2rem 0 5rem 0;
-    }
-
-    .hero-bezel-card {
-      position: relative;
-      width: 100%;
-      max-width: 1140px;
-      margin: 0 auto;
-      aspect-ratio: 918 / 620;
-      min-height: 590px;
-      background: var(--bg-card);
-      border: 1px solid rgba(255, 255, 255, 0.5); /* Seamless Stitch Bezel without black outline */
-      border-radius: 36px;
-      box-shadow: 0 32px 80px -16px rgba(25, 22, 18, 0.16), 0 12px 30px -6px rgba(25, 22, 18, 0.08);
-      overflow: hidden;
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-      padding: 34px 44px 28px 44px;
-    }
-
-
-
-    /* 3D DYNAMIC CHROME SPHERES (Responsive Kinetic Movement) */
-    .sphere-layer {
-      position: absolute;
-      pointer-events: none;
-      will-change: transform;
-    }
-
-    /* Sphere A: Main Foreground Sphere */
-    .sphere-1-wrap {
-      left: 6.5%;
-      bottom: 18px; /* Grounded directly onto the bezel card floor */
-      width: 150px;
-      height: 150px;
-      z-index: 8;
-    }
-
-    .sphere-1-shadow {
-      position: absolute;
-      left: 5.8%;
-      bottom: 10px;
-      width: 165px;
-      height: 36px;
-      /* Intense authentic contact occlusion core + soft diffuse penumbra */
-      background: radial-gradient(ellipse at 50% 50%, rgba(10, 8, 6, 0.76) 0%, rgba(18, 14, 10, 0.48) 28%, rgba(35, 28, 20, 0.16) 55%, transparent 75%);
-      filter: blur(3.5px);
-      border-radius: 50%;
-      z-index: 6;
-      pointer-events: none;
-      will-change: transform;
-    }
-
-    .sphere-img {
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
-    }
-
-    /* Sphere B: Secondary Floating Sphere */
-    .sphere-2-wrap {
-      right: 15.5%;
-      top: 17%;
-      width: 44px;
-      height: 44px;
-      z-index: 8;
-    }
-
-    /* Sphere C: Foreground Depth Sphere (Bokeh Blurred) */
-    .sphere-3-wrap {
-      right: -24px;
-      bottom: -32px;
-      width: 290px;
-      height: 290px;
-      z-index: 15;
-    }
-
-    /* Hero Center Stage */
-    .hero-stage {
-      position: relative;
-      z-index: 10;
-      text-align: center;
-      max-width: 780px;
-      margin: auto;
-      padding: 1rem 0;
-    }
-
-    .hero-variation-container {
-      min-height: 195px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .hero-headline {
-      font-size: clamp(2.4rem, 4.6vw, 4.1rem);
-      font-weight: 700;
-      line-height: 1.05;
-      letter-spacing: -0.04em;
-      color: var(--text-main);
-      margin-bottom: 1.15rem;
-      transition: opacity 0.3s ease, transform 0.3s ease;
-    }
-
-    .hero-description {
-      font-size: 0.965rem;
-      color: var(--text-sub);
-      line-height: 1.65;
-      max-width: 580px;
-      margin: 0 auto 2rem auto;
-      transition: opacity 0.3s ease;
-    }
-
-    .hero-actions {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 1.25rem;
-      margin-bottom: 1.5rem;
-    }
-
-    .hero-supporting {
-      font-size: 0.825rem;
-      color: var(--text-muted);
-      font-weight: 500;
-      letter-spacing: 0.02em;
-    }
-
-    /* Hero Switcher Tabs */
-    .hero-switcher {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.4rem;
-      background: rgba(11, 10, 9, 0.06);
-      padding: 4px;
-      border-radius: 12px;
-      margin-bottom: 1.5rem;
-    }
-
-    .switcher-btn {
-      padding: 5px 12px;
-      font-size: 0.775rem;
-      font-weight: 600;
-      color: var(--text-sub);
-      border: none;
-      background: transparent;
-      border-radius: 8px;
-      cursor: pointer;
-      transition: all 0.2s ease;
-    }
-
-    .switcher-btn.active {
-      background: #FFFFFF;
-      color: var(--text-main);
-      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
-    }
-
-    /* Hero Bottom Bar */
-    .hero-bottom-bar {
-      position: relative;
-      z-index: 20;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      width: 100%;
-    }
-
-    .hero-bottom-left {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .dot-capsule {
-      width: 24px;
-      height: 24px;
-      background: var(--color-dark);
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .dots-grid {
-      display: grid;
-      grid-template-columns: repeat(2, 3px);
-      gap: 2.5px;
-    }
-
-    .dots-grid span {
-      width: 3px;
-      height: 3px;
-      background: #FFFFFF;
-      border-radius: 50%;
-    }
-
-    .hero-pagination {
-      position: absolute;
-      left: 50%;
-      transform: translateX(-50%);
-      font-size: 0.85rem;
-      color: var(--text-main);
-      letter-spacing: 0.28em;
-      font-weight: 500;
-    }
-
-    /* SECTIONS GLOBAL */
-    .section-padding {
-      padding: 6.5rem 0;
-      border-top: 1px solid var(--border-subtle);
-      scroll-margin-top: 72px;
-    }
-
-    /* 3. PLATFORM INTRODUCTION */
-    .product-cards-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 2rem;
-      margin-top: 3.5rem;
-    }
-
-    .product-card {
-      background: #FFFFFF;
-      border: 1px solid rgba(11, 10, 9, 0.05); /* Soft optical edge */
-      border-radius: 28px;
-      padding: 3rem;
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-      box-shadow: 0 16px 40px -12px rgba(20, 18, 14, 0.06);
-      transition: transform 0.25s ease, box-shadow 0.25s ease;
-    }
-
-    .product-card:hover {
-      transform: translateY(-4px);
-      box-shadow: 0 24px 50px -12px rgba(20, 18, 14, 0.12);
-    }
-
-    .product-card-badge {
-      display: inline-block;
-      font-size: 0.725rem;
-      font-weight: 700;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-      padding: 4px 12px;
-      border-radius: 9999px;
-      background: var(--bg-canvas);
-      border: 1px solid var(--border-subtle);
-      margin-bottom: 1.25rem;
-      align-self: flex-start;
-    }
-
-    .product-card-title {
-      font-size: 1.75rem;
-      font-weight: 700;
-      letter-spacing: -0.03em;
-      line-height: 1.2;
-      margin-bottom: 1rem;
-    }
-
-    .product-card-desc {
-      color: var(--text-sub);
-      font-size: 0.95rem;
-      line-height: 1.65;
-      margin-bottom: 2rem;
-    }
-
-    .feature-list {
-      list-style: none;
-      display: flex;
-      flex-direction: column;
-      gap: 0.75rem;
-      margin-bottom: 2.5rem;
-    }
-
-    .feature-item {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-      font-size: 0.925rem;
-      color: var(--text-main);
-      font-weight: 500;
-    }
-
-    .feature-item svg {
-      width: 16px;
-      height: 16px;
-      stroke: var(--accent-sand-hover);
-      stroke-width: 2.5;
-      fill: none;
-      flex-shrink: 0;
-    }
-
-    /* 4. PAYMENT INTELLIGENCE VISUAL JOURNEY FOR BUSINESS OWNERS */
-    .journey-timeline {
-      display: flex;
-      flex-direction: column;
-      gap: 2.5rem;
-      margin-top: 3.5rem;
-      position: relative;
-    }
-
-    .journey-stage {
-      background: #FFFFFF;
-      border: 1px solid rgba(11, 10, 9, 0.05); /* Soft optical edge */
-      border-radius: 24px;
-      padding: 2.5rem;
-      display: grid;
-      grid-template-columns: 2fr 3fr;
-      gap: 3rem;
-      align-items: center;
-      box-shadow: 0 12px 36px -10px rgba(25, 20, 15, 0.05);
-      transition: transform 0.25s ease;
-    }
-
-    .journey-stage:hover {
-      transform: translateY(-2px);
-    }
-
-    .stage-badge {
-      font-size: 0.75rem;
-      font-weight: 700;
-      letter-spacing: 0.15em;
-      color: var(--accent-sand-hover);
-      text-transform: uppercase;
-      margin-bottom: 0.65rem;
-    }
-
-    .stage-title {
-      font-size: 1.45rem;
-      font-weight: 700;
-      letter-spacing: -0.02em;
-      margin-bottom: 0.85rem;
-      line-height: 1.25;
-    }
-
-    .stage-text {
-      font-size: 0.95rem;
-      color: var(--text-sub);
-      line-height: 1.65;
-    }
-
-    .stage-visual {
-      background: var(--bg-canvas);
-      border: 1px solid var(--border-subtle);
-      border-radius: 18px;
-      padding: 1.75rem;
-      position: relative;
-      overflow: hidden;
-    }
-
-    /* Simulated Visual Interfaces for Non-Technical Business Owners */
-    .sim-phone {
-      background: #FFFFFF;
-      border: 1px solid rgba(11, 10, 9, 0.06); /* Soft tactile border */
-      border-radius: 16px;
-      padding: 1.25rem;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
-    }
-
-    .sim-notif {
-      display: flex;
-      align-items: center;
-      gap: 0.85rem;
-      padding: 0.85rem;
-      background: #F8F6F2;
-      border-radius: 12px;
-      border-left: 4px solid #2E7D32;
-    }
-
-    .sim-notif-title {
-      font-size: 0.85rem;
-      font-weight: 700;
-      color: var(--text-main);
-    }
-
-    .sim-notif-sub {
-      font-size: 0.775rem;
-      color: var(--text-sub);
-    }
-
-    .sim-match-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 1rem;
-      flex-wrap: wrap;
-    }
-
-    .sim-invoice-box, .sim-payment-box {
-      flex: 1 1 200px;
-      min-width: 0;
-      background: #FFFFFF;
-      border: 1px solid var(--border-subtle);
-      border-radius: 12px;
-      padding: 1rem;
-      font-size: 0.85rem;
-      box-sizing: border-box;
-    }
-
-    .sim-link-arrow {
-      color: #2E7D32;
-      font-weight: 800;
-      font-size: 1.25rem;
-    }
-
-    .status-chip-grid {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 0.75rem;
-    }
-
-    .status-chip {
-      padding: 0.75rem 1.25rem;
-      border-radius: 9999px;
-      font-size: 0.825rem;
-      font-weight: 600;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-
-    .chip-matched { background: #E8F5E9; color: #2E7D32; border: 1px solid rgba(46, 125, 50, 0.2); }
-    .chip-partial { background: #FFF8E1; color: #F57F17; border: 1px solid rgba(245, 127, 23, 0.2); }
-    .chip-unmatched { background: #FFEBEE; color: #C62828; border: 1px solid rgba(198, 40, 40, 0.2); }
-    .chip-review { background: #E3F2FD; color: #1565C0; border: 1px solid rgba(21, 101, 192, 0.2); }
-
-    .supporting-note-banner {
-      background: var(--bg-bone);
-      border: 1px solid var(--border-subtle);
-      border-radius: 16px;
-      padding: 1.25rem 2rem;
-      margin-top: 2.5rem;
-      font-size: 0.9rem;
-      color: var(--text-sub);
-      display: flex;
-      align-items: flex-start;
-      gap: 1rem;
-      line-height: 1.6;
-    }
-
-    /* 5. BULK SMS SEPARATE PRODUCT JOURNEY */
-    .sms-journey-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 1.5rem;
-      margin-top: 3.5rem;
-    }
-
-    .sms-stage-card {
-      background: #FFFFFF;
-      border: 1px solid var(--border-subtle);
-      border-radius: 20px;
-      padding: 2rem 1.75rem;
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-    }
-
-    .sms-stage-num {
-      font-size: 1.5rem;
-      font-weight: 800;
-      color: var(--accent-sand-hover);
-      margin-bottom: 0.85rem;
-    }
-
-    .sms-stage-title {
-      font-size: 1.15rem;
-      font-weight: 700;
-      letter-spacing: -0.02em;
-      margin-bottom: 0.65rem;
-    }
-
-    .sms-stage-text {
-      font-size: 0.885rem;
-      color: var(--text-sub);
-      line-height: 1.6;
-      margin-bottom: 1.5rem;
-    }
-
-    .sms-mock-visual {
-      background: var(--bg-canvas);
-      border: 1px solid var(--border-subtle);
-      border-radius: 12px;
-      padding: 1rem;
-      font-size: 0.8rem;
-    }
-
-    /* Independence Product Highlight */
-    .commercial-independence-card {
-      background: radial-gradient(100% 120% at 50% 20%, #FAF8F4 0%, #EAE6DF 100%);
-      border: 1px solid rgba(11, 10, 9, 0.05); /* Soft optical edge */
-      border-radius: 28px;
-      padding: 3.5rem;
-      margin-top: 4rem;
-      text-align: center;
-    }
-
-    .commercial-independence-card h3 {
-      font-size: 1.85rem;
-      font-weight: 700;
-      letter-spacing: -0.03em;
-      margin-bottom: 1rem;
-    }
-
-    .commercial-independence-card p {
-      font-size: 1.05rem;
-      color: var(--text-sub);
-      max-width: 680px;
-      margin: 0 auto;
-      line-height: 1.7;
-    }
-
-    /* 6. HOW IT WORKS */
-    .steps-grid {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 1.5rem;
-      margin-top: 3.5rem;
-    }
-
-    .step-card {
-      background: #FFFFFF;
-      border: 1px solid var(--border-subtle);
-      border-radius: 22px;
-      padding: 2.25rem 1.75rem;
-    }
-
-    .step-number {
-      font-size: 1.75rem;
-      font-weight: 800;
-      letter-spacing: -0.03em;
-      color: var(--accent-sand);
-      margin-bottom: 1.25rem;
-    }
-
-    .step-title {
-      font-size: 1.15rem;
-      font-weight: 700;
-      letter-spacing: -0.02em;
-      margin-bottom: 0.75rem;
-      line-height: 1.3;
-    }
-
-    .step-text {
-      font-size: 0.885rem;
-      color: var(--text-sub);
-      line-height: 1.6;
-    }
-
-    /* 7. USE CASES */
-    .usecases-grid {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 1.5rem;
-      margin-top: 3.5rem;
-    }
-
-    .usecase-card {
-      background: #FFFFFF;
-      border: 1px solid var(--border-subtle);
-      border-radius: 20px;
-      padding: 2rem;
-    }
-
-    .usecase-title {
-      font-size: 1.15rem;
-      font-weight: 700;
-      letter-spacing: -0.02em;
-      margin-bottom: 0.75rem;
-    }
-
-    .usecase-text {
-      font-size: 0.885rem;
-      color: var(--text-sub);
-      line-height: 1.65;
-    }
-
-    /* INTEGRATIONS: YOUR BUSINESS TOOLS CONNECTED */
-    .integrations-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 1.5rem;
-      margin-top: 3.5rem;
-    }
-
-    .integration-card {
-      background: #FFFFFF;
-      border: 1px solid var(--border-subtle);
-      border-radius: 20px;
-      padding: 2.25rem 1.75rem;
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-      box-shadow: 0 10px 30px -10px rgba(25, 20, 15, 0.04);
-      transition: transform 0.22s ease, box-shadow 0.22s ease;
-    }
-
-    .integration-card:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 16px 36px -10px rgba(25, 20, 15, 0.08);
-    }
-
-    .integration-badge {
-      display: inline-block;
-      font-size: 0.725rem;
-      font-weight: 700;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      color: var(--accent-sand-hover);
-      margin-bottom: 0.65rem;
-    }
-
-    .integration-title {
-      font-size: 1.25rem;
-      font-weight: 700;
-      letter-spacing: -0.02em;
-      color: var(--text-main);
-      margin-bottom: 0.75rem;
-    }
-
-    .integration-text {
-      font-size: 0.9rem;
-      color: var(--text-sub);
-      line-height: 1.65;
-    }
-
-    .integration-diagram {
-      background: var(--bg-bone);
-      border: 1px solid var(--border-subtle);
-      border-radius: 12px;
-      padding: 0.85rem 1rem;
-      margin: 1.25rem 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 0.45rem;
-      font-size: 0.75rem;
-      font-weight: 600;
-      flex-wrap: wrap;
-    }
-
-    .diagram-pill {
-      background: #FFFFFF;
-      border: 1px solid var(--border-subtle);
-      padding: 0.35rem 0.65rem;
-      border-radius: 6px;
-      display: inline-flex;
-      align-items: center;
-      gap: 0.35rem;
-      white-space: nowrap;
-      font-family: var(--font-mono);
-      font-size: 0.725rem;
-    }
-
-    .diagram-arrow {
-      color: #2E7D32;
-      font-weight: 800;
-      font-size: 0.9rem;
-    }
-
-    /* 6B. MERCHANT CONSOLE SHOWCASE */
-    .console-showcase-grid {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 1.5rem;
-      margin-top: 3.5rem;
-    }
-
-    .console-showcase-card {
-      background: #FFFFFF;
-      border: 1px solid var(--border-subtle);
-      border-radius: 20px;
-      padding: 2.25rem 2rem;
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-      box-shadow: 0 10px 30px -10px rgba(25, 20, 15, 0.04);
-      transition: transform 0.22s ease, box-shadow 0.22s ease;
-    }
-
-    .console-showcase-card:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 16px 36px -10px rgba(25, 20, 15, 0.08);
-    }
-
-    .console-card-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 1rem;
-    }
-
-    .console-badge-active {
-      font-size: 0.725rem;
-      font-weight: 700;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      color: #2E7D32;
-      background: #E8F5E9;
-      padding: 4px 10px;
-      border-radius: 9999px;
-    }
-
-    .console-badge-review {
-      font-size: 0.725rem;
-      font-weight: 700;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      color: #ED6C02;
-      background: #FFF3E0;
-      padding: 4px 10px;
-      border-radius: 9999px;
-    }
-
-    .console-badge-zapier {
-      font-size: 0.725rem;
-      font-weight: 700;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      color: #FF4F00;
-      background: rgba(255, 79, 0, 0.08);
-      padding: 4px 10px;
-      border-radius: 9999px;
-    }
-
-    .console-card-title {
-      font-size: 1.35rem;
-      font-weight: 700;
-      letter-spacing: -0.02em;
-      color: var(--text-main);
-      margin-bottom: 0.75rem;
-    }
-
-    .console-card-desc {
-      font-size: 0.925rem;
-      color: var(--text-sub);
-      line-height: 1.65;
-      margin-bottom: 1.5rem;
-    }
-
-    .console-metric-box {
-      background: var(--bg-canvas);
-      border: 1px solid var(--border-subtle);
-      border-radius: 12px;
-      padding: 1rem 1.25rem;
-      display: flex;
-      flex-direction: column;
-      gap: 0.65rem;
-    }
-
-    .metric-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      font-size: 0.825rem;
-      font-family: var(--font-mono);
-    }
-
-    .metric-label {
-      color: var(--text-sub);
-      font-weight: 500;
-    }
-
-    .metric-status {
-      font-size: 0.7rem;
-      font-weight: 700;
-      padding: 2px 8px;
-      border-radius: 4px;
-      letter-spacing: 0.05em;
-    }
-
-    .status-matched {
-      background: #E8F5E9;
-      color: #2E7D32;
-    }
-
-    .status-review {
-      background: #FFF3E0;
-      color: #ED6C02;
-    }
-
-    .console-cta-banner {
-      background: #FFFFFF;
-      border: 1px solid var(--border-subtle);
-      border-radius: 20px;
-      padding: 2rem 2.5rem;
-      margin-top: 2rem;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 2rem;
-      flex-wrap: wrap;
-      box-shadow: 0 8px 24px -6px rgba(25, 20, 15, 0.04);
-    }
-
-    @media (max-width: 900px) {
-      .console-showcase-grid {
-        grid-template-columns: 1fr;
-      }
-      .console-cta-banner {
-        flex-direction: column;
-        align-items: flex-start;
-      }
-    }
-
-    /* 8. SECURITY AND ACCOUNTABILITY */
-    .security-grid {
-      display: grid;
-      grid-template-columns: repeat(5, 1fr);
-      gap: 1.25rem;
-      margin-top: 3.5rem;
-    }
-
-    .sec-card {
-      background: #FFFFFF;
-      border: 1px solid var(--border-subtle);
-      border-radius: 18px;
-      padding: 1.75rem;
-    }
-
-    .sec-card-title {
-      font-size: 1.05rem;
-      font-weight: 700;
-      margin-bottom: 0.65rem;
-      letter-spacing: -0.01em;
-    }
-
-    .sec-card-text {
-      font-size: 0.85rem;
-      color: var(--text-sub);
-      line-height: 1.6;
-    }
-
-    /* 9. FAQ ACCORDION */
-    .faq-container {
-      max-width: 820px;
-      margin: 3.5rem auto 0 auto;
-      display: flex;
-      flex-direction: column;
-      gap: 1rem;
-    }
-
-    .faq-item {
-      background: #FFFFFF;
-      border: 1px solid var(--border-subtle);
-      border-radius: 18px;
-      overflow: hidden;
-      transition: border-color 0.2s ease;
-    }
-
-    .faq-item.active {
-      border-color: #C6B480;
-    }
-
-    .faq-question {
-      width: 100%;
-      padding: 1.5rem 2rem;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      border: none;
-      background: transparent;
-      font-size: 1.05rem;
-      font-weight: 600;
-      color: var(--text-main);
-      text-align: left;
-      cursor: pointer;
-    }
-
-    .faq-icon {
-      width: 24px;
-      height: 24px;
-      border-radius: 50%;
-      background: var(--bg-canvas);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 1.2rem;
-      color: var(--text-main);
-      flex-shrink: 0;
-      transition: transform 0.25s ease;
-    }
-
-    .faq-item.active .faq-icon {
-      transform: rotate(45deg);
-    }
-
-    .faq-answer {
-      max-height: 0;
-      overflow: hidden;
-      transition: max-height 0.3s cubic-bezier(0.16, 1, 0.3, 1), padding 0.3s ease;
-      padding: 0 2rem;
-      color: var(--text-sub);
-      font-size: 0.95rem;
-      line-height: 1.7;
-    }
-
-    .faq-item.active .faq-answer {
-      max-height: 200px;
-      padding-bottom: 1.75rem;
-    }
-
-    /* 10. FINAL CTA */
-    .final-cta-card {
-      background: var(--bg-card);
-      border: 1px solid rgba(255, 255, 255, 0.6); /* Warm tactile bezel */
-      border-radius: 36px;
-      padding: 5rem 3rem;
-      text-align: center;
-      box-shadow: 0 24px 60px -16px rgba(25, 22, 18, 0.12);
-      max-width: 1040px;
-      margin: 0 auto;
-    }
-
-    .final-cta-card .section-title {
-      max-width: 680px;
-      margin: 0 auto 1.25rem auto;
-    }
-
-    .final-cta-card .section-desc {
-      margin: 0 auto 2.5rem auto;
-    }
-
-    .final-cta-actions {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 1.25rem;
-    }
-
-    /* 11. FOOTER */
-    .site-footer {
-      border-top: 1px solid var(--border-subtle);
-      padding: 5rem 0 3rem 0;
-      background: var(--bg-canvas);
-    }
-
-    .footer-grid {
-      display: grid;
-      grid-template-columns: 2fr 1fr 1fr 1fr;
-      gap: 3rem;
-      margin-bottom: 4rem;
-    }
-
-    .footer-brand-title {
-      font-size: 1.45rem;
-      font-weight: 800;
-      letter-spacing: -0.03em;
-      margin-bottom: 0.75rem;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-
-    .footer-brand-tagline {
-      font-size: 0.925rem;
-      color: var(--text-sub);
-      max-width: 320px;
-      line-height: 1.6;
-    }
-
-    .footer-col-title {
-      font-size: 0.85rem;
-      font-weight: 700;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: var(--text-main);
-      margin-bottom: 1.25rem;
-    }
-
-    .footer-links {
-      list-style: none;
-      display: flex;
-      flex-direction: column;
-      gap: 0.75rem;
-    }
-
-    .footer-links a {
-      color: var(--text-sub);
-      text-decoration: none;
-      font-size: 0.9rem;
-      transition: color 0.2s ease;
-    }
-
-    .footer-links a:hover {
-      color: var(--text-main);
-    }
-
-    .footer-bottom {
-      border-top: 1px solid var(--border-subtle);
-      padding-top: 2rem;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      font-size: 0.85rem;
-      color: var(--text-muted);
-    }
-
-    /* RESPONSIVE DESIGN */
-    @media (max-width: 1080px) {
-      .steps-grid, .usecases-grid, .integrations-grid {
-        grid-template-columns: repeat(2, 1fr);
-      }
-      .security-grid {
-        grid-template-columns: repeat(2, 1fr);
-      }
-      .journey-stage {
-        grid-template-columns: 1fr;
-        gap: 1.5rem;
-      }
-    }
-
-    @media (max-width: 840px) {
-      .top-nav .nav-links {
-        display: none;
-      }
-      .product-cards-grid {
-        grid-template-columns: 1fr;
-      }
-      .footer-grid {
-        grid-template-columns: 1fr 1fr;
-      }
-      .hero-bezel-card {
-        aspect-ratio: auto;
-        min-height: 600px;
-        padding: 24px;
-      }
-      .sphere-1-wrap {
-        width: 100px;
-        height: 100px;
-        left: 4%;
-        bottom: 14%;
-      }
-      .sphere-1-shadow {
-        width: 110px;
-        left: 3.5%;
-        bottom: 12.5%;
-      }
-      .sphere-3-wrap {
-        width: 190px;
-        height: 190px;
-        right: -30px;
-        bottom: -30px;
-      }
-    }
-
-    /* Tablet/Mobile Atmosphere Hide & Card Adaptations */
-    @media (max-width: 768px) {
-      .atmospheric-sphere {
-        display: none !important;
-      }
-      .sim-match-row {
-        display: flex !important;
-        flex-direction: column !important;
-        align-items: stretch !important;
-        gap: 0.75rem !important;
-      }
-      .sim-link-arrow {
-        transform: rotate(90deg) !important;
-        margin: 0.25rem auto !important;
-        text-align: center !important;
-      }
-      .sim-invoice-box, .sim-payment-box {
-        width: 100% !important;
-        box-sizing: border-box !important;
-      }
-      .status-chip-grid {
-        display: grid !important;
-        grid-template-columns: 1fr !important;
-        gap: 0.75rem !important;
-      }
-      .status-chip {
-        width: 100% !important;
-        box-sizing: border-box !important;
-        justify-content: flex-start !important;
-      }
-    }
-
-    @media (max-width: 600px) {
-      .hero-actions, .final-cta-actions {
-        flex-direction: column;
-        width: 100%;
-      }
-      .btn-hero-sand, .btn-hero-black {
-        width: 100%;
-      }
-      .hero-bezel-card {
-        padding: 28px 18px 24px 18px;
-        min-height: auto;
-        border-radius: 28px;
-      }
-      .hero-variation-container {
-        min-height: auto;
-        margin-bottom: 1.25rem;
-      }
-      .hero-headline {
-        font-size: clamp(1.85rem, 7.2vw, 2.45rem);
-        margin-bottom: 1rem;
-      }
-      .hero-description {
-        font-size: 0.9rem;
-        margin-bottom: 1.5rem;
-      }
-      .sphere-1-wrap, .sphere-1-shadow, .sphere-2-wrap, .sphere-3-wrap {
-        display: none !important;
-      }
-      .hero-pagination {
-        position: static;
-        transform: none;
-      }
-
-      /* Card Padding & Mobile Layout Normalization */
-      .product-card {
-        padding: 1.75rem 1.25rem;
-        border-radius: 22px;
-      }
-      .journey-stage {
-        padding: 1.5rem 1.25rem;
-        gap: 1.25rem;
-        border-radius: 20px;
-      }
-      .stage-visual {
-        padding: 1rem;
-        border-radius: 14px;
-      }
-      .sim-phone {
-        padding: 1rem 0.85rem;
-      }
-      .sim-notif {
-        padding: 0.75rem;
-        gap: 0.65rem;
-      }
-      .sim-notif-title {
-        font-size: 0.8rem;
-        word-break: break-word;
-      }
-      .sim-notif-sub {
-        font-size: 0.725rem;
-        word-break: break-word;
-      }
-
-      /* Simulated Invoice & Payment Match Row (Stack vertically on mobile) */
-      .sim-match-row {
-        flex-direction: column;
-        align-items: stretch;
-        gap: 0.65rem;
-      }
-      .sim-link-arrow {
-        transform: rotate(90deg);
-        margin: 0.15rem auto;
-        text-align: center;
-      }
-      .sim-invoice-box, .sim-payment-box {
-        padding: 0.85rem;
-        font-size: 0.825rem;
-        width: 100%;
-        box-sizing: border-box;
-      }
-
-      /* Simulated Status Chips (Single column on mobile so badges never overflow card) */
-      .status-chip-grid {
-        grid-template-columns: 1fr;
-        gap: 0.65rem;
-      }
-      .status-chip {
-        padding: 0.65rem 1rem;
-        font-size: 0.8rem;
-      }
-
-      /* Bulk SMS Stages on Mobile */
-      .sms-journey-grid {
-        grid-template-columns: 1fr;
-        gap: 1rem;
-      }
-      .sms-stage-card {
-        padding: 1.5rem 1.25rem;
-      }
-
-      /* Independence & Feature Cards on Mobile */
-      .commercial-independence-card {
-        padding: 2rem 1.25rem;
-        border-radius: 22px;
-        margin-top: 2.5rem;
-      }
-      .commercial-independence-card h3 {
-        font-size: 1.45rem;
-      }
-      .commercial-independence-card p {
-        font-size: 0.925rem;
-      }
-      .steps-grid, .usecases-grid, .integrations-grid, .security-grid {
-        grid-template-columns: 1fr;
-        gap: 1rem;
-      }
-      .step-card, .usecase-card, .integration-card, .sec-card {
-        padding: 1.5rem 1.25rem;
-      }
-      .supporting-note-banner {
-        padding: 1rem 1.15rem;
-        gap: 0.75rem;
-        flex-direction: column;
-        align-items: flex-start;
-      }
-      .final-cta-card {
-        padding: 3rem 1.25rem;
-        border-radius: 24px;
-      }
-      .footer-grid {
-        grid-template-columns: 1fr;
-        gap: 2rem;
-      }
-      .footer-bottom {
-        flex-direction: column;
-        gap: 1rem;
-        text-align: center;
-      }
-      .faq-question {
-        padding: 1.25rem 1.25rem;
-        font-size: 0.95rem;
-      }
-      .faq-answer {
-        padding: 0 1.25rem;
-      }
-      .faq-item.active .faq-answer {
-        padding-bottom: 1.25rem;
-      }
-    }
-
-    @media (max-width: 480px) {
-      .container {
-        padding: 0 1rem;
-      }
-      .section-padding {
-        padding: 3.5rem 0;
-      }
-      .section-title {
-        font-size: clamp(1.65rem, 6.5vw, 2.1rem);
-      }
-      .hero-bezel-card {
-        padding: 24px 14px 20px 14px;
-      }
-    }
-
-    /* Respect reduced-motion preferences */
-    @media (prefers-reduced-motion: reduce) {
-      * {
-        transition: none !important;
-        animation: none !important;
-      }
-      .kinetic-word {
-        opacity: 1 !important;
-        transform: none !important;
-      }
-    }
-  </style>
+  <link rel="stylesheet" href="assets/css/site.css">
+  <link rel="stylesheet" href="assets/css/home.css">
+  <script src="assets/js/site.js" defer></script>
 </head>
 <body>
 
-  <!-- 1. STICKY LIQUID GLASS NAVIGATION -->
-  <header class="top-nav-wrapper liquid-glass-nav" id="mainHeader">
-    <div class="container">
-      <nav class="top-nav" aria-label="Main Navigation">
-        <a href="/" class="nav-brand-group">
-          <!-- BriskSMS Canonical Symbol -->
-          <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
-            <rect width="32" height="32" rx="8" fill="#0B0A09"/>
-            <path d="M7 8C7 6.34 8.34 5 10 5H22C23.66 5 25 6.34 25 8V17C25 18.66 23.66 20 22 20H13.5L9 24.5V20H10C8.34 20 7 18.66 7 17V8Z" fill="#F4F1EA"/>
-            <path d="M17.5 7.5L11.5 14H16L14 19.5L20.5 13H15.5L17.5 7.5Z" fill="#C6B480"/>
-          </svg>
-          <span class="nav-wordmark">BriskSMS</span>
-        </a>
-
-        <ul class="nav-links">
-          <li><a href="#payment-intelligence">Payments</a></li>
-          <li><a href="#bulk-sms">Messaging</a></li>
-          <li><a href="#integrations">Integrations</a></li>
-          <li><a href="/developers">Developers</a></li>
-          <li class="nav-secondary"><a href="#how-it-works">How It Works</a></li>
-          <li class="nav-secondary"><a href="#about">About</a></li>
-        </ul>
-
-        <div class="nav-actions">
-          <a href="/console" class="btn btn-console">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
-            Merchant Console
-          </a>
-          <a href="#get-started" class="btn btn-sand">Get Started</a>
-          <button class="mobile-menu-btn" id="mobileMenuBtn" aria-label="Toggle Navigation Menu">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <line x1="3" y1="12" x2="21" y2="12"></line>
-              <line x1="3" y1="6" x2="21" y2="6"></line>
-              <line x1="3" y1="18" x2="21" y2="18"></line>
-            </svg>
-          </button>
-        </div>
-      </nav>
-    </div>
-  </header>
-
-  <!-- Mobile Navigation Drawer -->
-  <div class="mobile-nav-drawer" id="mobileNavDrawer" aria-hidden="true">
-    <div class="mobile-nav-backdrop" id="mobileNavBackdrop"></div>
-    <div class="mobile-nav-panel">
-      <div class="mobile-nav-header">
-        <a href="/" class="nav-brand-group" style="margin: 0;">
-          <svg width="24" height="24" viewBox="0 0 32 32" fill="none">
-            <rect width="32" height="32" rx="8" fill="#0B0A09"/>
-            <path d="M7 8C7 6.34 8.34 5 10 5H22C23.66 5 25 6.34 25 8V17C25 18.66 23.66 20 22 20H13.5L9 24.5V20H10C8.34 20 7 18.66 7 17V8Z" fill="#F4F1EA"/>
-            <path d="M17.5 7.5L11.5 14H16L14 19.5L20.5 13H15.5L17.5 7.5Z" fill="#C6B480"/>
-          </svg>
-          <span class="nav-wordmark" style="font-size: 1.15rem;">BriskSMS</span>
-        </a>
-        <button class="mobile-nav-close" id="mobileNavClose" aria-label="Close Navigation Menu">&times;</button>
-      </div>
-      <ul class="mobile-nav-links">
-        <li><a href="#payment-intelligence" class="mobile-nav-item">Payments</a></li>
-        <li><a href="#bulk-sms" class="mobile-nav-item">Messaging</a></li>
-        <li><a href="#integrations" class="mobile-nav-item">Integrations</a></li>
-        <li><a href="/developers" class="mobile-nav-item">Developers</a></li>
-        <li><a href="#how-it-works" class="mobile-nav-item">How It Works</a></li>
-        <li><a href="#about" class="mobile-nav-item">About</a></li>
-      </ul>
-      <div class="mobile-nav-actions">
-        <a href="/console" class="btn btn-console" style="width: 100%; justify-content: center;">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
-          Merchant Console
-        </a>
-        <a href="#get-started" class="btn btn-sand mobile-nav-item" style="width: 100%; justify-content: center;">Get Started</a>
-      </div>
-    </div>
-  </div>
+  <!-- @header -->
 
   <main>
     <!-- 2. DYNAMIC HERO SECTION WITH RESPONSIVE 3D CHROME SPHERES -->
     <section class="hero-section" id="hero">
       <div class="container">
-        <div class="hero-bezel-card" id="heroCard">
+        <div class="hero-bezel-card ambient-host" id="heroCard">
+          <div class="drift" aria-hidden="true"><span class="drift-blob drift-b1"></span><span class="drift-blob drift-b2"></span><span class="drift-blob drift-b3"></span><span class="drift-blob drift-b4"></span></div>
 
 
 
@@ -1888,7 +44,7 @@
 
           <!-- Hero Center Stage -->
           <div class="hero-stage">
-            <div class="eyebrow">PAYMENT INTELLIGENCE · BUSINESS AUTOMATION · MESSAGING</div>
+            <div class="eyebrow">Payment intelligence · Business automation · Messaging</div>
 
 <!-- Hero variations transition automatically on their own -->
 
@@ -1898,19 +54,89 @@
                 <span class="kinetic-word" style="transition-delay: 0ms;">Every</span>
                 <span class="kinetic-word" style="transition-delay: 55ms;">payment</span>
                 <span class="kinetic-word" style="transition-delay: 110ms;">deserves</span>
-                <span class="kinetic-word" style="transition-delay: 165ms;">clarity.</span>
+                <span class="kinetic-word" style="transition-delay: 165ms;"><span class="hero-mark">clarity</span>.</span>
               </h1>
               <p class="hero-description" id="heroDescription">
-                Bring payment notifications, transaction records, and invoice reconciliation into one organized workspace. Spend less time checking payments and more time running your business.
+                Bring payment messages, transaction records, and invoice reconciliation into one organized workspace. Spend less time checking payments and more time running your business.
               </p>
             </div>
 
             <div class="hero-actions">
-              <a href="#get-started" class="btn btn-hero-sand">Get Started</a>
-              <a href="#platform" class="btn btn-hero-black">Explore the Platform</a>
+              <span class="venom-host"><a href="#get-started" class="btn btn-hero-sand btn-shine venom-link">Get Started<svg class="btn-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></a></span>
+              <a href="#platform" class="btn btn-hero-black">Explore the Platform<svg class="btn-arrow btn-arrow-down" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></svg></a>
+            </div>
+
+            <div class="provider-strip">
+              <span class="provider-strip-label">Reads payment messages from</span>
+              <div class="provider-marquee">
+                <ul class="provider-track" aria-label="Supported payment providers">
+                  <li>Vodacom M-Pesa</li>
+                  <li>Mixx by Yas</li>
+                  <li>Airtel Money</li>
+                  <li>HaloPesa</li>
+                  <li>CRDB Bank</li>
+                </ul>
+                <ul class="provider-track" aria-hidden="true">
+                  <li>Vodacom M-Pesa</li>
+                  <li>Mixx by Yas</li>
+                  <li>Airtel Money</li>
+                  <li>HaloPesa</li>
+                  <li>CRDB Bank</li>
+                </ul>
+              </div>
             </div>
 
             <div class="hero-supporting">Built for businesses operating in Tanzania.</div>
+          </div>
+
+          <!-- Code-generated hero illustration: a payment slip is matched to an invoice (no raster image) -->
+          <div class="hero-art" id="heroArt">
+            <svg viewBox="0 0 470 500" role="img" aria-label="A payment slip for TZS 150,000 from BARAKA JOHN is matched to invoice INV-2026-44, which changes from due to paid">
+              <g class="ha-invoice">
+                <rect x="12" y="336" width="300" height="150" rx="18" class="ha-card"/>
+                <text x="36" y="372" class="ha-t ha-sub">Invoice #INV-2026-44</text>
+                <text x="36" y="410" class="ha-m ha-amt">TZS 150,000</text>
+                <g class="ha-due-text"><text x="36" y="446" class="ha-t ha-cap">Balance due: TZS 150,000</text></g>
+                <g class="ha-paid-text"><text x="36" y="446" class="ha-t ha-cap">Balance: TZS 0</text></g>
+                <g class="ha-chip-due">
+                  <rect x="206" y="352" width="86" height="30" rx="15" class="ha-chip ha-chip-amber"/>
+                  <circle cx="224" cy="367" r="4" fill="#ED6C02"/>
+                  <text x="236" y="372" class="ha-t ha-chip-text">Due</text>
+                </g>
+                <g class="ha-chip-paid">
+                  <rect x="206" y="352" width="86" height="30" rx="15" class="ha-chip ha-chip-green"/>
+                  <path class="ha-tick ha-tick-b" pathLength="1" d="M218 367l4 4 8-9"/>
+                  <text x="238" y="372" class="ha-t ha-chip-text">Paid</text>
+                </g>
+              </g>
+
+              <path id="haLink" class="ha-link" pathLength="1" d="M420 214C456 214 458 372 316 372"/>
+              <circle class="ha-dot" r="5">
+                <animateMotion dur="10s" repeatCount="indefinite" calcMode="linear" keyPoints="0;0;1;1" keyTimes="0;0.27;0.4;1"><mpath href="#haLink"/></animateMotion>
+              </circle>
+
+              <g class="ha-slip">
+                <path d="M158 20H402A18 18 0 0 1 420 38V312L410 324L400 312L390 324L380 312L370 324L360 312L350 324L340 312L330 324L320 312L310 324L300 312L290 324L280 312L270 324L260 312L250 324L240 312L230 324L220 312L210 324L200 312L190 324L180 312L170 324L160 312L150 324L140 312V38A18 18 0 0 1 158 20Z" class="ha-card"/>
+                <text x="164" y="62" class="ha-t ha-sub">M-Pesa evidence</text>
+                <text x="164" y="84" class="ha-t ha-cap">Received</text>
+                <text x="164" y="126" class="ha-m ha-amt ha-amt-lg">TZS 150,000</text>
+                <path d="M164 148H396" class="ha-rule"/>
+                <g class="ha-row ha-row-1"><text x="164" y="178" class="ha-t ha-cap">Reference</text><text x="396" y="178" text-anchor="end" class="ha-m ha-val">08173849129</text></g>
+                <g class="ha-row ha-row-2"><text x="164" y="206" class="ha-t ha-cap">Sender</text><text x="396" y="206" text-anchor="end" class="ha-m ha-val">BARAKA JOHN</text></g>
+                <g class="ha-row ha-row-3"><text x="164" y="234" class="ha-t ha-cap">Time</text><text x="396" y="234" text-anchor="end" class="ha-m ha-val">05 Nov 2026, 18:42 EAT</text></g>
+                <path d="M152 256H408" class="ha-tear"/>
+                <g class="ha-obs">
+                  <rect x="164" y="270" width="112" height="30" rx="15" class="ha-chip ha-chip-sand"/>
+                  <circle cx="182" cy="285" r="4" fill="#B8A674"/>
+                  <text x="194" y="290" class="ha-t ha-chip-text">Observed</text>
+                </g>
+                <g class="ha-matched">
+                  <rect x="164" y="270" width="112" height="30" rx="15" class="ha-chip ha-chip-green"/>
+                  <path class="ha-tick ha-tick-a" pathLength="1" d="M176 285l4 4 8-9"/>
+                  <text x="196" y="290" class="ha-t ha-chip-text">Matched</text>
+                </g>
+              </g>
+            </svg>
           </div>
 
 
@@ -1923,7 +149,7 @@
     <section class="section-padding" id="platform" style="position: relative; overflow: visible;">
       <div class="atmospheric-sphere sphere-platform" id="spherePlatform" data-speed="0.14"><img src="data:image/png;base64,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" alt="" class="sphere-img"></div>
       <div class="container">
-        <div class="eyebrow">ONE PLATFORM. TWO POWERFUL PRODUCTS.</div>
+        <div class="eyebrow">One platform, two products</div>
         <h2 class="section-title kinetic-text">
           <span class="kinetic-word">More</span> <span class="kinetic-word">control</span> <span class="kinetic-word">over</span> <span class="kinetic-word">the</span> <span class="kinetic-word">way</span> <span class="kinetic-word">your</span> <span class="kinetic-word">business</span> <span class="kinetic-word">operates.</span>
         </h2>
@@ -1936,13 +162,13 @@
           <div class="product-card scroll-build" id="payment-intelligence">
             <div>
               <span class="product-card-badge">Product 01</span>
-              <h3 class="product-card-title">From payment notifications to business clarity.</h3>
+              <h3 class="product-card-title">From payment messages to business clarity.</h3>
               <p class="product-card-desc">
-                Collect authorized payment notifications from connected Android devices and organize them into searchable transaction records. Match incoming payments against invoices, identify unmatched transactions, and keep track of what needs attention.
+                Collect authorized payment messages from connected Android devices and organize them into searchable transaction records. Match incoming payments against invoices, identify unmatched transactions, and keep track of what needs attention.
               </p>
 
               <ul class="feature-list">
-                <li class="feature-item"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>Payment notification collection</li>
+                <li class="feature-item"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>Payment message collection</li>
                 <li class="feature-item"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>Transaction organization and search</li>
                 <li class="feature-item"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>Invoice and payment matching</li>
                 <li class="feature-item"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>Partial and overpayment handling</li>
@@ -1986,15 +212,16 @@
     </section>
 
     <!-- 4. PAYMENT INTELLIGENCE: JOURNEY FOR BUSINESS OWNERS -->
-    <section class="section-padding" id="payment-journey">
+    <section class="section-padding ambient-host" id="payment-journey">
+      <div class="drift" aria-hidden="true"><span class="drift-blob drift-b1"></span><span class="drift-blob drift-b2"></span><span class="drift-blob drift-b3"></span><span class="drift-blob drift-b4"></span></div>
       <div class="container">
         <div class="journey-header-block" style="display: flex; flex-direction: column; align-items: center; text-align: center; max-width: 780px; margin: 0 auto 3.5rem auto; width: 100%;">
-          <div class="eyebrow" style="display: block; width: 100%; margin: 0 0 0.85rem 0; text-align: center; letter-spacing: 0.18em;">VISUAL PRODUCT JOURNEY</div>
+          <div class="eyebrow" style="display: block; width: 100%; margin: 0 0 0.85rem 0; text-align: center; letter-spacing: 0;">Visual product journey</div>
           <h2 class="section-title kinetic-text" style="display: block; width: 100%; margin: 0 0 1.25rem 0; text-align: center;">
             <span class="kinetic-word">From</span> <span class="kinetic-word">customer</span> <span class="kinetic-word">payment</span> <span class="kinetic-word">to</span> <span class="kinetic-word">business</span> <span class="kinetic-word">clarity.</span>
           </h2>
           <p class="section-desc" style="margin: 0 auto; text-align: center;">
-            When a customer pays your business, BriskSMS helps turn the payment notification into an organized record, making it easier to understand which invoices have been paid and which payments still need attention.
+            When a customer pays your business, BriskSMS helps turn the payment message into an organized record, making it easier to understand which invoices have been paid and which payments still need attention.
           </p>
         </div>
 
@@ -2002,13 +229,13 @@
           <!-- Stage 1 -->
           <div class="journey-stage scroll-build">
             <div>
-              <div class="stage-badge">STAGE 01</div>
+              <div class="stage-badge">Stage 01</div>
               <h3 class="stage-title">A customer makes a payment</h3>
               <p class="stage-text">A customer pays your business using a supported payment service such as Vodacom M-Pesa, Mixx by Yas, Airtel Money, HaloPesa, or supported bank channels.</p>
             </div>
-            <div class="stage-visual">
+            <div class="stage-visual pop-seq">
               <div class="sim-notif" style="border-left-color: #C6B480;">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#0B0A09" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"></rect><line x1="2" y1="10" x2="22" y2="10"></line></svg>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" stroke-width="1.5"><rect width="20" height="14" x="2" y="5" rx="2"/><path d="M2 10h20"/></svg>
                 <div>
                   <div class="sim-notif-title">Customer Confirmation</div>
                   <div class="sim-notif-sub">Paid TZS 150,000 to Lipa Till #504421</div>
@@ -2020,15 +247,15 @@
           <!-- Stage 2 -->
           <div class="journey-stage scroll-build">
             <div>
-              <div class="stage-badge">STAGE 02</div>
-              <h3 class="stage-title">Your business receives a notification</h3>
-              <p class="stage-text">Your connected business phone receives the payment notification. The BriskSMS Android relay app securely captures the transaction notification.</p>
+              <div class="stage-badge">Stage 02</div>
+              <h3 class="stage-title">Your business receives a payment message</h3>
+              <p class="stage-text">Your connected business phone receives the payment text from your mobile money provider or bank. The BriskSMS Android relay app securely captures it.</p>
             </div>
-            <div class="stage-visual">
+            <div class="stage-visual pop-seq">
               <div class="sim-phone">
-                <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.5rem; font-weight: 600;">ANDROID BUSINESS RELAY</div>
+                <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.5rem; font-weight: 600;">Android business relay</div>
                 <div class="sim-notif">
-                  <div style="width: 8px; height: 8px; border-radius: 50%; background: #2E7D32;"></div>
+                  <div class="live-dot" style="width: 8px; height: 8px; border-radius: 50%; background: #2E7D32;"></div>
                   <div>
                     <div class="sim-notif-title">M-Pesa: 08173849129 Confirmed</div>
                     <div class="sim-notif-sub">Received TZS 150,000 from BARAKA JOHN</div>
@@ -2041,17 +268,17 @@
           <!-- Stage 3 -->
           <div class="journey-stage scroll-build">
             <div>
-              <div class="stage-badge">STAGE 03</div>
+              <div class="stage-badge">Stage 03</div>
               <h3 class="stage-title">BriskSMS organizes the payment</h3>
               <p class="stage-text">BriskSMS organizes the payment information so your team can find and review it easily, normalizing provider reference, amount, and timestamp.</p>
             </div>
-            <div class="stage-visual">
-              <div style="background: #FFFFFF; border: 1px solid var(--border-subtle); border-radius: 12px; padding: 1rem;">
+            <div class="stage-visual pop-seq">
+              <div class="sim-evidence" style="background: #FFFFFF; border: 1px solid var(--border-subtle); border-radius: 12px; padding: 1rem;">
                 <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-                  <span style="font-weight: 700; font-size: 0.85rem;">M-PESA EVIDENCE</span>
+                  <span style="font-weight: 600; font-size: 0.85rem;">M-Pesa evidence</span>
                   <span style="font-family: var(--font-mono); font-size: 0.75rem; background: var(--bg-canvas); padding: 2px 6px; border-radius: 4px;">REF: 08173849129</span>
                 </div>
-                <div style="font-size: 1.25rem; font-weight: 800; color: var(--text-main);">TZS 150,000</div>
+                <div style="font-size: 1.25rem; font-weight: 600; color: var(--text-main);">TZS 150,000</div>
                 <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">Timestamp: 05 Nov 2026, 18:42 EAT • Sender: BARAKA JOHN</div>
               </div>
             </div>
@@ -2060,21 +287,21 @@
           <!-- Stage 4 -->
           <div class="journey-stage scroll-build">
             <div>
-              <div class="stage-badge">STAGE 04</div>
+              <div class="stage-badge">Stage 04</div>
               <h3 class="stage-title">The payment is matched to an invoice</h3>
               <p class="stage-text">BriskSMS helps identify which invoice the payment may belong to, matching references, customer phone numbers, or pending invoice balances.</p>
             </div>
             <div class="stage-visual">
-              <div class="sim-match-row">
+              <div class="sim-match-row pop-seq">
                 <div class="sim-invoice-box">
-                  <div style="color: var(--text-muted); font-size: 0.75rem; font-weight: 700;">INVOICE #INV-2026-44</div>
-                  <div style="font-weight: 800; font-size: 1rem; margin-top: 0.25rem;">TZS 150,000</div>
+                  <div style="color: var(--text-muted); font-size: 0.75rem; font-weight: 600;">Invoice #INV-2026-44</div>
+                  <div style="font-weight: 600; font-size: 1rem; margin-top: 0.25rem;">TZS 150,000</div>
                   <div style="font-size: 0.75rem; color: #2E7D32; font-weight: 600; margin-top: 0.25rem;">Balance Due: TZS 150,000</div>
                 </div>
                 <div class="sim-link-arrow">⇄</div>
                 <div class="sim-payment-box">
-                  <div style="color: var(--text-muted); font-size: 0.75rem; font-weight: 700;">PAYMENT EVIDENCE</div>
-                  <div style="font-weight: 800; font-size: 1rem; margin-top: 0.25rem;">TZS 150,000</div>
+                  <div style="color: var(--text-muted); font-size: 0.75rem; font-weight: 600;">Payment evidence</div>
+                  <div style="font-weight: 600; font-size: 1rem; margin-top: 0.25rem;">TZS 150,000</div>
                   <div style="font-size: 0.75rem; color: #2E7D32; font-weight: 600; margin-top: 0.25rem;">REF: 08173849129</div>
                 </div>
               </div>
@@ -2084,25 +311,25 @@
           <!-- Stage 5 -->
           <div class="journey-stage scroll-build">
             <div>
-              <div class="stage-badge">STAGE 05</div>
+              <div class="stage-badge">Stage 05</div>
               <h3 class="stage-title">Your business sees what needs attention</h3>
               <p class="stage-text">See which payments have been matched, which invoices still have a balance, and which transactions need your attention.</p>
             </div>
             <div class="stage-visual">
-              <div class="status-chip-grid">
-                <div class="status-chip chip-matched"><span>●</span> Matched (Settled)</div>
-                <div class="status-chip chip-partial"><span>●</span> Partially Paid</div>
-                <div class="status-chip chip-unmatched"><span>●</span> Unmatched</div>
-                <div class="status-chip chip-review"><span>●</span> Needs Review</div>
+              <div class="status-chip-grid pop-seq">
+                <div class="status-chip chip-matched"><svg class="check-ring" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><circle class="check-ring-track" cx="12" cy="12" r="10"/><circle class="check-ring-fill" cx="12" cy="12" r="10" pathLength="100"/><path class="check-ring-tick" d="M7.5 12.5l3 3 6-6.5" pathLength="100"/></svg> Matched (Settled)</div>
+                <div class="status-chip chip-partial"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 18a6 6 0 0 0 0-12v12z"/></svg> Partially Paid</div>
+                <div class="status-chip chip-unmatched"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg> Unmatched</div>
+                <div class="status-chip chip-review"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" stroke-width="2"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg> Needs Review</div>
               </div>
             </div>
           </div>
         </div>
 
         <div class="supporting-note-banner">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>
           <div>
-            <strong>Financial Accuracy Note:</strong> Payment notifications provide transaction evidence. Final settlement confirmation depends on the available verification method and your business workflow. BriskSMS does not hold customer funds or operate as an escrow.
+            <strong>Financial Accuracy Note:</strong> Payment messages provide transaction evidence. Final settlement confirmation depends on the available verification method and your business workflow. BriskSMS does not hold customer funds or operate as an escrow.
           </div>
         </div>
       </div>
@@ -2111,7 +338,7 @@
     <!-- 5. BULK SMS: A COMPLETELY SEPARATE PRODUCT JOURNEY -->
     <section class="section-padding" id="bulk-journey">
       <div class="container">
-        <div class="eyebrow">BUSINESS COMMUNICATION JOURNEY</div>
+        <div class="eyebrow">Business communication journey</div>
         <h2 class="section-title kinetic-text">
           <span class="kinetic-word">The</span> <span class="kinetic-word">right</span> <span class="kinetic-word">message.</span> <span class="kinetic-word">The</span> <span class="kinetic-word">right</span> <span class="kinetic-word">people.</span> <span class="kinetic-word">The</span> <span class="kinetic-word">right</span> <span class="kinetic-word">time.</span>
         </h2>
@@ -2158,7 +385,7 @@
             </div>
             <div class="sms-mock-visual">
               <div style="display: flex; gap: 0.5rem; align-items: center; font-weight: 600;">
-                <span style="color: #2E7D32; font-weight: 700;">Active</span> Scheduled: 09:00 AM
+                <span style="color: #2E7D32; font-weight: 600;">Active</span> Scheduled: 09:00 AM
               </div>
             </div>
           </div>
@@ -2195,7 +422,7 @@
 
         <!-- Commercial Independence Banner -->
         <div class="commercial-independence-card">
-          <span class="eyebrow" style="color: var(--accent-sand-hover);">COMMERCIAL INDEPENDENCE</span>
+          <span class="eyebrow" style="color: var(--accent-sand-hover);">Commercial independence</span>
           <h3>A separate service. A separate choice.</h3>
           <p>
             Bulk Messaging is independently available and billed. You can use BriskSMS Payment Intelligence without purchasing Bulk SMS credits, or use Bulk Messaging independently. Payment reconciliation will never require prepaid messaging credits.
@@ -2208,22 +435,22 @@
     <section class="section-padding" id="how-it-works" style="position: relative; overflow: visible;">
       <div class="atmospheric-sphere sphere-ledger" id="sphereLedger" data-speed="-0.1"><img src="data:image/png;base64,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" alt="" class="sphere-img"></div>
       <div class="container">
-        <div class="eyebrow">A CLEARER WORKFLOW</div>
+        <div class="eyebrow">A clearer workflow</div>
         <h2 class="section-title kinetic-text">
-          <span class="kinetic-word">From</span> <span class="kinetic-word">incoming</span> <span class="kinetic-word">notification</span> <span class="kinetic-word">to</span> <span class="kinetic-word">organized</span> <span class="kinetic-word">business</span> <span class="kinetic-word">records.</span>
+          <span class="kinetic-word">From</span> <span class="kinetic-word">incoming</span> <span class="kinetic-word">message</span> <span class="kinetic-word">to</span> <span class="kinetic-word">organized</span> <span class="kinetic-word">business</span> <span class="kinetic-word">records.</span>
         </h2>
 
         <div class="steps-grid">
           <div class="step-card scroll-build">
             <div class="step-number">01</div>
             <h3 class="step-title">Connect your device</h3>
-            <p class="step-text">Install the BriskSMS Android application and authorize the payment notification access needed for your business workflow.</p>
+            <p class="step-text">Install the BriskSMS Android application and allow the access it needs to read supported payment messages.</p>
           </div>
 
           <div class="step-card scroll-build">
             <div class="step-number">02</div>
-            <h3 class="step-title">Receive notifications</h3>
-            <p class="step-text">Supported payment notifications are securely forwarded to your BriskSMS workspace for processing.</p>
+            <h3 class="step-title">Receive payment messages</h3>
+            <p class="step-text">Supported payment messages are securely forwarded to your BriskSMS workspace for processing.</p>
           </div>
 
           <div class="step-card scroll-build">
@@ -2242,14 +469,15 @@
     </section>
 
     <!-- INTEGRATIONS SECTION -->
-    <section class="section-padding" id="integrations">
+    <section class="section-padding ambient-host" id="integrations">
+      <div class="code-rain" aria-hidden="true"></div>
       <div class="container">
-        <div class="eyebrow">SEAMLESS CONNECTIVITY & AUTOMATION</div>
+        <div class="eyebrow">Connectivity and automation</div>
         <h2 class="section-title kinetic-text">
           <span class="kinetic-word">Your</span> <span class="kinetic-word">business</span> <span class="kinetic-word">tools.</span> <span class="kinetic-word">Connected</span> <span class="kinetic-word">through</span> <span class="kinetic-word">BriskSMS.</span>
         </h2>
         <p class="section-desc">
-          Automate message dispatch from spreadsheets and deliver verified payment notifications directly to your accounting, CRM, and workflow tools with zero manual data entry.
+          Automate message dispatch from spreadsheets and deliver verified payments directly to your accounting, CRM, and workflow tools with zero manual data entry.
         </p>
 
         <div class="integrations-grid">
@@ -2263,19 +491,19 @@
               </p>
               <div class="integration-diagram">
                 <span class="diagram-pill">Google Sheets</span>
-                <span class="diagram-arrow">→</span>
+                <span class="diagram-arrow"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" stroke-width="2"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></span>
                 <span class="diagram-pill">Zapier Catch Hook</span>
-                <span class="diagram-arrow">→</span>
+                <span class="diagram-arrow"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" stroke-width="2"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></span>
                 <span class="diagram-pill">BriskSMS Carrier Relay</span>
               </div>
             </div>
             <div style="margin-top: 1.25rem; display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center;">
               <a href="https://zapier.com" target="_blank" rel="noopener noreferrer" class="btn btn-zapier">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm1.2 17.4h-2.4v-4.2H6.6v-2.4h4.2V6.6h2.4v4.2h4.2v2.4h-4.2v4.2z" fill="#FFF"/></svg>
-                Connect on Zapier.com
+                Connect on Zapier.com <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" stroke-width="2"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></svg>
               </a>
-              <a href="/developers#zapier-sms" style="font-size: 0.825rem; font-weight: 700; color: var(--text-main); text-decoration: none; display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.5rem 0.25rem;">
-                Explore Spreadsheet Dispatch <span>&rarr;</span>
+              <a href="/developers#zapier-sms" style="font-size: 0.825rem; font-weight: 600; color: var(--text-main); text-decoration: none; display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.5rem 0.25rem;">
+                Explore Spreadsheet Dispatch
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" stroke-width="2"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
               </a>
             </div>
           </div>
@@ -2286,19 +514,20 @@
               <span class="integration-badge">Real-Time Financial Outbox</span>
               <h3 class="integration-title">Instant Payment Reconciliation Webhooks</h3>
               <p class="integration-text">
-                When customer payments settle against invoices, BriskSMS signs and dispatches transactional webhooks to your destination. Automatically mark invoices paid in QuickBooks, unlock MikroTik internet access, or notify your billing team.
+                When customer payments settle against invoices, BriskSMS signs and dispatches transactional webhooks to your destination. Automatically mark invoices paid in your accounting or billing system, grant access in your own platform, or notify your team.
               </p>
               <div class="integration-diagram">
                 <span class="diagram-pill">M-Pesa / Mixx / Airtel</span>
-                <span class="diagram-arrow">→</span>
+                <span class="diagram-arrow"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" stroke-width="2"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></span>
                 <span class="diagram-pill">BriskSMS Engine</span>
-                <span class="diagram-arrow">→</span>
+                <span class="diagram-arrow"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" stroke-width="2"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></span>
                 <span class="diagram-pill">HMAC-Signed Webhook</span>
               </div>
             </div>
             <div style="margin-top: 1rem;">
-              <a href="/developers#webhooks" style="font-size: 0.825rem; font-weight: 700; color: var(--text-main); text-decoration: none; display: inline-flex; align-items: center; gap: 0.35rem;">
-                View Webhook Specifications <span>→</span>
+              <a href="/developers#webhooks" style="font-size: 0.825rem; font-weight: 600; color: var(--text-main); text-decoration: none; display: inline-flex; align-items: center; gap: 0.35rem;">
+                View Webhook Specifications
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" stroke-width="2"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
               </a>
             </div>
           </div>
@@ -2313,15 +542,16 @@
               </p>
               <div class="integration-diagram">
                 <span class="diagram-pill">x-api-key: YOUR_BRISKSMS_API_KEY</span>
-                <span class="diagram-arrow">→</span>
+                <span class="diagram-arrow"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" stroke-width="2"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></span>
                 <span class="diagram-pill">POST /v1/messages/send</span>
-                <span class="diagram-arrow">→</span>
+                <span class="diagram-arrow"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" stroke-width="2"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></span>
                 <span class="diagram-pill">Multi-SIM Dispatch</span>
               </div>
             </div>
             <div style="margin-top: 1rem;">
-              <a href="/developers#api-reference" style="font-size: 0.825rem; font-weight: 700; color: var(--text-main); text-decoration: none; display: inline-flex; align-items: center; gap: 0.35rem;">
-                Browse API Documentation <span>→</span>
+              <a href="/developers#api-reference" style="font-size: 0.825rem; font-weight: 600; color: var(--text-main); text-decoration: none; display: inline-flex; align-items: center; gap: 0.35rem;">
+                Browse API Documentation
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" stroke-width="2"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
               </a>
             </div>
           </div>
@@ -2329,10 +559,11 @@
       </div>
     </section>
 
-    <!-- 6B. DEDICATED ENTERPRISE MERCHANT CONSOLE SHOWCASE -->
-    <section class="section-padding" id="merchant-console" style="position: relative; overflow: visible;">
+    <!-- 6B. DEDICATED Enterprise merchant console SHOWCASE -->
+    <section class="section-padding ambient-host" id="merchant-console" style="position: relative; overflow: visible;">
+      <div class="drift" aria-hidden="true"><span class="drift-blob drift-b1"></span><span class="drift-blob drift-b2"></span><span class="drift-blob drift-b3"></span><span class="drift-blob drift-b4"></span></div>
       <div class="container">
-        <div class="eyebrow">ENTERPRISE MERCHANT CONSOLE</div>
+        <div class="eyebrow">Enterprise merchant console</div>
         <h2 class="section-title kinetic-text">
           <span class="kinetic-word">Mission</span> <span class="kinetic-word">control</span> <span class="kinetic-word">for</span> <span class="kinetic-word">financial</span> <span class="kinetic-word">intelligence</span> <span class="kinetic-word">&amp;</span> <span class="kinetic-word">cellular</span> <span class="kinetic-word">relay.</span>
         </h2>
@@ -2346,7 +577,7 @@
           <div class="console-showcase-card scroll-build">
             <div>
               <div class="console-card-header">
-                <span class="console-badge-active">99.8% Deterministic Matching</span>
+                <span class="console-badge-active">Rule-based matching</span>
               </div>
               <h3 class="console-card-title">Live Push Financial Ledger</h3>
               <p class="console-card-desc">
@@ -2356,11 +587,11 @@
             <div class="console-metric-box">
               <div class="metric-row">
                 <span class="metric-label">TZS 85,000 (M-Pesa · 9K37XZ10Q)</span>
-                <span class="metric-status status-matched">SETTLED</span>
+                <span class="metric-status status-matched">Settled</span>
               </div>
               <div class="metric-row">
                 <span class="metric-label">TZS 240,000 (Mixx · YAS-8812)</span>
-                <span class="metric-status status-matched">SETTLED</span>
+                <span class="metric-status status-matched">Settled</span>
               </div>
             </div>
           </div>
@@ -2379,11 +610,11 @@
             <div class="console-metric-box">
               <div class="metric-row">
                 <span class="metric-label">TZS 15,000 (Expected TZS 20,000)</span>
-                <span class="metric-status status-review">UNDERPAYMENT</span>
+                <span class="metric-status status-review">Underpayment</span>
               </div>
               <div class="metric-row">
                 <span class="metric-label">TZS 50,000 (Unmatched Ref)</span>
-                <span class="metric-status status-review">NEEDS REVIEW</span>
+                <span class="metric-status status-review">Needs review</span>
               </div>
             </div>
           </div>
@@ -2406,7 +637,7 @@
               </div>
               <div class="metric-row">
                 <span class="metric-label">Queue: 0 pending · Sync: &lt; 250ms</span>
-                <span class="metric-status status-matched">HEALTHY</span>
+                <span class="metric-status status-matched">Healthy</span>
               </div>
             </div>
           </div>
@@ -2416,9 +647,6 @@
             <div>
               <div class="console-card-header">
                 <span class="console-badge-zapier">Zapier Integration</span>
-                <span>
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm1.2 17.4h-2.4v-4.2H6.6v-2.4h4.2V6.6h2.4v4.2h4.2v2.4h-4.2v4.2z" fill="#FF4F00"/></svg>
-                </span>
               </div>
               <h3 class="console-card-title">Zapier &amp; Spreadsheet Automation</h3>
               <p class="console-card-desc">
@@ -2428,8 +656,7 @@
             <div class="console-metric-box" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem;">
               <span style="font-size: 0.8rem; font-weight: 600; color: var(--text-sub);">Direct 1-Click Connect</span>
               <a href="https://zapier.com" target="_blank" rel="noopener noreferrer" class="btn btn-zapier" style="padding: 0.45rem 1rem; font-size: 0.785rem;">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm1.2 17.4h-2.4v-4.2H6.6v-2.4h4.2V6.6h2.4v4.2h4.2v2.4h-4.2v4.2z" fill="#FFF"/></svg>
-                Connect on Zapier.com
+                Connect on Zapier.com <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" stroke-width="2"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></svg>
               </a>
             </div>
           </div>
@@ -2437,21 +664,41 @@
 
         <!-- Call to Action Banner -->
         <div class="console-cta-banner scroll-build">
-          <div>
-            <h4 style="font-size: 1.15rem; font-weight: 700; color: var(--text-main); margin-bottom: 0.35rem;">
+          <div class="console-cta-text">
+            <h4 style="font-size: 1.15rem; font-weight: 600; color: var(--text-main); margin-bottom: 0.35rem;">
               Explore the BriskSMS Merchant Console
             </h4>
             <p style="font-size: 0.885rem; color: var(--text-sub);">
               Explore the live settlement stream, review queue, API key generation, and Zapier Catch Hook configuration.
             </p>
           </div>
-          <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center;">
+          <div class="console-cta-actions">
             <a href="/console" class="btn btn-hero-black" style="height: 44px; min-width: 170px; font-size: 0.885rem;">
               Launch Merchant Console
             </a>
             <a href="https://zapier.com" target="_blank" rel="noopener noreferrer" class="btn btn-zapier" style="height: 44px; padding: 0 1.35rem;">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm1.2 17.4h-2.4v-4.2H6.6v-2.4h4.2V6.6h2.4v4.2h4.2v2.4h-4.2v4.2z" fill="#FFF"/></svg>
-              Zapier.com
+              Zapier.com <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" stroke-width="2"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></svg>
+            </a>
+          </div>
+        </div>
+
+        <!-- Android relay app -->
+        <div class="app-callout scroll-build">
+          <div class="console-cta-text">
+            <h4 style="font-size: 1.15rem; font-weight: 600; color: var(--text-main); margin-bottom: 0.35rem;">
+              Get the Android relay app
+            </h4>
+            <p style="font-size: 0.885rem; color: var(--text-sub);">
+              The BriskSMS relay app reads your payment texts and sends your SMS from your own SIM. Install it from Google Play or <a href="https://downloads.brisksms.app/brisksms-direct.apk" rel="noopener noreferrer">download it directly</a>, then follow the setup guide.
+            </p>
+          </div>
+          <div class="console-cta-actions">
+            <!-- Package id tz.co.brisksms comes from the Android build. Check this address once the listing is live -->
+            <a class="play-badge" href="https://play.google.com/store/apps/details?id=tz.co.brisksms" target="_blank" rel="noopener noreferrer">
+              <img src="assets/brand/google-play-badge.svg" width="180" height="53" alt="Get it on Google Play">
+            </a>
+            <a href="/getting-started" class="btn btn-hero-black" style="height: 44px; min-width: 170px; font-size: 0.885rem;">
+              Read the setup guide
             </a>
           </div>
         </div>
@@ -2461,7 +708,7 @@
     <!-- 7. USE CASES -->
     <section class="section-padding">
       <div class="container">
-        <div class="eyebrow">MADE FOR BUSINESS OPERATIONS</div>
+        <div class="eyebrow">Made for business operations</div>
         <h2 class="section-title kinetic-text">
           <span class="kinetic-word">One</span> <span class="kinetic-word">workspace</span> <span class="kinetic-word">for</span> <span class="kinetic-word">the</span> <span class="kinetic-word">details</span> <span class="kinetic-word">that</span> <span class="kinetic-word">matter.</span>
         </h2>
@@ -2482,7 +729,7 @@
 
           <div class="usecase-card scroll-build">
             <h3 class="usecase-title">Online businesses</h3>
-            <p class="usecase-text">Bring payment notification records into a structured workflow for reviewing customer orders and invoices.</p>
+            <p class="usecase-text">Bring payment message records into a structured workflow for reviewing customer orders and invoices.</p>
           </div>
 
           <div class="usecase-card scroll-build">
@@ -2496,7 +743,7 @@
     <!-- 8. SECURITY AND ACCOUNTABILITY -->
     <section class="section-padding" id="security">
       <div class="container">
-        <div class="eyebrow">BUILT WITH RESPONSIBILITY</div>
+        <div class="eyebrow">Built with responsibility</div>
         <h2 class="section-title kinetic-text">
           <span class="kinetic-word">Business</span> <span class="kinetic-word">information</span> <span class="kinetic-word">deserves</span> <span class="kinetic-word">careful</span> <span class="kinetic-word">handling.</span>
         </h2>
@@ -2512,7 +759,7 @@
 
           <div class="sec-card scroll-build">
             <h3 class="sec-card-title">Purpose-limited</h3>
-            <p class="sec-card-text">Android notification access is intended for authorized payment notifications relevant to business workflows.</p>
+            <p class="sec-card-text">The app keeps only payment messages from supported mobile money and bank senders. Everything else is ignored on the phone and never stored.</p>
           </div>
 
           <div class="sec-card scroll-build">
@@ -2522,7 +769,7 @@
 
           <div class="sec-card scroll-build">
             <h3 class="sec-card-title">Careful verification</h3>
-            <p class="sec-card-text">A payment notification alone is not treated as definitive settlement confirmation.</p>
+            <p class="sec-card-text">A payment message alone is not treated as definitive settlement confirmation.</p>
           </div>
 
           <div class="sec-card scroll-build">
@@ -2533,11 +780,11 @@
       </div>
     </section>
 
-    <!-- 9. FREQUENTLY ASKED QUESTIONS -->
+    <!-- 9. Frequently asked questions -->
     <section class="section-padding" id="faq">
       <div class="container">
         <div style="text-align: center; max-width: 680px; margin: 0 auto 3rem auto;">
-          <div class="eyebrow" style="margin-bottom: 0.85rem;">FREQUENTLY ASKED QUESTIONS</div>
+          <div class="eyebrow" style="margin-bottom: 0.85rem;">Frequently asked questions</div>
           <h2 class="section-title">Common questions about BriskSMS.</h2>
         </div>
 
@@ -2558,7 +805,7 @@
               <span class="faq-icon">+</span>
             </button>
             <div class="faq-answer">
-              <p>No. Payment notifications provide transaction evidence, but they are not automatically treated as definitive proof of settlement. Verification and review workflows help businesses make informed decisions.</p>
+              <p>No. Payment messages provide transaction evidence, but they are not automatically treated as definitive proof of settlement. Verification and review workflows help businesses make informed decisions.</p>
             </div>
           </div>
 
@@ -2578,7 +825,7 @@
               <span class="faq-icon">+</span>
             </button>
             <div class="faq-answer">
-              <p>The Android application is used to collect authorized payment notifications from supported devices. The web platform is where businesses manage their payment records, reconciliation workflows, and messaging.</p>
+              <p>The Android application is used to collect authorized payment messages from supported devices. The web platform is where businesses manage their payment records, reconciliation workflows, and messaging.</p>
             </div>
           </div>
 
@@ -2628,16 +875,17 @@
     <!-- 10. FINAL CTA -->
     <section class="section-padding" id="get-started">
       <div class="container">
-        <div class="final-cta-card">
-          <div class="eyebrow" style="margin-bottom: 0.85rem;">TAKE CONTROL OF YOUR BUSINESS OPERATIONS</div>
+        <div class="final-cta-card ambient-host">
+          <div class="drift" aria-hidden="true"><span class="drift-blob drift-b1"></span><span class="drift-blob drift-b2"></span><span class="drift-blob drift-b3"></span><span class="drift-blob drift-b4"></span></div>
+          <div class="eyebrow" style="margin-bottom: 0.85rem;">Take control of your business operations</div>
           <h2 class="section-title">Make every business transaction easier to understand.</h2>
           <p class="section-desc">
             Bring payment activity, reconciliation workflows, and customer communication into a more organized way of working.
           </p>
 
           <div class="final-cta-actions">
-            <a href="#get-started" class="btn btn-hero-sand">Get Started</a>
-            <a href="/developers" class="btn btn-hero-black">Developer Portal</a>
+            <span class="venom-host"><a href="#get-started" class="btn btn-hero-sand venom-link">Get Started<svg class="btn-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></a></span>
+            <a href="/developers" class="btn btn-hero-black">Developer Portal<svg class="btn-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></a>
           </div>
         </div>
       </div>
@@ -2652,8 +900,8 @@
           <div class="footer-brand-title">
             <svg width="24" height="24" viewBox="0 0 32 32" fill="none">
               <rect width="32" height="32" rx="8" fill="#0B0A09"/>
-              <path d="M7 8C7 6.34 8.34 5 10 5H22C23.66 5 25 6.34 25 8V17C25 18.66 23.66 20 22 20H13.5L9 24.5V20H10C8.34 20 7 18.66 7 17V8Z" fill="#F4F1EA"/>
-              <path d="M17.5 7.5L11.5 14H16L14 19.5L20.5 13H15.5L17.5 7.5Z" fill="#C6B480"/>
+              <path d="M10 5H22A2 2 0 0 1 24 7V25L22 23L20 25L18 23L16 25L14 23L12 25L10 23L8 25V7A2 2 0 0 1 10 5Z" fill="#F4F1EA"/>
+              <path d="M10.36 15.14L14.5 19.33L21.68 11.09L20.32 9.91L14.5 16.67L11.64 13.86Z" fill="#C6B480"/>
             </svg>
             <span>BriskSMS</span>
           </div>
@@ -2668,6 +916,7 @@
             <li><a href="#bulk-sms">Bulk Messaging</a></li>
             <li><a href="https://zapier.com" target="_blank" rel="noopener noreferrer">Zapier.com Integration</a></li>
             <li><a href="/developers">Developer API</a></li>
+            <li><a href="/getting-started">Setup guide</a></li>
             <li><a href="#how-it-works">How It Works</a></li>
           </ul>
         </div>
@@ -2684,257 +933,19 @@
         <div>
           <div class="footer-col-title">Legal</div>
           <ul class="footer-links">
-            <li><a href="#privacy">Privacy Policy</a></li>
-            <li><a href="#terms">Terms of Service</a></li>
+            <li><a href="/privacy">Privacy Policy</a></li>
+            <li><a href="/terms">Terms of Service</a></li>
           </ul>
         </div>
       </div>
 
-      <div id="privacy" style="margin-top: 2.5rem; padding-top: 1.5rem; border-top: 1px solid rgba(11,10,9,0.08); font-size: 0.78rem; color: var(--text-muted); line-height: 1.6;">
-        <strong style="color: var(--text-main);">Privacy &amp; Data Scope:</strong> BriskSMS processes only authorized financial notification alerts matching configured telco and bank sender patterns. Personal SMS conversations are never read, transmitted, or stored.
-      </div>
-      <div id="terms" style="margin-top: 0.65rem; font-size: 0.78rem; color: var(--text-muted); line-height: 1.6;">
-        <strong style="color: var(--text-main);">Terms of Service:</strong> BriskSMS operates strictly as non-custodial reconciliation and cellular relay software. Merchants retain full custody and settlement authority over their carrier and bank accounts.
-      </div>
-
       <div class="footer-bottom">
-        <div>Built to help businesses operate with greater clarity.</div>
+        <div>BriskSMS is an independent software automation platform and is not a bank, electronic money issuer, or payment service provider licensed by the Bank of Tanzania.</div>
         <div>&copy; BriskSMS. All rights reserved.</div>
       </div>
     </div>
   </footer>
 
-  <script>
-    // 1. Dynamic Hero Variations
-    const heroData = [
-      {
-        headline: "Every payment deserves clarity.",
-        description: "Bring payment notifications, transaction records, and invoice reconciliation into one organized workspace. Spend less time checking payments and more time running your business."
-      },
-      {
-        headline: "Stop chasing payments. Start seeing the full picture.",
-        description: "Know which payments have been received, which invoices remain outstanding, and which transactions need your attention."
-      },
-      {
-        headline: "Your business moves. Your payment records should keep up.",
-        description: "Turn incoming payment notifications into organized transaction records. Match payments to invoices, identify exceptions, and keep your financial operations moving."
-      },
-      {
-        headline: "Better business communication starts here.",
-        description: "Reach customers with single, bulk, and scheduled SMS campaigns. Manage your messaging alongside the tools that help you run your business."
-      }
-    ];
-
-    const headlineEl = document.getElementById('heroHeadline');
-    const descEl = document.getElementById('heroDescription');
-    const heroStageEl = document.querySelector('.hero-stage');
-
-    function switchHero(index) {
-      if (!headlineEl || !descEl) return;
-
-      // Smooth fade-out and slight downward reset
-      headlineEl.classList.remove('revealed');
-      headlineEl.style.opacity = '0';
-      headlineEl.style.transform = 'translateY(6px)';
-      descEl.style.opacity = '0';
-      descEl.style.transform = 'translateY(6px)';
-
-      setTimeout(() => {
-        // Build progressive kinetic words with staggered reveal
-        const words = heroData[index].headline.split(' ');
-        headlineEl.innerHTML = words.map((w, idx) =>
-          `<span class="kinetic-word" style="transition-delay: ${idx * 45}ms;">${w}</span>`
-        ).join(' ');
-
-        descEl.textContent = heroData[index].description;
-
-        // Force browser layout reflow to trigger sequential reveal transitions
-        void headlineEl.offsetHeight;
-
-        headlineEl.classList.add('revealed');
-        headlineEl.style.opacity = '1';
-        headlineEl.style.transform = 'translateY(0)';
-        descEl.style.opacity = '1';
-        descEl.style.transform = 'translateY(0)';
-      }, 200);
-    }
-
-    let currentHeroIndex = 0;
-    let autoCycle = null;
-
-    function startHeroCycle() {
-      if (autoCycle) clearInterval(autoCycle);
-      autoCycle = setInterval(() => {
-        currentHeroIndex = (currentHeroIndex + 1) % heroData.length;
-        switchHero(currentHeroIndex);
-      }, 5000);
-    }
-
-    function stopHeroCycle() {
-      if (autoCycle) {
-        clearInterval(autoCycle);
-        autoCycle = null;
-      }
-    }
-
-    // Start auto-rotation
-    startHeroCycle();
-
-    // Pause on hover so users can finish reading comfortably
-    if (heroStageEl) {
-      heroStageEl.addEventListener('mouseenter', stopHeroCycle);
-      heroStageEl.addEventListener('mouseleave', startHeroCycle);
-    }
-
-    // Pause when tab is hidden, resume when visible
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden) {
-        stopHeroCycle();
-      } else {
-        startHeroCycle();
-      }
-    });
-
-
-
-    // 2. Scroll-Driven Storytelling (Intersection Observer for Kinetic Typography)
-    const kineticElements = document.querySelectorAll('.kinetic-text');
-    const kineticObserver = new IntersectionObserver((entries) => {
-      entries.forEach(entry => {
-        if (entry.isIntersecting) {
-          entry.target.classList.add('revealed');
-        }
-      });
-    }, { threshold: 0.25 });
-
-    kineticElements.forEach(el => kineticObserver.observe(el));
-
-
-    // Scroll-Driven Building Animation Observer
-    const buildElements = document.querySelectorAll('.scroll-build');
-    const buildObserver = new IntersectionObserver((entries) => {
-      entries.forEach(entry => {
-        if (entry.isIntersecting) {
-          entry.target.classList.add('built');
-        }
-      });
-    }, { threshold: 0.18 });
-
-    buildElements.forEach(el => buildObserver.observe(el));
-
-    // 3. Responsive 3D Chrome Spheres Motion Engine
-    const s1 = document.getElementById('sphere1');
-    const s1Shadow = document.getElementById('sphereShadow1');
-    const s2 = document.getElementById('sphere2');
-    const s3 = document.getElementById('sphere3');
-    const heroCard = document.getElementById('heroCard');
-
-    let mouseX = 0, mouseY = 0;
-    let currentX1 = 0, currentY1 = 0;
-    let currentX2 = 0, currentY2 = 0;
-    let currentX3 = 0, currentY3 = 0;
-    const isReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-    if (!isReducedMotion) {
-      window.addEventListener('mousemove', (e) => {
-        const rect = heroCard.getBoundingClientRect();
-        if (e.clientY < rect.bottom + 200) {
-          mouseX = (e.clientX - window.innerWidth / 2);
-          mouseY = (e.clientY - window.innerHeight / 2);
-        }
-      });
-
-      function animateSpheres(time) {
-        // Grounded Landing Physics: Sphere 1 rests solidly on its contact plane
-        const float1 = Math.sin(time * 0.001) * 1.5; /* Micro-breathing of 1.5px, firmly grounded */
-        const rot1 = Math.sin(time * 0.0005) * 2;
-
-        const float2 = Math.cos(time * 0.0014) * 5;
-        const float3 = Math.sin(time * 0.0009) * 10;
-
-        // Smooth Mouse Parallax Easing
-        currentX1 += (mouseX * 0.02 - currentX1) * 0.05;
-        currentY1 += (mouseY * 0.02 - currentY1) * 0.05;
-
-        currentX2 += (mouseX * -0.035 - currentX2) * 0.05;
-        currentY2 += (mouseY * -0.035 - currentY2) * 0.05;
-
-        currentX3 += (mouseX * 0.05 - currentX3) * 0.05;
-        currentY3 += (mouseY * 0.05 - currentY3) * 0.05;
-
-        // Scroll Parallax
-        const scrollY = window.scrollY;
-        const scrollOffset1 = scrollY * 0.06;
-        const scrollOffset2 = scrollY * 0.12;
-        const scrollOffset3 = scrollY * -0.15;
-
-        if (s1) s1.style.transform = `translate3d(${currentX1}px, ${float1 + currentY1 - scrollOffset1}px, 0) rotate(${rot1}deg)`;
-        if (s1Shadow) s1Shadow.style.transform = `translate3d(${currentX1 * 0.7}px, ${currentY1 * 0.15}px, 0) scale(${1 + float1 * 0.008})`;
-        if (s2) s2.style.transform = `translate3d(${currentX2}px, ${float2 + currentY2 - scrollOffset2}px, 0)`;
-        if (s3) s3.style.transform = `translate3d(${currentX3}px, ${float3 + currentY3 - scrollOffset3}px, 0)`;
-
-        // Scroll-Dynamic Chrome Atmosphere Across Entire Website
-        const atmoSpheres = document.querySelectorAll(".atmospheric-sphere");
-        atmoSpheres.forEach((atmo, i) => {
-          const speed = parseFloat(atmo.dataset.speed || 0.1);
-          const rect = atmo.getBoundingClientRect();
-          if (rect.top < window.innerHeight + 350 && rect.bottom > -350) {
-            const relScroll = (window.innerHeight / 2 - rect.top) * speed;
-            const atmoFloat = Math.sin(time * 0.0011 + i) * 7;
-            const atmoRot = Math.sin(time * 0.0006 + i) * 3 + (scrollY * 0.02 * (i % 2 === 0 ? 1 : -1));
-            atmo.style.transform = `translate3d(${currentX1 * 0.3 * (i % 2 === 0 ? 1 : -1)}px, ${atmoFloat + relScroll}px, 0) rotate(${atmoRot}deg)`;
-          }
-        });
-
-        requestAnimationFrame(animateSpheres);
-      }
-
-      requestAnimationFrame(animateSpheres);
-    }
-
-    // 4. FAQ Accordion Interaction
-    const faqItems = document.querySelectorAll('.faq-item');
-    faqItems.forEach(item => {
-      const questionBtn = item.querySelector('.faq-question');
-      questionBtn.addEventListener('click', () => {
-        const wasActive = item.classList.contains('active');
-        faqItems.forEach(otherItem => otherItem.classList.remove('active'));
-        if (!wasActive) {
-          item.classList.add('active');
-        }
-      });
-    });
-
-    // 5. Mobile Navigation Drawer Controls
-    const mobileMenuBtn = document.getElementById('mobileMenuBtn');
-    const mobileNavDrawer = document.getElementById('mobileNavDrawer');
-    const mobileNavClose = document.getElementById('mobileNavClose');
-    const mobileNavBackdrop = document.getElementById('mobileNavBackdrop');
-    const mobileNavItems = document.querySelectorAll('.mobile-nav-item');
-
-    function openMobileNav() {
-      if (!mobileNavDrawer) return;
-      mobileNavDrawer.classList.add('open');
-      mobileNavDrawer.setAttribute('aria-hidden', 'false');
-      document.body.style.overflow = 'hidden';
-    }
-
-    function closeMobileNav() {
-      if (!mobileNavDrawer) return;
-      mobileNavDrawer.classList.remove('open');
-      mobileNavDrawer.setAttribute('aria-hidden', 'true');
-      document.body.style.overflow = '';
-    }
-
-    if (mobileMenuBtn) mobileMenuBtn.addEventListener('click', openMobileNav);
-    if (mobileNavClose) mobileNavClose.addEventListener('click', closeMobileNav);
-    if (mobileNavBackdrop) mobileNavBackdrop.addEventListener('click', closeMobileNav);
-    mobileNavItems.forEach(item => item.addEventListener('click', closeMobileNav));
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && mobileNavDrawer && mobileNavDrawer.classList.contains('open')) {
-        closeMobileNav();
-      }
-    });
-  </script>
+  <script src="assets/js/home.js"></script>
 </body>
 </html>

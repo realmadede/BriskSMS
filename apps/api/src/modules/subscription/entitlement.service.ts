@@ -60,6 +60,17 @@ export class EntitlementService {
   }
 
   /**
+   * Asserts that at least one of several boolean features is enabled (e.g. OAuth is open to
+   * Zapier-only and API-enabled plans alike)
+   */
+  async assertAnyFeatureEnabled(organizationId: string, featureKeys: string[], tx: SqlExecutor = sql): Promise<void> {
+    const entitlements = await this.getEntitlements(organizationId, tx);
+    if (!featureKeys.some((key) => entitlements[key] === 'true' || entitlements[key] === '1')) {
+      throw new FeatureDisabledError(featureKeys.join(' or '));
+    }
+  }
+
+  /**
    * Evaluates a numeric quota limit against current usage
    */
   async checkNumericLimit(

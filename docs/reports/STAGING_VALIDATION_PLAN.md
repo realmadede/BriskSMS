@@ -69,8 +69,8 @@ flowchart TD
     AndroidIngest -->|POST /v1/ingestion/evidence| Proxy
     AndroidGateway -->|POST /v1/messaging/webhooks/smsgate| Proxy
 
-    Proxy -->|Host: staging-api.brisksms.com| API
-    Proxy -->|Host: staging-console.brisksms.com| MerchantBrowser
+    Proxy -->|Host: staging-api.brisksms.app| API
+    Proxy -->|Host: staging-console.brisksms.app| MerchantBrowser
     
     API -->|DATABASE_URL (SSL)| PG
     API -->|REDIS_URL (TCP/Auth)| Redis
@@ -138,7 +138,7 @@ The device pairing implementation adheres to a **cryptographic, single-use, 5-mi
      {
        "token": "bsk_pair_...",
        "org": "organization_uuid",
-       "endpoint": "https://staging-api.brisksms.com/v1",
+       "endpoint": "https://staging-api.brisksms.app/v1",
        "exp": "2026-11-10T04:00:00.000Z"
      }
      ```
@@ -158,7 +158,7 @@ The device pairing implementation adheres to a **cryptographic, single-use, 5-mi
 | Carrier / Provider | Network Code | Test Number Prefix | Supported Ingestion (Product A) | Outbound Dispatch (Product B) | Physical SIM Slot |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Vodacom Tanzania** | 640-04 | `+255 74x`, `+255 75x`, `+255 76x` | M-Pesa push/SMS notifications (`MPESA`) | SMSGate SIM 1 routing via cellular radio | Slot 1 |
-| **Mixx by Yas (Tigo)** | 640-02 | `+255 65x`, `+255 67x`, `+255 71x` | Tigo Pesa payment notifications (`TIGO_PESA`) | SMSGate SIM 2 routing via cellular radio | Slot 2 |
+| **Mixx by Yas (Tigo)** | 640-02 | `+255 65x`, `+255 67x`, `+255 71x` | Mixx by Yas payment notifications (`MIXX`) | SMSGate SIM 2 routing via cellular radio | Slot 2 |
 | **Airtel Tanzania** | 640-05 | `+255 68x`, `+255 69x`, `+255 78x` | Airtel Money notifications (`AIRTEL_MONEY`) | Carrier routing / fallback | Secondary Test Device |
 | **Halotel Tanzania** | 640-09 | `+255 62x` | HaloPesa notifications (`HALOPESA`) | Carrier routing / fallback | Secondary Test Device |
 | **CRDB Bank** | N/A | Alpha sender `CRDB` | Bank push alerts & payment receipts | N/A (Inbound evidence only) | Notification Ingestion |
@@ -168,7 +168,7 @@ The device pairing implementation adheres to a **cryptographic, single-use, 5-mi
   - *Permissions Required:* `BIND_NOTIFICATION_LISTENER_SERVICE`, `POST_NOTIFICATIONS`, `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`.
   - *OEM Battery Optimization:* Whitelisted from aggressive background process termination (Samsung Auto-optimization disabled, Xiaomi MIUI battery saver set to "No restrictions", Transsion autostart enabled).
 - **Product B SMSGate Gateway Device:** Dedicated physical dual-SIM Android handset running the SMSGate relay application.
-  - *Network Configuration:* Direct HTTPS connectivity to `staging-api.brisksms.com`.
+  - *Network Configuration:* Direct HTTPS connectivity to `staging-api.brisksms.app`.
   - *Webhook Signing:* Configured with staging HMAC-SHA256 device signing secret.
 
 ---
@@ -195,7 +195,7 @@ The device pairing implementation adheres to a **cryptographic, single-use, 5-mi
 | Test ID | Test Scenario | Execution Method | Expected Verifiable Result |
 | :--- | :--- | :--- | :--- |
 | **STG-PAY-01** | 5-Minute Cryptographic QR Pairing | `POST /v1/devices/pairing-token` & `POST /v1/devices/pair` | Issues `bsk_pair_...` (300s TTL). Companion submits Keystore `publicKeyPem`. Atomically consumes token, registers device, returns `bsk_dev_...`. Duplicate attempt fails with `401`. |
-| **STG-PAY-02** | Notification Evidence Ingestion | `POST /v1/ingestion/evidence` with `bsk_dev_...` | Persists immutably in `raw_payment_evidence` (`OBSERVED`). Normalizes M-Pesa, Tigo, Airtel, Halotel, and CRDB Bank alerts. |
+| **STG-PAY-02** | Notification Evidence Ingestion | `POST /v1/ingestion/evidence` with `bsk_dev_...` | Persists immutably in `raw_payment_evidence` (`OBSERVED`). Normalizes M-Pesa, Mixx by Yas, Airtel, Halotel, and CRDB Bank alerts. |
 | **STG-PAY-03** | Cryptographic Deduplication Verification | Re-send identical notification 5 times | Exactly 1 payment record created. 4 duplicates detected via `hash(...)` and return idempotency confirmation without re-reconciling. |
 | **STG-PAY-04** | Offline Evidence Queue & Synchronization | Ingest payments in airplane mode, reconnect | Room database queues evidence locally; synchronizes in FIFO order upon network restoration without data loss. |
 | **STG-PAY-05** | Candidate Invoice Matching (No Auto-Settlement) | Ingest payment matching open invoice | Candidate match marked `MATCHED`. **Invoice status remains `UNPAID` / `PARTIALLY_PAID`**. Emits `payment.matched` with `verificationRequired: true`. |
@@ -225,7 +225,7 @@ The device pairing implementation adheres to a **cryptographic, single-use, 5-mi
 ### Workstream 5: Merchant Web Console Experience
 | Test ID | Test Scenario | Execution Method | Expected Verifiable Result |
 | :--- | :--- | :--- | :--- |
-| **STG-WEB-01** | Static Asset Serving & Security | Access `https://staging-console.brisksms.com` | `apps/web/server.ts` serves static Stitch assets (`index.html`, `console.html`, `developers.html`) with strict security headers. |
+| **STG-WEB-01** | Static Asset Serving & Security | Access `https://staging-console.brisksms.app` | `apps/web/server.ts` serves static Stitch assets (`index.html`, `console.html`, `developers.html`) with strict security headers. |
 | **STG-WEB-02** | Real-Time Dashboard Analytics | Refresh console after payments / messages | Dashboard KPI cards display exact live counts for processed volume, reconciliation rate, and gateway queue health. |
 
 ---
@@ -238,8 +238,8 @@ The SMSGate integration distinguishes between two modes:
    - Normalized Dispatch URL: `https://api.sms-gate.app/3rdparty/v1/messages`
    - Inbound Webhook: Delivered to `POST /v1/messaging/webhooks/smsgate`
 2. **Self-Hosted / Managed Gateway (`MANAGED_GATEWAY`):**
-   - Base URL: `https://gateway.brisksms.com/api/3rdparty/v1` (or tenant-configured server)
-   - Normalized Dispatch URL: `https://gateway.brisksms.com/api/3rdparty/v1/messages`
+   - Base URL: `https://gateway.brisksms.app/api/3rdparty/v1` (or tenant-configured server)
+   - Normalized Dispatch URL: `https://gateway.brisksms.app/api/3rdparty/v1/messages`
    - Note on URL Normalization: Native self-hosted SMSGate uses `/api/3rdparty/v1/messages`. Passing a bare `/api/v1` path will fail with HTTP 404 unless a custom reverse proxy rewrite rule explicitly maps `/api/v1` to `/api/3rdparty/v1`.
 
 ---
@@ -247,9 +247,9 @@ The SMSGate integration distinguishes between two modes:
 ## 8. Explicit Staging & External Configuration Blockers
 
 The following items represent operational and physical hardware requirements prior to commercial staging and production launch:
-1. **Google Identity OAuth Credentials (Configuration Requirement):** The Google Sign-In backend implementation and RS256 token verification engine are complete and tested with automated mock-based and local cryptographic suites. Staging operation requires provisioning a Google Cloud Project with OAuth 2.0 Web Client credentials (`GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`) and authorized JavaScript origins for `staging-console.brisksms.com`.
-2. **Resend Transactional Email API Key & DNS Verification (Configuration Requirement):** The Resend transactional email provider and token lifecycle are complete and tested with automated mock-based suites. Staging operation requires acquiring a live `RESEND_API_KEY` and configuring SPF/DKIM DNS records for `staging.brisksms.com`.
-3. **Physical Cellular Hardware & Carrier SIMs:** Staging cannot complete end-to-end cellular validation without physical Android devices and active Tanzanian carrier SIMs (Vodacom, Tigo, Airtel, Halotel).
+1. **Google Identity OAuth Credentials (Configuration Requirement):** The Google Sign-In backend implementation and RS256 token verification engine are complete and tested with automated mock-based and local cryptographic suites. Staging operation requires provisioning a Google Cloud Project with OAuth 2.0 Web Client credentials (`GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`) and authorized JavaScript origins for `staging-console.brisksms.app`.
+2. **Resend Transactional Email API Key & DNS Verification (Configuration Requirement):** The Resend transactional email provider and token lifecycle are complete and tested with automated mock-based suites. Staging operation requires acquiring a live `RESEND_API_KEY` and configuring SPF/DKIM DNS records for `staging.brisksms.app`.
+3. **Physical Cellular Hardware & Carrier SIMs:** Staging cannot complete end-to-end cellular validation without physical Android devices and active Tanzanian carrier SIMs (Vodacom, Mixx by Yas, Airtel, Halotel).
 4. **Staging Cloud Compute & Persistence:** Staging compute VM, managed PostgreSQL 16+, and Redis 7+ are not yet provisioned.
 
 ---
@@ -268,7 +268,7 @@ flowchart TD
 ```
 
 1. **Step 1: Live Google Sign-In Flow:**
-   - Access `https://staging-console.brisksms.com` and trigger Google Sign-In.
+   - Access `https://staging-console.brisksms.app` and trigger Google Sign-In.
    - Frontend requests `POST /v1/auth/google/nonce` to obtain server-issued nonce (`bsk_gn_...`) and sets HttpOnly cookie `bsk_g_nonce` (300s default TTL, configurable via `GOOGLE_NONCE_TTL_SECONDS`).
    - Frontend initializes Google Identity Services passing `nonce: serverNonce`.
    - Merchant selects Google Account; frontend receives real Google ID token and posts to `/v1/auth/google`.
@@ -282,7 +282,7 @@ flowchart TD
 3. **Step 3: Live Resend Registration & Delivery:**
    - Register a new merchant with a real merchant email address via `POST /v1/auth/register`.
    - Verify email delivery arrives in the merchant inbox within 10 seconds via Resend REST API.
-   - Inspect email headers: verify DKIM, SPF, and DMARC alignments for `staging.brisksms.com`.
+   - Inspect email headers: verify DKIM, SPF, and DMARC alignments for `staging.brisksms.app`.
 4. **Step 4: Verification Link Consumption:**
    - Click the verification button in the email targeting `${FRONTEND_URL}/verify-email#token=...`.
    - Confirm browser executes without transmitting token in query string (log privacy).

@@ -18,7 +18,7 @@ import {
   isAllowedOrigin,
 } from '../../core/cookies.js';
 
-function extractClientIp(req: RouteRequest): string {
+export function extractClientIp(req: RouteRequest): string {
   const remoteIp = req.rawReq?.socket?.remoteAddress || '';
   const trustProxy = process.env.TRUST_PROXY === 'true';
   const isProdOrStaging = process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'staging';
@@ -227,7 +227,12 @@ export function registerAuthRoutes(router: Router): void {
     }
 
     const idToken = ((req.body.idToken || req.body.credential) as string) || '';
-    const result = await authService.loginWithGoogle(idToken, extractClientIp(req), cookieNonceHash);
+    const result = await authService.loginWithGoogle(
+      idToken,
+      extractClientIp(req),
+      cookieNonceHash,
+      typeof req.body.totpCode === 'string' ? req.body.totpCode : undefined,
+    );
     const csrfToken = generateCsrfToken();
 
     const cookies: CookieToSet[] = [

@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow, noarchive">
+  <meta name="referrer" content="no-referrer">
+  <title>Nexus</title>
+  <link rel="icon" type="image/svg+xml" href="/assets/brand/favicon.svg?v=2">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-canvas: #F4F1EA; --bg-bone: #EAE6DF; --bg-card: #FFFFFF;
+      --text-main: #0B0A09; --text-sub: #54514C; --text-muted: #827E77;
+      --border-subtle: rgba(11, 10, 9, 0.08);
+      --font-stack: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --font-mono: "JetBrains Mono", monospace;
+      --ok: #2E7D32; --ok-bg: #E8F5E9; --bad: #C62828; --bad-bg: #FFEBEE;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg-canvas); color: var(--text-main); font-family: var(--font-stack); font-size: 0.9rem; line-height: 1.5; min-height: 100vh; }
+    [hidden] { display: none !important; }
+    .wrap { max-width: 1040px; margin: 0 auto; padding: 1.5rem 16px 4rem; }
+    .bar { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-bottom: 1.5rem; }
+    .brand { font-weight: 600; font-size: 1.05rem; }
+    .brand span { color: var(--text-muted); font-weight: 400; margin-left: 0.5rem; }
+    .card { background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 16px; padding: 1.5rem; margin-bottom: 1rem; }
+    .card h2 { font-size: 1.05rem; font-weight: 600; }
+    .lead { color: var(--text-sub); font-size: 0.8rem; margin: 0.25rem 0 1rem; }
+    .gate { max-width: 400px; margin: 12vh auto 0; }
+    label { display: block; font-size: 0.78rem; font-weight: 500; color: var(--text-sub); margin: 0.9rem 0 0.3rem; }
+    input, select, textarea { width: 100%; font: inherit; padding: 0.6rem 0.8rem; border: 1px solid var(--border-subtle); border-radius: 10px; background: #fff; color: inherit; }
+    input[type="checkbox"] { width: auto; }
+    input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible { outline: 2px solid var(--text-main); outline-offset: 2px; }
+    button { font: inherit; font-weight: 600; font-size: 0.82rem; padding: 0.55rem 1.1rem; border-radius: 9999px; border: 1px solid var(--border-subtle); background: #fff; color: var(--text-main); cursor: pointer; }
+    button.primary { background: var(--text-main); color: #fff; border-color: var(--text-main); }
+    button:disabled { opacity: 0.5; cursor: default; }
+    .gate button { width: 100%; margin-top: 1.25rem; }
+    .msg { border-radius: 10px; padding: 0.6rem 0.8rem; font-size: 0.8rem; margin-top: 1rem; }
+    .msg.err { background: var(--bad-bg); color: var(--bad); }
+    .msg.ok { background: var(--ok-bg); color: var(--ok); }
+    .tabs { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
+    .tabs button[aria-selected="true"] { background: var(--text-main); color: #fff; border-color: var(--text-main); }
+    .plan-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap; }
+    .tag { font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-muted); }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.5rem; margin-top: 1rem; }
+    .sub { font-size: 0.78rem; font-weight: 600; margin-bottom: 0.4rem; }
+    .detail .sub { margin-top: 1.25rem; }
+    .row { display: grid; grid-template-columns: 1fr 1.2fr 1.4fr auto; gap: 0.5rem; margin-bottom: 0.5rem; align-items: center; }
+    .ent { display: grid; grid-template-columns: 1fr 120px; gap: 0.5rem; align-items: center; margin-bottom: 0.5rem; font-size: 0.8rem; }
+    .actions { display: flex; gap: 0.5rem; margin-top: 1rem; flex-wrap: wrap; }
+    table { width: 100%; border-collapse: collapse; }
+    td { padding: 0.65rem 0.5rem; border-top: 1px solid var(--border-subtle); vertical-align: middle; }
+    td.k { font-family: var(--font-mono); font-size: 0.75rem; }
+    td small { display: block; color: var(--text-muted); font-size: 0.75rem; }
+    @media (max-width: 720px) {
+      .grid { grid-template-columns: minmax(0, 1fr); }
+      .row { grid-template-columns: 1fr 1fr; }
+      table, tbody, tr, td { display: block; width: 100%; }
+      tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.5rem; align-items: center; padding: 0.75rem 0; border-top: 1px solid var(--border-subtle); }
+      td { border: 0; padding: 0; }
+      td:first-child, td.k { grid-column: 1 / -1; }
+      td.k { overflow-wrap: anywhere; }
+      td.wide { grid-column: 1 / -1; overflow-wrap: anywhere; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="bar">
+      <div class="brand">Nexus<span>BriskSMS platform</span></div>
+      <button id="signOut" hidden>Sign out</button>
+    </div>
+
+    <form id="gate" class="card gate" autocomplete="off">
+      <h2>Platform access</h2>
+      <p class="lead">Staff only. The key is kept in this tab and is gone when you close it.</p>
+      <label for="email">Email</label><input id="email" type="email" required autocomplete="username">
+      <label for="password">Password</label><input id="password" type="password" required autocomplete="current-password">
+      <div id="totpWrap" hidden><label for="totp">Authenticator or recovery code</label><input id="totp" autocomplete="one-time-code"></div>
+      <label for="adminKey">Platform admin key</label><input id="adminKey" type="password" required autocomplete="off">
+      <div id="gateMsg" class="msg err" hidden></div>
+      <button class="primary" type="submit">Enter</button>
+    </form>
+
+    <main id="app" hidden>
+      <div class="tabs" role="tablist">
+        <button role="tab" id="tabPlans" aria-selected="true">Plans</button>
+        <button role="tab" id="tabDefaults" aria-selected="false">Defaults</button>
+        <button role="tab" id="tabOrgs" aria-selected="false">Workspaces</button>
+        <button role="tab" id="tabBilling" aria-selected="false">Billing</button>
+        <button role="tab" id="tabPacks" aria-selected="false">Credit packs</button>
+        <button role="tab" id="tabAudit" aria-selected="false">Audit</button>
+      </div>
+      <div id="appMsg" class="msg" hidden></div>
+      <section id="plansView"></section>
+      <section id="defaultsView" hidden></section>
+      <section id="orgsView" hidden></section>
+      <section id="billingView" hidden></section>
+      <section id="packsView" hidden></section>
+      <section id="auditView" hidden></section>
+    </main>
+  </div>
+
+  <script>
+    (function () {
+      const metaApiBase = document.querySelector('meta[name="brisksms-api-base"]')?.content;
+      const API_BASE = (window.BRISKSMS_API_BASE_URL || metaApiBase || (window.location.port === '4200' ? 'http://localhost:3000' : window.location.origin)).replace(/\/+$/, '');
+      let csrf = null;
+      let adminKey = '';
+      let features = [];
+      let products = [];
+
+      const $ = (id) => document.getElementById(id);
+      function el(tag, attrs, ...kids) {
+        const n = document.createElement(tag);
+        for (const [k, v] of Object.entries(attrs || {})) {
+          if (k === 'class') n.className = v; else if (k === 'text') n.textContent = v; else if (k.startsWith('on')) n.addEventListener(k.slice(2), v); else n.setAttribute(k, v);
+        }
+        kids.flat().forEach((c) => c != null && n.append(c));
+        return n;
+      }
+      function flash(node, text, kind) { node.textContent = text; node.className = 'msg ' + kind; node.hidden = false; }
+
+      async function api(path, opts = {}) {
+        const method = (opts.method || 'GET').toUpperCase();
+        const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+        if (method !== 'GET') {
+          if (!csrf) {
+            const m = document.cookie.match(/(?:^|;\s*)bsk_csrf=([^;]*)/);
+            csrf = m ? decodeURIComponent(m[1]) : (await (await fetch(API_BASE + '/v1/auth/csrf', { credentials: 'include' })).json())?.data?.csrfToken;
+          }
+          if (csrf) headers['X-CSRF-Token'] = csrf;
+        }
+        if (adminKey) headers['X-Platform-Admin-Key'] = adminKey;
+        const res = await fetch(API_BASE + path, { ...opts, headers, credentials: 'include' });
+        const json = await res.json().catch(() => null);
+        if (!res.ok || json?.success === false) {
+          const e = new Error(json?.error?.message || 'Request failed (' + res.status + ')');
+          e.code = json?.error?.code; e.status = res.status; throw e;
+        }
+        if (json?.data?.csrfToken) csrf = json.data.csrfToken;
+        return json?.data;
+      }
+
+      // ---- Sign in ----
+      $('gate').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const msg = $('gateMsg'); msg.hidden = true;
+        adminKey = $('adminKey').value.trim();
+        try {
+          const totp = $('totp').value.trim();
+          const body = { email: $('email').value.trim(), password: $('password').value };
+          if (totp) body.totpCode = totp;
+          await api('/v1/auth/login', { method: 'POST', body: JSON.stringify(body) });
+          await load();
+          $('password').value = ''; $('adminKey').value = '';
+          $('gate').hidden = true; $('app').hidden = false; $('signOut').hidden = false;
+        } catch (err) {
+          if (err.code === 'TWO_FACTOR_REQUIRED') { $('totpWrap').hidden = false; flash(msg, 'Enter your authenticator code.', 'err'); }
+          else { adminKey = ''; flash(msg, 'Access denied.', 'err'); }
+        }
+      });
+      $('signOut').addEventListener('click', async () => {
+        try { await api('/v1/auth/logout', { method: 'POST', body: '{}' }); } catch (_) { /* session may already be gone */ }
+        adminKey = ''; location.reload();
+      });
+
+      // ---- Data ----
+      async function load() {
+        const [f, p] = await Promise.all([api('/v1/admin/catalog/features'), api('/v1/admin/catalog/plans')]);
+        features = f.features; products = p.products;
+        renderPlans(); renderDefaults();
+      }
+
+      const INTERVALS = ['MONTHLY', 'QUARTERLY', 'SEMI_ANNUALLY', 'ANNUALLY'];
+      const toMinor = (v) => String(Math.round(parseFloat(v) * 100));
+      const toMajor = (c) => (Number(c) / 100).toString();
+
+      function priceRow(p) {
+        const row = el('div', { class: 'row' },
+          el('input', { 'aria-label': 'Currency', maxlength: '3', value: p.currency || 'TZS' }),
+          (() => { const s = el('select', { 'aria-label': 'Billing interval' }); INTERVALS.forEach((i) => { const o = el('option', { value: i, text: i.toLowerCase().replace('_', ' ') }); if (i === (p.billingInterval || 'MONTHLY')) o.selected = true; s.append(o); }); return s; })(),
+          el('input', { 'aria-label': 'Amount', inputmode: 'decimal', value: p.amountCents != null ? toMajor(p.amountCents) : '' }),
+          el('button', { type: 'button', text: 'Remove', onclick: (e) => e.target.closest('.row').remove() }),
+        );
+        return row;
+      }
+      function readPrices(box) {
+        return [...box.querySelectorAll('.row')].map((r) => {
+          const [cur, int, amt] = r.querySelectorAll('input, select');
+          if (!(parseFloat(amt.value) >= 0)) throw new Error('Every price needs an amount.');
+          return { currency: cur.value.trim().toUpperCase(), billingInterval: int.value, amountCents: toMinor(amt.value) };
+        });
+      }
+      function entitlementInputs(values) {
+        const box = el('div', {});
+        features.forEach((f) => {
+          const cur = values[f.key] ?? f.defaultValue;
+          const input = f.type === 'BOOLEAN_FLAG'
+            ? el('input', { type: 'checkbox', 'data-key': f.key, 'aria-label': f.name })
+            : el('input', { 'data-key': f.key, inputmode: 'numeric', value: cur, 'aria-label': f.name });
+          if (f.type === 'BOOLEAN_FLAG') input.checked = cur === 'true';
+          box.append(el('div', { class: 'ent' }, el('span', { text: f.name, title: f.description || '' }), input));
+        });
+        return box;
+      }
+      function readEntitlements(box) {
+        const out = {};
+        box.querySelectorAll('[data-key]').forEach((i) => { out[i.dataset.key] = i.type === 'checkbox' ? String(i.checked) : i.value.trim(); });
+        return out;
+      }
+      function pricesBox(prices) {
+        const box = el('div', {});
+        (prices.length ? prices : [{}]).forEach((p) => box.append(priceRow(p)));
+        const wrap = el('div', {}, el('div', { class: 'sub', text: 'Prices' }), box,
+          el('button', { type: 'button', text: 'Add a price', onclick: () => box.append(priceRow({})) }));
+        wrap.box = box; return wrap;
+      }
+
+      function renderPlans() {
+        const view = $('plansView'); view.replaceChildren();
+        products.forEach((prod) => prod.plans.forEach((pl) => {
+          const v = pl.currentVersion;
+          const prices = pricesBox(v.prices.map((p) => ({ currency: p.currency, billingInterval: p.billingInterval, amountCents: p.amountCents })));
+          const ents = entitlementInputs(Object.fromEntries(v.entitlements.map((e) => [e.featureKey, e.value])));
+          const note = el('div', { class: 'msg', hidden: '' });
+          const save = el('button', { class: 'primary', text: 'Publish as a new version', onclick: async () => {
+            save.disabled = true;
+            try {
+              const r = await api('/v1/admin/catalog/plans/' + encodeURIComponent(pl.code) + '/versions', { method: 'POST', body: JSON.stringify({ prices: readPrices(prices.box), entitlements: readEntitlements(ents) }) });
+              flash(note, 'Version ' + r.versionNumber + ' published. Current subscribers keep the terms they signed up on.', 'ok');
+              await load();
+            } catch (err) { flash(note, err.message, 'err'); } finally { save.disabled = false; }
+          } });
+          view.append(el('div', { class: 'card' },
+            el('div', { class: 'plan-head' },
+              el('div', {}, el('h2', { text: pl.name }), el('div', { class: 'lead', text: pl.description || '' })),
+              el('div', { class: 'tag', text: pl.code + ' · version ' + v.versionNumber + (pl.isPublic ? '' : ' · private') })),
+            el('div', { class: 'grid' }, prices, el('div', {}, el('div', { class: 'sub', text: 'Included' }), ents)),
+            el('div', { class: 'actions' }, save), note));
+        }));
+        view.append(newPlanCard());
+      }
+
+      function newPlanCard() {
+        const prices = pricesBox([]);
+        const ents = entitlementInputs({});
+        const note = el('div', { class: 'msg', hidden: '' });
+        const code = el('input', { placeholder: 'PLAN_PERSONAL', 'aria-label': 'Plan code' });
+        const name = el('input', { 'aria-label': 'Plan name' });
+        const desc = el('input', { 'aria-label': 'Description' });
+        const trial = el('input', { inputmode: 'numeric', value: '0', 'aria-label': 'Trial days' });
+        const grace = el('input', { inputmode: 'numeric', value: '0', 'aria-label': 'Grace days' });
+        const pub = el('input', { type: 'checkbox', 'aria-label': 'Shown publicly' }); pub.checked = true;
+        const prod = el('select', { 'aria-label': 'Product' }); products.forEach((p) => prod.append(el('option', { value: p.code, text: p.name })));
+        const create = el('button', { class: 'primary', text: 'Create plan', onclick: async () => {
+          create.disabled = true;
+          try {
+            await api('/v1/admin/catalog/plans', { method: 'POST', body: JSON.stringify({ productCode: prod.value, code: code.value.trim(), name: name.value.trim(), description: desc.value.trim() || undefined, isPublic: pub.checked, trialPeriodDays: Number(trial.value) || 0, gracePeriodDays: Number(grace.value) || 0, prices: readPrices(prices.box), entitlements: readEntitlements(ents) }) });
+            await load();
+          } catch (err) { flash(note, err.message, 'err'); } finally { create.disabled = false; }
+        } });
+        const f = (label, input) => el('div', {}, el('label', { text: label }), input);
+        return el('details', { class: 'card' }, el('summary', { text: 'New plan', style: 'cursor:pointer;font-weight:600' }),
+          el('div', { class: 'grid' },
+            el('div', {}, f('Product', prod), f('Code', code), f('Name', name), f('Description', desc), f('Trial days', trial), f('Grace days', grace), el('label', {}, pub, ' Shown on the public price list')),
+            el('div', {}, prices, el('div', { class: 'sub', text: 'Included', style: 'margin-top:1rem' }), ents)),
+          el('div', { class: 'actions' }, create), note);
+      }
+
+      function renderDefaults() {
+        const view = $('defaultsView'); view.replaceChildren();
+        const note = el('div', { class: 'msg', hidden: '' });
+        const table = el('table', {});
+        features.forEach((f) => {
+          const input = f.type === 'BOOLEAN_FLAG'
+            ? (() => { const s = el('select', { 'aria-label': f.name }, el('option', { value: 'true', text: 'On' }), el('option', { value: 'false', text: 'Off' })); s.value = f.defaultValue; return s; })()
+            : el('input', { inputmode: 'numeric', value: f.defaultValue, 'aria-label': f.name });
+          const save = el('button', { text: 'Save', onclick: async () => {
+            try { await api('/v1/admin/catalog/features/' + encodeURIComponent(f.key), { method: 'PUT', body: JSON.stringify({ defaultValue: input.value.trim() }) }); flash(note, f.name + ' saved.', 'ok'); }
+            catch (err) { flash(note, err.message, 'err'); }
+          } });
+          table.append(el('tr', {}, el('td', {}, f.name, el('small', { text: f.description || '' })), el('td', { class: 'k', text: f.key }), el('td', {}, input), el('td', {}, save)));
+        });
+        view.append(el('div', { class: 'card' }, el('h2', { text: 'Defaults' }),
+          el('p', { class: 'lead', text: 'What a workspace gets while it has no active subscription. Plans override these.' }), table, note));
+      }
+
+      async function renderBilling() {
+        const view = $('billingView'); view.replaceChildren();
+        const note = el('div', { class: 'msg', hidden: '' });
+        let current = { organizationId: null, name: null, instructions: '' };
+        try { current = await api('/v1/admin/billing-workspace'); } catch (err) { flash(note, err.message, 'err'); }
+        const org = el('input', { 'aria-label': 'Workspace id', value: current.organizationId || '', placeholder: 'Workspace id', autocomplete: 'off' });
+        const reason = el('input', { 'aria-label': 'Reason', placeholder: 'Reason for the change (optional)', maxlength: '500' });
+        const status = el('div', { class: 'lead', text: current.organizationId ? 'Current: ' + current.name + ' (' + current.organizationId + ')' : 'Not set. Paid plans cannot be activated until a billing workspace is chosen.' });
+        const save = el('button', { class: 'primary', text: 'Save', onclick: async () => {
+          save.disabled = true;
+          try {
+            const r = await api('/v1/admin/billing-workspace', { method: 'PUT', body: JSON.stringify({ organizationId: org.value.trim(), reason: reason.value.trim() || undefined }) });
+            status.textContent = 'Current: ' + r.name + ' (' + r.organizationId + ')';
+            flash(note, 'Billing workspace saved.', 'ok');
+          } catch (err) { flash(note, err.message, 'err'); } finally { save.disabled = false; }
+        } });
+        view.append(el('div', { class: 'card' }, el('h2', { text: 'Billing workspace' }),
+          el('p', { class: 'lead', text: 'The workspace whose verified payments activate paid subscriptions. Customers pay to the numbers connected to it, and their payment is looked up there, never in their own workspace.' }),
+          status, el('label', { text: 'Workspace id' }), org, el('label', { text: 'Reason' }), reason, el('div', { class: 'actions' }, save), note));
+
+        const instructionsNote = el('div', { class: 'msg', hidden: '' });
+        const instructions = el('textarea', { 'aria-label': 'Payment instructions', rows: '4', maxlength: '1000', placeholder: 'For example: Pay to M-Pesa number 255700000000 (BriskSMS) and use the reference shown' });
+        instructions.value = current.instructions || '';
+        const saveInstructions = el('button', { class: 'primary', text: 'Save', onclick: async () => {
+          saveInstructions.disabled = true;
+          try {
+            await api('/v1/admin/billing-workspace/instructions', { method: 'PUT', body: JSON.stringify({ instructions: instructions.value }) });
+            flash(instructionsNote, 'Payment instructions saved.', 'ok');
+          } catch (err) { flash(instructionsNote, err.message, 'err'); } finally { saveInstructions.disabled = false; }
+        } });
+        view.append(el('div', { class: 'card' }, el('h2', { text: 'Payment instructions' }),
+          el('p', { class: 'lead', text: 'Shown to a customer with their payment reference when they choose a paid plan. Say where to send the money and to use the reference.' }),
+          el('label', { text: 'Instructions' }), instructions, el('div', { class: 'actions' }, saveInstructions), instructionsNote));
+      }
+
+      // Prepaid SMS credit packs a customer can buy. A pack's code never changes; its terms can.
+      async function renderPacks() {
+        const view = $('packsView'); view.replaceChildren();
+        const listNote = el('div', { class: 'msg', hidden: '' });
+        let packs = [];
+        try { packs = (await api('/v1/admin/credit-packs')).packs; } catch (err) { flash(listNote, err.message, 'err'); }
+
+        const fields = (p) => {
+          const name = el('input', { 'aria-label': 'Pack name', maxlength: '100', value: p.name || '' });
+          const credits = el('input', { 'aria-label': 'SMS credits', inputmode: 'numeric', value: p.credits != null ? String(p.credits) : '' });
+          const currency = el('input', { 'aria-label': 'Currency', maxlength: '3', value: p.currency || 'TZS' });
+          const price = el('input', { 'aria-label': 'Price', inputmode: 'decimal', value: p.amountCents != null ? toMajor(p.amountCents) : '' });
+          const sort = el('input', { 'aria-label': 'Order in the list', inputmode: 'numeric', value: String(p.sortOrder ?? 0) });
+          const active = el('input', { type: 'checkbox', 'aria-label': 'On sale' }); active.checked = p.isActive !== false;
+          const f = (label, input) => el('div', {}, el('label', { text: label }), input);
+          const body = (code) => {
+            if (!(parseFloat(price.value) > 0)) throw new Error('A pack needs a price above zero.');
+            return JSON.stringify({ code, name: name.value.trim(), credits: Number(credits.value), currency: currency.value.trim().toUpperCase(), amountCents: toMinor(price.value), isActive: active.checked, sortOrder: Number(sort.value) });
+          };
+          const layout = el('div', { class: 'grid' },
+            el('div', {}, f('Name', name), f('SMS credits', credits), f('Order in the list', sort)),
+            el('div', {}, f('Currency', currency), f('Price', price), el('label', {}, active, ' On sale')));
+          return { layout, body };
+        };
+
+        packs.forEach((p) => {
+          const note = el('div', { class: 'msg', hidden: '' });
+          const form = fields(p);
+          const save = el('button', { class: 'primary', text: 'Save', onclick: async () => {
+            save.disabled = true;
+            try {
+              await api('/v1/admin/credit-packs/' + encodeURIComponent(p.id), { method: 'PUT', body: form.body(p.code) });
+              flash(note, 'Pack saved. Requests already made keep the price they were made at.', 'ok');
+            } catch (err) { flash(note, err.message, 'err'); } finally { save.disabled = false; }
+          } });
+          view.append(el('div', { class: 'card' },
+            el('div', { class: 'plan-head' }, el('h2', { text: p.name }), el('div', { class: 'tag', text: p.code + (p.isActive ? '' : ' · off sale') })),
+            form.layout, el('div', { class: 'actions' }, save), note));
+        });
+        if (!packs.length && listNote.hidden) {
+          view.append(el('div', { class: 'card' }, el('p', { class: 'lead', text: 'No credit packs yet. Customers cannot buy SMS credits until one is on sale.' })));
+        }
+        view.append(listNote);
+
+        const code = el('input', { 'aria-label': 'Pack code', placeholder: 'SMS_1000', maxlength: '40', autocomplete: 'off' });
+        const createNote = el('div', { class: 'msg', hidden: '' });
+        const blank = fields({});
+        const create = el('button', { class: 'primary', text: 'Create pack', onclick: async () => {
+          create.disabled = true;
+          try {
+            await api('/v1/admin/credit-packs', { method: 'POST', body: blank.body(code.value.trim()) });
+            await renderPacks();
+          } catch (err) { flash(createNote, err.message, 'err'); } finally { create.disabled = false; }
+        } });
+        view.append(el('details', { class: 'card' }, el('summary', { text: 'New credit pack', style: 'cursor:pointer;font-weight:600' }),
+          el('label', { text: 'Code (capital letters, digits or underscore; cannot be changed later)' }), code,
+          blank.layout, el('div', { class: 'actions' }, create), createNote));
+      }
+
+      async function renderAudit() {
+        const view = $('auditView'); view.replaceChildren();
+        const note = el('div', { class: 'msg', hidden: '' });
+        const table = el('table', {});
+        const filter = el('input', { 'aria-label': 'Action', placeholder: 'Filter by action' });
+        async function refresh() {
+          table.replaceChildren(); note.hidden = true;
+          try {
+            const q = filter.value.trim() ? '&action=' + encodeURIComponent(filter.value.trim()) : '';
+            const { entries } = await api('/v1/admin/audit?limit=100' + q);
+            if (!entries.length) flash(note, 'No entries yet.', 'ok');
+            entries.forEach((e) => table.append(el('tr', {},
+              el('td', {}, new Date(e.createdAt).toLocaleString(), el('small', { text: 'Admin ' + e.adminUserId.slice(0, 8) + (e.ipAddress ? ' · ' + e.ipAddress : '') })),
+              el('td', { class: 'k', text: e.action }),
+              el('td', { class: 'wide', text: [e.targetType, e.targetId].filter(Boolean).join(' · ') }),
+              el('td', { class: 'wide', text: e.reason || '' }))));
+          } catch (err) { flash(note, err.message, 'err'); }
+        }
+        view.append(el('div', { class: 'card' }, el('h2', { text: 'Audit' }),
+          el('p', { class: 'lead', text: 'Every change made from this page. Entries cannot be edited or removed.' }),
+          filter, el('div', { class: 'actions' }, el('button', { text: 'Refresh', onclick: refresh })), table, note));
+        await refresh();
+      }
+
+      const when = (iso) => (iso ? new Date(iso).toLocaleString() : 'never');
+
+      async function renderOrgs() {
+        const view = $('orgsView'); view.replaceChildren();
+        const note = el('div', { class: 'msg', hidden: '' });
+        const search = el('input', { 'aria-label': 'Search', placeholder: 'Search by name, slug or email' });
+        const status = el('select', { 'aria-label': 'Status' }, el('option', { value: '', text: 'All' }), el('option', { value: 'active', text: 'Active' }), el('option', { value: 'suspended', text: 'Suspended' }));
+        const list = el('div', {});
+        const detail = el('div', {});
+
+        async function find() {
+          list.replaceChildren(); note.hidden = true;
+          try {
+            const q = '?limit=25&q=' + encodeURIComponent(search.value.trim()) + (status.value ? '&status=' + status.value : '');
+            const { merchants, total } = await api('/v1/admin/organizations' + q);
+            if (!merchants.length) flash(note, 'No workspaces match.', 'ok');
+            const table = el('table', {});
+            merchants.forEach((m) => table.append(el('tr', {},
+              el('td', {}, m.name, el('small', { text: (m.ownerEmail || 'no owner') + ' · ' + m.activeDeviceCount + ' device' + (m.activeDeviceCount === 1 ? '' : 's') })),
+              el('td', { class: 'k', text: (m.planName || 'No plan') + (m.isActive ? '' : ' · suspended') }),
+              el('td', {}, el('button', { text: 'Open', onclick: () => open(m.id) })))));
+            list.append(table);
+            if (total > merchants.length) list.append(el('p', { class: 'lead', text: 'Showing ' + merchants.length + ' of ' + total + '. Narrow the search to see others.' }));
+          } catch (err) { flash(note, err.message, 'err'); }
+        }
+
+        async function open(id) {
+          detail.replaceChildren();
+          try {
+            const d = await api('/v1/admin/organizations/' + id);
+            const m = d.merchant;
+            const msg = el('div', { class: 'msg', hidden: '' });
+            const reason = el('input', { 'aria-label': 'Reason', placeholder: 'Reason (required, kept in the audit log)', maxlength: '500' });
+            async function act(path, label) {
+              if (reason.value.trim().length < 3) { flash(msg, 'Write a reason of at least 3 characters first.', 'err'); return; }
+              if (!window.confirm(label + '? This is recorded in the audit log.')) return;
+              try { await api('/v1/admin/organizations/' + id + path, { method: 'POST', body: JSON.stringify({ reason: reason.value.trim() }) }); await open(id); await find(); }
+              catch (err) { flash(msg, err.message, 'err'); }
+            }
+            const table = (rows) => el('table', {}, ...rows);
+            detail.append(el('div', { class: 'card detail' },
+              el('div', { class: 'plan-head' },
+                el('div', {}, el('h2', { text: m.name }), el('div', { class: 'lead', text: m.id })),
+                el('div', { class: 'tag', text: m.isActive ? 'Active' : 'Suspended' })),
+              el('p', { class: 'lead', text: 'Owner ' + (m.ownerEmail || 'none') + ' · ' + (m.planName || 'No plan') + (m.subscriptionStatus ? ' (' + m.subscriptionStatus.toLowerCase() + ')' : '') + ' · created ' + when(m.createdAt) }),
+              el('div', { class: 'sub', text: 'Devices' }),
+              table(d.devices.map((v) => el('tr', {},
+                el('td', {}, v.label, el('small', { text: v.deviceModel + ' · last sync ' + when(v.lastSyncAt) })),
+                el('td', { class: 'k', text: v.status.toLowerCase().replace('_', ' ') }),
+                el('td', {},
+                  v.status === 'ACTIVE' ? el('button', { text: 'Quarantine', onclick: () => act('/devices/' + v.id + '/quarantine', 'Quarantine ' + v.label) }) : null,
+                  v.status === 'QUARANTINED' ? el('button', { text: 'Release', onclick: () => act('/devices/' + v.id + '/release', 'Release ' + v.label) }) : null,
+                  v.status !== 'REVOKED' ? el('button', { text: 'Revoke', onclick: () => act('/devices/' + v.id + '/revoke', 'Permanently revoke ' + v.label) }) : null)))),
+              d.devices.length ? null : el('p', { class: 'lead', text: 'No devices.' }),
+              el('div', { class: 'sub', text: 'API keys' }),
+              table(d.apiKeys.map((k) => el('tr', {},
+                el('td', {}, k.label, el('small', { text: k.keyPrefix + '… · last used ' + when(k.lastUsedAt) })),
+                el('td', { class: 'k', text: k.revokedAt ? 'revoked' : 'active' }),
+                el('td', {}, k.revokedAt ? null : el('button', { text: 'Revoke', onclick: () => act('/api-keys/' + k.id + '/revoke', 'Revoke key ' + k.label) }))))),
+              d.apiKeys.length ? null : el('p', { class: 'lead', text: 'No API keys.' }),
+              el('div', { class: 'sub', text: 'Members' }),
+              table(d.members.map((u) => el('tr', {}, el('td', {}, u.fullName, el('small', { text: u.email })), el('td', { class: 'k', text: u.role.toLowerCase() })))),
+              el('div', { class: 'sub', text: 'Recent activity' }),
+              d.recentActivity.length ? table(d.recentActivity.map((a) => el('tr', {}, el('td', { text: a.action.toLowerCase().replace(/_/g, ' ') }), el('td', { class: 'k', text: when(a.createdAt) })))) : el('p', { class: 'lead', text: 'Nothing yet.' }),
+              el('div', { class: 'sub', text: 'Workspace access' }),
+              reason,
+              el('div', { class: 'actions' },
+                m.isActive
+                  ? el('button', { text: 'Suspend workspace', onclick: () => act('/suspend', 'Suspend ' + m.name + ' and block its sessions, keys and devices') })
+                  : el('button', { class: 'primary', text: 'Reactivate workspace', onclick: () => act('/reactivate', 'Reactivate ' + m.name) })),
+              msg));
+            detail.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          } catch (err) { flash(note, err.message, 'err'); }
+        }
+
+        view.append(el('div', { class: 'card' }, el('h2', { text: 'Workspaces' }),
+          el('p', { class: 'lead', text: 'Every customer workspace. Suspending a workspace blocks its sign-ins, API keys and devices on their next request.' }),
+          search, status, el('div', { class: 'actions' }, el('button', { class: 'primary', text: 'Search', onclick: find })), list, note), detail);
+        search.addEventListener('keydown', (e) => { if (e.key === 'Enter') find(); });
+        await find();
+      }
+
+      const TABS = { plans: 'tabPlans', defaults: 'tabDefaults', orgs: 'tabOrgs', billing: 'tabBilling', packs: 'tabPacks', audit: 'tabAudit' };
+      function show(tab) {
+        Object.entries(TABS).forEach(([name, id]) => {
+          $(name + 'View').hidden = tab !== name;
+          $(id).setAttribute('aria-selected', String(tab === name));
+        });
+        if (tab === 'orgs') renderOrgs();
+        if (tab === 'billing') renderBilling();
+        if (tab === 'packs') renderPacks();
+        if (tab === 'audit') renderAudit();
+      }
+      Object.entries(TABS).forEach(([name, id]) => $(id).addEventListener('click', () => show(name)));
+    })();
+  </script>
+</body>
+</html>

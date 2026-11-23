@@ -22,7 +22,7 @@ export class EmailService {
       return { success: false, error: `Invalid recipient email address: '${to}'` };
     }
 
-    const frontendBase = (process.env.FRONTEND_URL || 'https://console.brisksms.com').replace(/\/+$/, '');
+    const frontendBase = (process.env.FRONTEND_URL || 'https://console.brisksms.app').replace(/\/+$/, '');
     // Use URL fragment (#token=...) to prevent token leakage in HTTP request lines & reverse proxy access logs (RFC 3986)
     const verificationUrl = `${frontendBase}/verify-email#token=${encodeURIComponent(token)}`;
     const expiryHours = parseInt(process.env.EMAIL_VERIFICATION_EXPIRY_HOURS || '24', 10);
@@ -85,13 +85,33 @@ BriskSMS Team`;
     });
   }
 
+  async sendEmailChangeVerification(to: string, fullName: string, token: string): Promise<EmailDeliveryResult> {
+    if (!to || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to.trim())) {
+      return { success: false, error: `Invalid recipient email address: '${to}'` };
+    }
+    const frontendBase = (process.env.FRONTEND_URL || 'https://console.brisksms.app').replace(/\/+$/, '');
+    const confirmUrl = `${frontendBase}/console#confirm-email=${encodeURIComponent(token)}`;
+    const safeName = (fullName || 'there').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const subject = 'Confirm your new email address - BriskSMS';
+    const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Confirm your new email</title></head>
+<body style="font-family: sans-serif; padding: 24px;">
+  <p>Hi ${safeName},</p>
+  <p>Confirm this address to make it the email you sign in to BriskSMS with. The link expires in 24 hours.</p>
+  <p><a href="${confirmUrl}" target="_blank">Confirm new email</a></p>
+  <p>If you did not ask for this change, ignore this email and your address stays the same.</p>
+</body></html>`;
+    const text = `Hi ${fullName || 'there'},\n\nConfirm this address as your new BriskSMS sign-in email (link expires in 24 hours):\n\n${confirmUrl}\n\nIf you did not ask for this change, ignore this email.`;
+    return this.provider.sendEmail({ to, subject, html, text });
+  }
+
   async sendPasswordResetEmail(to: string, fullName: string, token: string): Promise<EmailDeliveryResult> {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!to || !emailRegex.test(to.trim())) {
       return { success: false, error: `Invalid recipient email address: '${to}'` };
     }
 
-    const frontendBase = (process.env.FRONTEND_URL || 'https://console.brisksms.com').replace(/\/+$/, '');
+    const frontendBase = (process.env.FRONTEND_URL || 'https://console.brisksms.app').replace(/\/+$/, '');
     const resetUrl = `${frontendBase}/reset-password#token=${encodeURIComponent(token)}`;
     const expiryMinutes = parseInt(process.env.PASSWORD_RESET_EXPIRY_MINUTES || '60', 10);
     const safeName = (fullName || 'Merchant').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -131,7 +151,7 @@ BriskSMS Team`;
       return { success: false, error: `Invalid recipient email address: '${to}'` };
     }
 
-    const frontendBase = (process.env.FRONTEND_URL || 'https://console.brisksms.com').replace(/\/+$/, '');
+    const frontendBase = (process.env.FRONTEND_URL || 'https://console.brisksms.app').replace(/\/+$/, '');
     const inviteUrl = `${frontendBase}/accept-invite#token=${encodeURIComponent(token)}`;
     const safeName = (fullName || 'Team Member').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const safeOrg = (organizationName || 'BriskSMS Workspace').replace(/</g, '&lt;').replace(/>/g, '&gt;');

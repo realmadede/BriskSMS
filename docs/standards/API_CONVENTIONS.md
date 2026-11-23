@@ -2,7 +2,7 @@
 
 **Last Synced:** 2026-11-16  
 **Protocol:** RESTful over HTTPS (JSON, 1 MB Router Payload Cap)  
-**Base URL:** `https://api.brisksms.com/v1` (or tenant staging base URL)  
+**Base URL:** `https://api.brisksms.app/v1` (or tenant staging base URL)  
 **Authentication:** HttpOnly Session Cookie + Double-Submit CSRF (`bsk_session`/`bsk_csrf`), User Bearer JWT, Scoped Developer API Key (`bsk_live_...`), OAuth 2.0 Bearer Token (`bsk_at_...`), or Hardware-Bound Device Token (`bsk_dev_...`)  
 
 ---

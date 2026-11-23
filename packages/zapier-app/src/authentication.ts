@@ -40,7 +40,7 @@ export const authentication = {
   type: 'oauth2',
   test: async (z: ZapierZ, bundle: ZapierBundle) => {
     const response = await z.request({
-      url: 'https://api.brisksms.com/v1/auth/me',
+      url: 'https://api.brisksms.app/v1/auth/me',
       method: 'GET',
       headers: {
         Authorization: `Bearer ${bundle.authData.access_token}`,
@@ -64,7 +64,7 @@ export const authentication = {
   },
   oauth2Config: {
     authorizeUrl: {
-      url: 'https://api.brisksms.com/v1/oauth/authorize',
+      url: 'https://api.brisksms.app/v1/oauth/authorize',
       params: {
         client_id: '{{process.env.CLIENT_ID}}',
         state: '{{bundle.inputData.state}}',
@@ -76,7 +76,7 @@ export const authentication = {
     },
     getAccessToken: async (z: ZapierZ, bundle: ZapierBundle) => {
       const response = await z.request({
-        url: 'https://api.brisksms.com/v1/oauth/token',
+        url: 'https://api.brisksms.app/v1/oauth/token',
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -99,7 +99,7 @@ export const authentication = {
     },
     refreshAccessToken: async (z: ZapierZ, bundle: ZapierBundle) => {
       const response = await z.request({
-        url: 'https://api.brisksms.com/v1/oauth/token',
+        url: 'https://api.brisksms.app/v1/oauth/token',
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -60,7 +60,7 @@ To deliver commercial reliability while complying with Google's policies, BriskS
 #### Detailed Breakdown of Mode 2 (Enterprise Direct APK):
 - For businesses with dedicated Android phones running cellular SIM cards that receive raw carrier SMS (without the official M-Pesa app installed).
 - The APK is signed and downloaded directly from the merchant's authenticated BriskSMS dashboard.
-- Includes a self-updater module that checks for new releases against `api.brisksms.co.tz/v1/app/releases/latest`.
+- Includes a self-updater module that checks for new releases against `api.brisksms.app/v1/app/releases/latest`.
 - Guidance provided to merchants to whitelist the application in **Google Play Protect** and configure OEM battery management.
 
 ---
@@ -112,7 +112,7 @@ Under Tanzania’s **Personal Data Protection Act No. 5 of 2022** and the **Pers
    - Personal SMS text messages must be discarded on-device and never transmitted to our servers.
 3. **Data Security & Breach Notification:**
    - Encryption in transit (TLS 1.3) and at rest (AES-256).
-   - In the event of a security incident or data breach, the PDPC must be notified within 72 hours in accordance with statutory obligations.
+   - In the event of a security incident or data breach, the PDPC must be notified within 72 hours in accordance with statutory obligations. Procedure: [`DATA_BREACH_RESPONSE_PLAN.md`](./DATA_BREACH_RESPONSE_PLAN.md).
 
 ---
 
@@ -127,6 +127,7 @@ For Product B (Bulk Messaging), operations must adhere to **Tanzania Communicati
      - Taxpayer Identification Number (TIN) Certificate
      - Letter of Authorization on official company letterhead signed by a company director.
    - Where alphanumeric sender IDs are used, the Sender ID documentation is submitted for whitelist approval in accordance with TCRA guidelines.
+   - Merchant-facing steps and current product limits: [`SENDER_ID_REGISTRATION.md`](./SENDER_ID_REGISTRATION.md).
 2. **Anti-Spam Time Windows:**
    - Promotional and marketing SMS messages are prohibited between **20:00 and 07:00 EAT**.
    - Transactional messages (OTP verification, urgent payment alerts) are permitted 24/7.

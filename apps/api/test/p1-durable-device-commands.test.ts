@@ -94,7 +94,7 @@ describe('P1: Durable PostgreSQL-Backed Fleet Command Queue', () => {
     delete process.env.DEVICE_COMMAND_LEASE_SECONDS;
 
     const regA = await authService.register({
-      email: `p1-owner-a-${randomUUID().slice(0, 6)}@brisksms.co.tz`,
+      email: `p1-owner-a-${randomUUID().slice(0, 6)}@brisksms.app`,
       password: 'StrongPassword123!',
       fullName: 'Org A Admin',
       organizationName: 'Kilimanjaro Fiber Ltd',
@@ -109,7 +109,7 @@ describe('P1: Durable PostgreSQL-Backed Fleet Command Queue', () => {
     });
 
     const regB = await authService.register({
-      email: `p1-owner-b-${randomUUID().slice(0, 6)}@brisksms.co.tz`,
+      email: `p1-owner-b-${randomUUID().slice(0, 6)}@brisksms.app`,
       password: 'StrongPassword123!',
       fullName: 'Org B Admin',
       organizationName: 'Serengeti ISP Ltd',
@@ -345,7 +345,7 @@ describe('P1: Durable PostgreSQL-Backed Fleet Command Queue', () => {
 
       // Non-admin FINANCE user in Org A cannot queue or cancel commands
       const financeReg = await authService.register({
-        email: `finance-${randomUUID().slice(0, 6)}@brisksms.co.tz`,
+        email: `finance-${randomUUID().slice(0, 6)}@brisksms.app`,
         password: 'StrongPassword123!',
         fullName: 'Finance Member',
       });

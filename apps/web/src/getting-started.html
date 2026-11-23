@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Getting started — BriskSMS</title>
+  <meta name="description" content="Set up BriskSMS: create a workspace, pair an Android phone, check your first payment and send your first SMS from your own SIM.">
+  <link rel="icon" type="image/svg+xml" href="assets/brand/favicon.svg?v=2">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/css/site.css">
+  <link rel="stylesheet" href="assets/css/legal.css">
+  <link rel="stylesheet" href="assets/css/getting-started.css">
+  <script>
+    // Reveal animations hide content until it scrolls into view. If the page script has not started
+    // within 2.5 seconds, show everything instead.
+    document.documentElement.classList.add('gs-js');
+    setTimeout(function () {
+      if (!document.documentElement.classList.contains('gs-ready')) document.documentElement.classList.remove('gs-js');
+    }, 2500);
+  </script>
+  <script src="assets/js/site.js" defer></script>
+  <script src="assets/js/getting-started.js" defer></script>
+</head>
+<body>
+
+  <!-- @header -->
+
+  <main>
+    <header class="gs-hero">
+      <div class="container gs-hero-grid">
+        <div class="gs-hero-copy">
+          <span class="gs-eyebrow">Setup guide</span>
+          <h1>From a new account to your first verified payment and first SMS</h1>
+          <p class="gs-lead">BriskSMS runs on an Android phone that stays at your business. The phone reads the payment text messages your mobile money and bank send you, and sends your SMS through its own SIM. This guide takes you from sign-up to both working.</p>
+          <nav class="gs-jump" aria-label="On this page">
+            <a href="#need">What you need</a>
+            <a href="#steps">Steps</a>
+            <a href="#how">How it works</a>
+            <a href="#trouble">Troubleshooting</a>
+            <a href="#faq">Questions</a>
+          </nav>
+        </div>
+        <div class="gs-art" role="img" aria-label="Illustration: the console shows a pairing code, and the phone changes from Waiting to pair to Active with notification access and send SMS switched on.">
+          <svg class="gs-art-wide" viewBox="0 0 560 440" xmlns="http://www.w3.org/2000/svg" focusable="false">
+    <g class="a-scene">
+      <rect x="16" y="48" width="300" height="330" rx="20" fill="#FFFFFF" stroke="#0B0A09" stroke-opacity=".1"/>
+      <text x="36" y="84" class="t t-600" font-size="15" fill="#0B0A09">Pair a phone</text>
+      <rect x="36" y="104" width="150" height="150" rx="12" fill="#F4F1EA"/>
+      <g class="a-qr"><path d="M96 116h6v6h-6zM102 116h6v6h-6zM120 116h6v6h-6zM96 122h6v6h-6zM108 122h6v6h-6zM96 128h6v6h-6zM102 128h6v6h-6zM108 128h6v6h-6zM114 128h6v6h-6zM114 134h6v6h-6zM120 134h6v6h-6zM108 140h6v6h-6zM108 146h6v6h-6zM114 146h6v6h-6zM96 152h6v6h-6zM108 152h6v6h-6zM114 152h6v6h-6zM120 152h6v6h-6zM96 158h6v6h-6zM114 158h6v6h-6zM72 164h6v6h-6zM78 164h6v6h-6zM90 164h6v6h-6zM96 164h6v6h-6zM120 164h6v6h-6zM138 164h6v6h-6zM144 164h6v6h-6zM150 164h6v6h-6zM156 164h6v6h-6zM162 164h6v6h-6zM54 170h6v6h-6zM60 170h6v6h-6zM66 170h6v6h-6zM84 170h6v6h-6zM90 170h6v6h-6zM96 170h6v6h-6zM120 170h6v6h-6zM126 170h6v6h-6zM132 170h6v6h-6zM162 170h6v6h-6zM168 170h6v6h-6zM60 176h6v6h-6zM72 176h6v6h-6zM78 176h6v6h-6zM84 176h6v6h-6zM114 176h6v6h-6zM120 176h6v6h-6zM132 176h6v6h-6zM150 176h6v6h-6zM156 176h6v6h-6zM162 176h6v6h-6zM168 176h6v6h-6zM48 182h6v6h-6zM54 182h6v6h-6zM66 182h6v6h-6zM72 182h6v6h-6zM78 182h6v6h-6zM84 182h6v6h-6zM120 182h6v6h-6zM126 182h6v6h-6zM150 182h6v6h-6zM156 182h6v6h-6zM60 188h6v6h-6zM72 188h6v6h-6zM96 188h6v6h-6zM108 188h6v6h-6zM114 188h6v6h-6zM144 188h6v6h-6zM150 188h6v6h-6zM156 188h6v6h-6zM162 188h6v6h-6zM120 194h6v6h-6zM162 194h6v6h-6zM168 194h6v6h-6zM102 200h6v6h-6zM108 200h6v6h-6zM114 200h6v6h-6zM126 200h6v6h-6zM132 200h6v6h-6zM138 200h6v6h-6zM144 200h6v6h-6zM156 200h6v6h-6zM162 200h6v6h-6zM96 206h6v6h-6zM102 206h6v6h-6zM108 206h6v6h-6zM120 206h6v6h-6zM150 206h6v6h-6zM156 206h6v6h-6zM162 206h6v6h-6zM102 212h6v6h-6zM114 212h6v6h-6zM120 212h6v6h-6zM126 212h6v6h-6zM132 212h6v6h-6zM138 212h6v6h-6zM156 212h6v6h-6zM108 218h6v6h-6zM114 218h6v6h-6zM120 218h6v6h-6zM132 218h6v6h-6zM138 218h6v6h-6zM144 218h6v6h-6zM162 218h6v6h-6zM168 218h6v6h-6zM108 224h6v6h-6zM114 224h6v6h-6zM120 224h6v6h-6zM126 224h6v6h-6zM138 224h6v6h-6zM150 224h6v6h-6zM168 224h6v6h-6zM96 230h6v6h-6zM132 230h6v6h-6zM150 230h6v6h-6zM156 230h6v6h-6zM162 230h6v6h-6zM168 230h6v6h-6zM108 236h6v6h-6zM114 236h6v6h-6zM126 236h6v6h-6zM132 236h6v6h-6zM144 236h6v6h-6zM150 236h6v6h-6zM168 236h6v6h-6z" fill="#0B0A09"/><rect x="48" y="116" width="42" height="42" rx="6" fill="#0B0A09"/><rect x="54" y="122" width="30" height="30" rx="3" fill="#F4F1EA"/><rect x="60" y="128" width="18" height="18" rx="2" fill="#0B0A09"/><rect x="132" y="116" width="42" height="42" rx="6" fill="#0B0A09"/><rect x="138" y="122" width="30" height="30" rx="3" fill="#F4F1EA"/><rect x="144" y="128" width="18" height="18" rx="2" fill="#0B0A09"/><rect x="48" y="200" width="42" height="42" rx="6" fill="#0B0A09"/><rect x="54" y="206" width="30" height="30" rx="3" fill="#F4F1EA"/><rect x="60" y="212" width="18" height="18" rx="2" fill="#0B0A09"/></g>
+      <rect class="a-scan" x="40" y="112" width="142" height="3" rx="1.5" fill="#C6B480"/>
+      <text x="204" y="122" class="t t-500" font-size="12" fill="#54514C">Or type this code</text>
+      <text x="204" y="148" class="t m" font-size="18" fill="#0B0A09">7K29-4MQ</text>
+      <text x="204" y="176" class="t t-500" font-size="12" fill="#54514C">Single use</text>
+      <rect x="204" y="188" width="100" height="6" rx="3" fill="#0B0A09" fill-opacity=".1"/>
+      <rect class="a-timer" x="204" y="188" width="100" height="6" rx="3" fill="#C6B480"/>
+      <text x="204" y="214" class="t t-500" font-size="12" fill="#54514C">Expires in 05:00</text>
+      <rect x="36" y="280" width="200" height="40" rx="20" fill="#C6B480"/>
+      <text x="136" y="305" class="t t-600" font-size="13" fill="#0B0A09" text-anchor="middle">Check connected devices</text>
+      <text x="36" y="352" class="t t-500" font-size="12" fill="#54514C">The phone then appears under Paired phones</text>
+      <path class="a-link" d="M318 214 C340 214 346 214 372 214" fill="none" stroke="#6E5F3D" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="2 9"/>
+      <g transform="translate(372 70)">
+      <rect width="184" height="340" rx="32" fill="#0B0A09"/>
+      <rect x="8" y="8" width="168" height="324" rx="25" fill="#F4F1EA"/>
+      <rect x="68" y="16" width="48" height="6" rx="3" fill="#0B0A09" opacity=".9"/>
+      <text x="22" y="52" class="t t-600" font-size="14" fill="#0B0A09">BriskSMS relay</text>
+      <g class="a-wait"><circle cx="27" cy="78" r="5" fill="#ED6C02"/><text x="40" y="82" class="t t-500" font-size="13" fill="#B4560A">Waiting to pair</text></g>
+      <g class="a-on"><circle cx="27" cy="78" r="5" fill="#2E7D32"/><text x="40" y="82" class="t t-500" font-size="13" fill="#2E7D32">Active</text></g>
+      <g class="a-row a-row1"><rect x="12" y="104" width="160" height="34" rx="11" fill="#FFFFFF" stroke="#0B0A09" stroke-opacity=".1"/><text x="24" y="125" class="t t-500" font-size="11" fill="#0B0A09">Notification access</text><text x="162" y="125" class="t t-600" font-size="12" fill="#2E7D32" text-anchor="end">On</text></g>
+      <g class="a-row a-row2"><rect x="12" y="146" width="160" height="34" rx="11" fill="#FFFFFF" stroke="#0B0A09" stroke-opacity=".1"/><text x="24" y="167" class="t t-500" font-size="11" fill="#0B0A09">Send SMS</text><text x="162" y="167" class="t t-600" font-size="12" fill="#2E7D32" text-anchor="end">On</text></g>
+      <g class="a-row a-row3"><rect x="12" y="188" width="160" height="34" rx="11" fill="#FFFFFF" stroke="#0B0A09" stroke-opacity=".1"/><text x="24" y="209" class="t t-500" font-size="11" fill="#0B0A09">SIM 1</text><text x="162" y="209" class="t t-500" font-size="12" fill="#54514C" text-anchor="end">Ready</text></g>
+      <g class="a-check"><circle cx="92" cy="266" r="27" fill="#0B0A09"/><path d="M-9 0.5 -3 6.5 9 -6" transform="translate(92 266)" fill="none" stroke="#C6B480" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></g>
+      <text x="92" y="316" class="t t-600 a-cap" font-size="13" fill="#0B0A09" text-anchor="middle">Phone paired</text>
+    </g>
+    </g>
+  </svg>
+          <svg class="gs-art-phone" viewBox="0 0 200 360" xmlns="http://www.w3.org/2000/svg" focusable="false">
+    <g class="a-scene">
+      <g transform="translate(8 10)">
+      <rect width="184" height="340" rx="32" fill="#0B0A09"/>
+      <rect x="8" y="8" width="168" height="324" rx="25" fill="#F4F1EA"/>
+      <rect x="68" y="16" width="48" height="6" rx="3" fill="#0B0A09" opacity=".9"/>
+      <text x="22" y="52" class="t t-600" font-size="14" fill="#0B0A09">BriskSMS relay</text>
+      <g class="a-wait"><circle cx="27" cy="78" r="5" fill="#ED6C02"/><text x="40" y="82" class="t t-500" font-size="13" fill="#B4560A">Waiting to pair</text></g>
+      <g class="a-on"><circle cx="27" cy="78" r="5" fill="#2E7D32"/><text x="40" y="82" class="t t-500" font-size="13" fill="#2E7D32">Active</text></g>
+      <g class="a-row a-row1"><rect x="12" y="104" width="160" height="34" rx="11" fill="#FFFFFF" stroke="#0B0A09" stroke-opacity=".1"/><text x="24" y="125" class="t t-500" font-size="11" fill="#0B0A09">Notification access</text><text x="162" y="125" class="t t-600" font-size="12" fill="#2E7D32" text-anchor="end">On</text></g>
+      <g class="a-row a-row2"><rect x="12" y="146" width="160" height="34" rx="11" fill="#FFFFFF" stroke="#0B0A09" stroke-opacity=".1"/><text x="24" y="167" class="t t-500" font-size="11" fill="#0B0A09">Send SMS</text><text x="162" y="167" class="t t-600" font-size="12" fill="#2E7D32" text-anchor="end">On</text></g>
+      <g class="a-row a-row3"><rect x="12" y="188" width="160" height="34" rx="11" fill="#FFFFFF" stroke="#0B0A09" stroke-opacity=".1"/><text x="24" y="209" class="t t-500" font-size="11" fill="#0B0A09">SIM 1</text><text x="162" y="209" class="t t-500" font-size="12" fill="#54514C" text-anchor="end">Ready</text></g>
+      <g class="a-check"><circle cx="92" cy="266" r="27" fill="#0B0A09"/><path d="M-9 0.5 -3 6.5 9 -6" transform="translate(92 266)" fill="none" stroke="#C6B480" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></g>
+      <text x="92" y="316" class="t t-600 a-cap" font-size="13" fill="#0B0A09" text-anchor="middle">Phone paired</text>
+    </g>
+    </g>
+  </svg>
+        </div>
+      </div>
+    </header>
+
+    <section class="gs-section" id="need">
+      <div class="container">
+        <h2>What you need</h2>
+        <ul class="gs-needs">
+          <li>
+            <h3>An Android phone with a SIM</h3>
+            <p>It needs the SIM that receives your mobile money and bank payment messages, and it must be able to send SMS. An emulator cannot send real SMS, so use a physical phone. Keep it charged and connected to the internet.</p>
+          </li>
+          <li>
+            <h3>A BriskSMS workspace</h3>
+            <p>Your workspace holds your payments, customers, invoices and paired phones. You create it when you register, and confirm your email address.</p>
+          </li>
+          <li>
+            <h3>The phone you will leave on</h3>
+            <p>Pair the phone that stays at the till or the office. If payments cannot wait while it is off, pair a second phone as a backup.</p>
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="gs-section gs-section-tint" id="steps">
+      <div class="container">
+        <h2>Steps</h2>
+        <ol class="gs-steps">
+          <li>
+            <h3>Create your workspace</h3>
+            <p>Choose <strong>Get started</strong> and register with your name, business name, email and a password of at least 8 characters. Open the verification link we email you, then sign in to the merchant console.</p>
+          </li>
+          <li>
+            <h3>Install the BriskSMS relay app</h3>
+            <p>Install the app on the phone from the previous section. The first time it opens, it shows a short introduction and then asks for the permissions it needs. Step 4 explains each one.</p>
+            <p class="gs-play">
+              <!-- Package id tz.co.brisksms comes from the Android build. Check this address once the listing is live -->
+              <a class="play-badge" href="https://play.google.com/store/apps/details?id=tz.co.brisksms" target="_blank" rel="noopener noreferrer">
+                <img src="assets/brand/google-play-badge.svg" width="180" height="53" alt="Get it on Google Play">
+              </a>
+              <!-- Placeholder address for the Cloudflare R2 bucket. Replace it when the public download domain exists -->
+              <a class="gs-dl" href="https://downloads.brisksms.app/brisksms-direct.apk" rel="noopener noreferrer">Direct download</a>
+            </p>
+            <p class="gs-dl-note">Not on Google Play yet, or want the version that receives payment texts straight from the network? Download the APK to the phone and open it. Android asks you to allow installs from your browser the first time.</p>
+          </li>
+          <li>
+            <h3>Pair the phone with your workspace</h3>
+            <p>In the console, open <strong>Device fleet</strong> and choose <strong>Pair a phone</strong>. The console shows a QR code and a pairing code. In the app, scan the QR code, or choose to type the pairing code. The code works once and expires after 5 minutes. If it expires, generate a new one.</p>
+            <p>Back in the console, choose <strong>Check connected devices</strong>. The phone appears under <strong>Paired phones</strong> with the status <em>Active</em>.</p>
+          </li>
+          <li>
+            <h3>Allow what the phone needs</h3>
+            <p>Android asks for these, and the app explains why. Notification access is turned on by you, in Android settings, because Android does not let any app grant it. The app opens that screen for you.</p>
+            <dl class="gs-perms">
+              <div><dt>Notification access</dt><dd>Reads the alert your Messages app shows for a payment text from a supported mobile money or bank sender. Everything else is ignored and never stored.</dd></div>
+              <div><dt>Receive SMS</dt><dd>Direct-download version only. Receives payment texts from supported senders straight from the network, even when Messages notifications are off. Texts from any other sender are dropped on the phone, unread and unstored.</dd></div>
+              <div><dt>Send SMS</dt><dd>Lets the phone send your messages through its SIM.</dd></div>
+              <div><dt>Phone state</dt><dd>Finds your SIM cards, so a message can go out on SIM 1 or SIM 2.</dd></div>
+              <div><dt>Notifications</dt><dd>Shows the ongoing notice that the phone is relaying.</dd></div>
+              <div><dt>Unrestricted battery use</dt><dd>Stops Android from putting the app to sleep while the phone sits unattended.</dd></div>
+            </dl>
+          </li>
+          <li>
+            <h3>Check your first payment</h3>
+            <p>Receive a mobile money payment on the paired phone, or send a small one to yourself. The payment text arrives and BriskSMS reads it, so the payment appears in the <strong>Reconciliation feed</strong>. BriskSMS matches it to an invoice by its reference, or by the sender's number and exact amount. Anything uncertain goes to the <strong>Review queue</strong> for you to decide. A payment is never settled on a guess.</p>
+          </li>
+          <li>
+            <h3>Send your first SMS</h3>
+            <p>Open <strong>Cellular bulk SMS</strong>, enter your own number and a short message, and send. Bulk messaging needs a plan that includes it and prepaid message credits. The console tells you when either is missing. Messages leave from your own SIM, so customers see your number.</p>
+          </li>
+          <li>
+            <h3>Connect your own systems</h3>
+            <p>To send from your own software, create an API key and call the REST API. Use webhooks to receive verified payments, or connect spreadsheets through Zapier. The <a href="/developers">developer portal</a> has the quickstart and every endpoint.</p>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="gs-section" id="how">
+      <div class="container">
+        <h2>How it works</h2>
+        <div class="gs-flow">
+          <div class="gs-flow-col">
+            <h3>Payments</h3>
+            <ol>
+              <li>Your mobile money or bank sends a payment text to the phone, and the phone reads it.</li>
+              <li>The raw message is stored unchanged and sent to BriskSMS over an encrypted connection.</li>
+              <li>BriskSMS reads the amount, sender and reference, and ignores duplicates.</li>
+              <li>It matches the payment to an invoice, or sends it to your review queue.</li>
+              <li>Your team verifies it. Only then is the invoice marked paid.</li>
+            </ol>
+          </div>
+          <div class="gs-flow-col">
+            <h3>Messaging</h3>
+            <ol>
+              <li>You send a message from the console or the API.</li>
+              <li>BriskSMS checks your plan and your credits.</li>
+              <li>The paired phone collects the job and sends it through the SIM you chose.</li>
+              <li>The phone reports sent and delivered back to BriskSMS.</li>
+              <li>Credits are deducted as messages are sent.</li>
+            </ol>
+          </div>
+        </div>
+        <p class="gs-note"><strong>BriskSMS never holds your customers' money.</strong> Payments go from your customer to your own account, and BriskSMS only records the evidence.</p>
+      </div>
+    </section>
+
+    <section class="gs-section gs-section-tint" id="trouble">
+      <div class="container">
+        <h2>Troubleshooting</h2>
+        <dl class="gs-trouble">
+          <div>
+            <dt>The pairing code was refused</dt>
+            <dd>Each code works once and lasts 5 minutes. Choose <strong>Pair a phone</strong> again to get a new one, and enter it exactly as shown.</dd>
+          </div>
+          <div>
+            <dt>The phone shows <em>Not responding</em></dt>
+            <dd>Open the app and check that the phone has internet, that every permission is on, and that battery use is unrestricted. Then keep the phone charging.</dd>
+          </div>
+          <div>
+            <dt>Payments do not appear</dt>
+            <dd>Check that the payment text reaches this phone: it must arrive in the Messages app on the paired SIM. Then check that notification access is on for BriskSMS in Android settings, and that Messages notifications are not switched off. The direct-download version also needs Receive SMS allowed. Texts from senders BriskSMS does not support are ignored on purpose.</dd>
+          </div>
+          <div>
+            <dt>A message was not sent</dt>
+            <dd>Check that your plan includes bulk messaging, that you have credits, and that the SIM you chose is in the phone. If the chosen SIM slot is empty, the phone uses the active SIM.</dd>
+          </div>
+          <div>
+            <dt>A payment is in the review queue</dt>
+            <dd>That is expected when the reference is missing, the amount is different, or more than one invoice could match. Approve it against the right invoice, or reject it.</dd>
+          </div>
+        </dl>
+      </div>
+    </section>
+
+    <section class="gs-section" id="faq">
+      <div class="container">
+        <h2>Questions</h2>
+        <div class="gs-faq">
+          <details>
+            <summary>Does BriskSMS hold my money?</summary>
+            <p>No. BriskSMS is not a bank, wallet or payment processor. Your customers pay your own accounts, and BriskSMS records the evidence and matches it to your invoices.</p>
+          </details>
+          <details>
+            <summary>Does the app read my personal messages?</summary>
+            <p>No. It only keeps payment texts from supported mobile money and bank senders. Every other message is ignored on the phone and is never uploaded or stored.</p>
+          </details>
+          <details>
+            <summary>Which networks and SIM cards work?</summary>
+            <p>The app detects the SIM cards in the phone and handles Vodacom, Mixx by Yas, Airtel, Halotel and TTCL. On a dual-SIM phone you choose which SIM sends.</p>
+          </details>
+          <details>
+            <summary>Can I use payments without buying message credits?</summary>
+            <p>Yes. Payment reconciliation and bulk messaging are separate products with separate billing. Reconciliation never needs message credits.</p>
+          </details>
+          <details>
+            <summary>What happens if the phone is offline?</summary>
+            <p>The phone keeps what it has received and sends it when it is back online, and BriskSMS guards against sending the same message twice. Pair a second phone if payments cannot wait.</p>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <section class="gs-cta">
+      <div class="container">
+        <h2>Ready to pair your first phone</h2>
+        <p>Create a workspace, then follow the steps above.</p>
+        <div class="gs-cta-actions">
+          <a class="gs-btn gs-btn-primary" href="/console?auth=register" data-signin>Get started</a>
+          <a class="gs-btn gs-btn-quiet" href="/developers">Read the developer docs</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div>
+          <div class="footer-brand-title">
+            <svg width="24" height="24" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+              <rect width="32" height="32" rx="8" fill="#0B0A09"/>
+              <path d="M10 5H22A2 2 0 0 1 24 7V25L22 23L20 25L18 23L16 25L14 23L12 25L10 23L8 25V7A2 2 0 0 1 10 5Z" fill="#F4F1EA"/>
+              <path d="M10.36 15.14L14.5 19.33L21.68 11.09L20.32 9.91L14.5 16.67L11.64 13.86Z" fill="#C6B480"/>
+            </svg>
+            <span>BriskSMS</span>
+          </div>
+          <div class="footer-brand-tagline">Payment Intelligence. Business Automation. Messaging.</div>
+        </div>
+        <div>
+          <div class="footer-col-title">Platform</div>
+          <ul class="footer-links">
+            <li><a href="/console">Merchant Console</a></li>
+            <li><a href="/#payment-intelligence">Payment Intelligence</a></li>
+            <li><a href="/#bulk-sms">Bulk Messaging</a></li>
+            <li><a href="/developers">Developer API</a></li>
+            <li><a href="/getting-started" aria-current="page">Setup guide</a></li>
+          </ul>
+        </div>
+        <div>
+          <div class="footer-col-title">Company</div>
+          <ul class="footer-links">
+            <li><a href="/#about">About BriskSMS</a></li>
+            <li><a href="/#faq">Help Centre</a></li>
+          </ul>
+        </div>
+        <div>
+          <div class="footer-col-title">Legal</div>
+          <ul class="footer-links">
+            <li><a href="/privacy">Privacy Policy</a></li>
+            <li><a href="/terms">Terms of Service</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <div>BriskSMS is an independent software automation platform and is not a bank, electronic money issuer, or payment service provider licensed by the Bank of Tanzania.</div>
+        <div>&copy; BriskSMS</div>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

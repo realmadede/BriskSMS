@@ -95,7 +95,7 @@ describe('Refresh-Token Family Revocation Security Suite', () => {
 
   it('1. Initial refresh token issuance: creates a valid token and assigns a stable family_id', async () => {
     const regRes = await makeRequest('POST', '/v1/auth/register', {}, {
-      email: 'founder@brisksms.co.tz',
+      email: 'founder@brisksms.app',
       password: 'SecurePassword123!',
       fullName: 'Founder Admin',
       organizationName: 'Brisk Enterprises',
@@ -113,7 +113,7 @@ describe('Refresh-Token Family Revocation Security Suite', () => {
 
   it('2. Successful rotation preserving family identity: issues fresh child token with identical family_id', async () => {
     const regRes = await makeRequest('POST', '/v1/auth/register', {}, {
-      email: 'rotation@brisksms.co.tz',
+      email: 'rotation@brisksms.app',
       password: 'SecurePassword123!',
       fullName: 'Rotation User',
       organizationName: 'Rotation Corp',
@@ -153,7 +153,7 @@ describe('Refresh-Token Family Revocation Security Suite', () => {
 
   it('3. Replay of an already consumed token: immediately rejected with HTTP 401 INVALID_TOKEN', async () => {
     const regRes = await makeRequest('POST', '/v1/auth/register', {}, {
-      email: 'replay@brisksms.co.tz',
+      email: 'replay@brisksms.app',
       password: 'SecurePassword123!',
       fullName: 'Replay User',
       organizationName: 'Replay Corp',
@@ -191,7 +191,7 @@ describe('Refresh-Token Family Revocation Security Suite', () => {
 
   it('4. Family-wide revocation after replay: marks every active token in the family as revoked', async () => {
     const regRes = await makeRequest('POST', '/v1/auth/register', {}, {
-      email: 'familyrev@brisksms.co.tz',
+      email: 'familyrev@brisksms.app',
       password: 'SecurePassword123!',
       fullName: 'Family Revocation User',
       organizationName: 'Family Corp',
@@ -258,7 +258,7 @@ describe('Refresh-Token Family Revocation Security Suite', () => {
 
   it('5. Descendant refresh token rejected after family revocation: T3 cannot refresh after T1 replay', async () => {
     const regRes = await makeRequest('POST', '/v1/auth/register', {}, {
-      email: 'descendant@brisksms.co.tz',
+      email: 'descendant@brisksms.app',
       password: 'SecurePassword123!',
       fullName: 'Descendant User',
       organizationName: 'Descendant Corp',
@@ -303,7 +303,7 @@ describe('Refresh-Token Family Revocation Security Suite', () => {
 
   it('6. Concurrent refresh attempts: serialized via row lock; exactly one succeeds and no split branches form', async () => {
     const regRes = await makeRequest('POST', '/v1/auth/register', {}, {
-      email: 'concurrent@brisksms.co.tz',
+      email: 'concurrent@brisksms.app',
       password: 'SecurePassword123!',
       fullName: 'Concurrent User',
       organizationName: 'Concurrent Corp',
@@ -330,7 +330,7 @@ describe('Refresh-Token Family Revocation Security Suite', () => {
 
   it('7. Expired token behavior: expired refresh token fails with 401 without creating branches', async () => {
     const regRes = await makeRequest('POST', '/v1/auth/register', {}, {
-      email: 'expired@brisksms.co.tz',
+      email: 'expired@brisksms.app',
       password: 'SecurePassword123!',
       fullName: 'Expired User',
       organizationName: 'Expired Corp',
@@ -357,7 +357,7 @@ describe('Refresh-Token Family Revocation Security Suite', () => {
 
   it('8. Explicit logout: revokes the entire token family and invalidates cookies', async () => {
     const regRes = await makeRequest('POST', '/v1/auth/register', {}, {
-      email: 'logout@brisksms.co.tz',
+      email: 'logout@brisksms.app',
       password: 'SecurePassword123!',
       fullName: 'Logout User',
       organizationName: 'Logout Corp',
@@ -394,7 +394,7 @@ describe('Refresh-Token Family Revocation Security Suite', () => {
   it('9. Independent token families remain unaffected: revoking Family A does NOT revoke Family B for same user', async () => {
     // 1. Register user (creates Family A)
     const regRes = await makeRequest('POST', '/v1/auth/register', {}, {
-      email: 'multidevice@brisksms.co.tz',
+      email: 'multidevice@brisksms.app',
       password: 'SecurePassword123!',
       fullName: 'Multi Device User',
       organizationName: 'Multi Corp',
@@ -406,7 +406,7 @@ describe('Refresh-Token Family Revocation Security Suite', () => {
 
     // 2. User logs in from a second device/browser (creates Family B)
     const loginRes = await makeRequest('POST', '/v1/auth/login', {}, {
-      email: 'multidevice@brisksms.co.tz',
+      email: 'multidevice@brisksms.app',
       password: 'SecurePassword123!',
     });
     const tB = extractCookie(loginRes.setCookies, REFRESH_COOKIE_NAME)!;
@@ -450,7 +450,7 @@ describe('Refresh-Token Family Revocation Security Suite', () => {
   it('10. Registration, password login and Google login all create correct refresh families with non-null family_id', async () => {
     // A. Registration
     const regRes = await makeRequest('POST', '/v1/auth/register', {}, {
-      email: 'allproviders@brisksms.co.tz',
+      email: 'allproviders@brisksms.app',
       password: 'SecurePassword123!',
       fullName: 'Provider User',
       organizationName: 'Provider Org',
@@ -461,7 +461,7 @@ describe('Refresh-Token Family Revocation Security Suite', () => {
 
     // B. Password Login
     const loginRes = await makeRequest('POST', '/v1/auth/login', {}, {
-      email: 'allproviders@brisksms.co.tz',
+      email: 'allproviders@brisksms.app',
       password: 'SecurePassword123!',
     });
     const loginToken = extractCookie(loginRes.setCookies, REFRESH_COOKIE_NAME)!;
@@ -480,7 +480,7 @@ describe('Refresh-Token Family Revocation Security Suite', () => {
   it('11. Immediate access-token invalidation upon replay: active descendant access token A3 is rejected with 401 TOKEN_REVOKED after T1 replay', async () => {
     // Register: issues T1 and A1
     const regRes = await makeRequest('POST', '/v1/auth/register', {}, {
-      email: 'accesstokenrev@brisksms.co.tz',
+      email: 'accesstokenrev@brisksms.app',
       password: 'SecurePassword123!',
       fullName: 'Access Revocation User',
       organizationName: 'Access Rev Corp',
@@ -547,7 +547,7 @@ describe('Refresh-Token Family Revocation Security Suite', () => {
   it('12. Restart recovery / PostgreSQL authoritative source: revoked sessions remain rejected after in-memory cache clear', async () => {
     // Register and rotate to issue tokens
     const regRes = await makeRequest('POST', '/v1/auth/register', {}, {
-      email: 'restart@brisksms.co.tz',
+      email: 'restart@brisksms.app',
       password: 'SecurePassword123!',
       fullName: 'Restart User',
       organizationName: 'Restart Corp',
@@ -594,7 +594,7 @@ describe('Refresh-Token Family Revocation Security Suite', () => {
 
   it('13. Replaying an already-revoked token is idempotent and maintains full family invalidation', async () => {
     const regRes = await makeRequest('POST', '/v1/auth/register', {}, {
-      email: 'idempotent@brisksms.co.tz',
+      email: 'idempotent@brisksms.app',
       password: 'SecurePassword123!',
       fullName: 'Idempotent User',
       organizationName: 'Idempotent Corp',
@@ -629,7 +629,7 @@ describe('Refresh-Token Family Revocation Security Suite', () => {
 
   it('14. Explicit logout revokes access tokens across the rotated family', async () => {
     const regRes = await makeRequest('POST', '/v1/auth/register', {}, {
-      email: 'logouttokens@brisksms.co.tz',
+      email: 'logouttokens@brisksms.app',
       password: 'SecurePassword123!',
       fullName: 'Logout Token User',
       organizationName: 'Logout Token Corp',

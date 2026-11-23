@@ -4,22 +4,18 @@ import android.app.Notification
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
-import androidx.work.Constraints
-import androidx.work.ExistingWorkPolicy
-import androidx.work.NetworkType
-import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.WorkManager
+import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import tz.co.brisksms.core.storage.KeystoreSecureStorage
-import tz.co.brisksms.data.local.BriskDatabase
-import tz.co.brisksms.data.local.OfflineEvidenceEntity
-import tz.co.brisksms.payment.crypto.EvidenceEncryptor
+import tz.co.brisksms.payment.CaptureCounters
+import tz.co.brisksms.payment.CaptureSource
+import tz.co.brisksms.payment.NotificationText
+import tz.co.brisksms.payment.NotificationTextExtractor
+import tz.co.brisksms.payment.PaymentEvidenceRecorder
 import tz.co.brisksms.payment.provider.PaymentProviderRegistry
-import tz.co.brisksms.security.KeystoreManager
-import tz.co.brisksms.worker.EvidenceUploadWorker
 
 /**
  * Purpose-Limited Notification Collector Service
@@ -33,7 +29,6 @@ class BriskNotificationListenerService : NotificationListenerService() {
     }
 
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    private val keystoreManager = KeystoreManager()
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         super.onNotificationPosted(sbn)
@@ -50,58 +45,39 @@ class BriskNotificationListenerService : NotificationListenerService() {
         val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim() ?: ""
         val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.trim() ?: ""
         val bigText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()?.trim() ?: ""
+        val textLines = extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)
+            ?.map { it.toString() } ?: emptyList()
+        val style = NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(sbn.notification)
+        val messages = style?.messages?.map {
+            NotificationText(it.person?.name?.toString().orEmpty(), it.text?.toString().orEmpty(), it.timestamp)
+        } ?: emptyList()
 
-        val rawPayload = if (bigText.isNotEmpty()) bigText else text
-        if (rawPayload.isEmpty()) return
-
-        // Enforce purpose-limited notification scope: authorized financial apps or verified SMS shortcodes only
-        if (!PaymentProviderRegistry.isEligibleNotificationSource(packageName, title, rawPayload)) {
-            return
-        }
-
-        Log.i(TAG, "Ingesting authorized payment notification from [$packageName]: $title")
-
-        // Digital cryptographic signature using device key
-        val signature = try {
-            keystoreManager.sign(rawPayload.toByteArray(Charsets.UTF_8))
-        } catch (e: Exception) {
-            Log.w(TAG, "Device signing failed, proceeding with raw payload: ${e.message}")
-            null
-        }
-
-        val encryptor = EvidenceEncryptor(secureStorage)
-        val encryptedPayload = encryptor.encryptPayload(rawPayload)
-
-        val evidence = OfflineEvidenceEntity(
-            packageName = packageName,
-            senderAddress = if (title.isNotEmpty()) title else packageName,
-            rawPayload = encryptedPayload,
-            deviceTimestamp = sbn.postTime,
-            signature = signature
-        )
-
-        serviceScope.launch {
-            val db = BriskDatabase.getInstance(applicationContext)
-            db.evidenceDao().insertEvidence(evidence)
-
-            // Trigger WorkManager reliable background forwarding
-            enqueueUploadWork()
-        }
+        // Enforce purpose-limited notification scope: authorized financial apps or verified SMS shortcodes only.
+        // Each text in the notification is judged on its own.
+        NotificationTextExtractor
+            .candidates(title, style?.conversationTitle?.toString(), text, bigText, textLines, messages)
+            .onEach { countIfFromSupportedSender(packageName, it) }
+            .filter { PaymentProviderRegistry.isEligibleNotificationSource(packageName, it.sender, it.body) }
+            .forEach { payment ->
+                Log.i(TAG, "Ingesting authorized payment notification from [$packageName]: ${payment.sender}")
+                serviceScope.launch {
+                    PaymentEvidenceRecorder.record(
+                        applicationContext,
+                        packageName,
+                        payment.sender.ifEmpty { packageName },
+                        payment.body,
+                        payment.timestamp ?: sbn.postTime
+                    )
+                }
+            }
     }
 
-    private fun enqueueUploadWork() {
-        val constraints = Constraints.Builder()
-            .setRequiredNetworkType(NetworkType.CONNECTED)
-            .build()
-
-        val uploadWorkRequest = OneTimeWorkRequestBuilder<EvidenceUploadWorker>()
-            .setConstraints(constraints)
-            .build()
-
-        WorkManager.getInstance(applicationContext).enqueueUniqueWork(
-            "BrisksmsEvidenceUpload",
-            ExistingWorkPolicy.APPEND_OR_REPLACE,
-            uploadWorkRequest
-        )
+    // Counts what the filter did with texts under a supported sender name; other notifications are not counted
+    private fun countIfFromSupportedSender(packageName: String, text: NotificationText) {
+        if (PaymentProviderRegistry.isBlockedPersonalPackage(packageName)) return
+        val verdict = PaymentProviderRegistry.classifyMessage(text.sender, text.body)
+        if (verdict.senderIsSupported) {
+            CaptureCounters.record(applicationContext, CaptureSource.NOTIFICATION, verdict)
+        }
     }
 }

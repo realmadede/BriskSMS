@@ -73,10 +73,11 @@ All outbound webhooks to merchant endpoints are cryptographically signed to prev
    - Every state change, authentication event, device pairing/revocation, and manual financial override writes to `audit_logs`.
    - Audit logs are append-only. No application role possesses `UPDATE` or `DELETE` privileges on this table.
 2. **Anomaly Detection:**
-   - Rate anomalies (e.g., a single device sending 100 payments in 1 minute) trigger automated device quarantine and email alerts to the organization owner.
+   - *Not yet implemented:* automated device quarantine and owner email alerts on rate anomalies (e.g., a single device sending 100 payments in 1 minute). Today, revoked devices fail closed (`403 DEVICE_REVOKED`) and conflicting payment references are quarantined (`COLLISION_QUARANTINED`), but device rate anomalies are not detected automatically.
    - Brute-force login attempts are blocked using Redis-backed IP/Account rate limiters.
 3. **Breach Notification Protocol:**
    - In accordance with the Tanzania Personal Data Protection Act (PDPA 2022), any confirmed security breach impacting personal data must be escalated to the Data Protection Officer (DPO) and reported to the PDPC within 72 hours.
+   - Step-by-step procedure, containment controls and known gaps: [`docs/compliance/DATA_BREACH_RESPONSE_PLAN.md`](../compliance/DATA_BREACH_RESPONSE_PLAN.md).
 
 ---
 
