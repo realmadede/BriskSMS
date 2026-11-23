@@ -10,8 +10,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -20,10 +22,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
@@ -267,7 +274,25 @@ fun PairingScreen(
     val fieldColors = OutlinedTextFieldDefaults.colors(
         focusedContainerColor = BriskColors.cardContainer(),
         unfocusedContainerColor = BriskColors.cardContainer(),
-        disabledContainerColor = BriskColors.cardContainer()
+        disabledContainerColor = BriskColors.cardContainer(),
+        focusedPlaceholderColor = BriskColors.textTertiary(),
+        unfocusedPlaceholderColor = BriskColors.textTertiary()
+    )
+    val monoInputStyle = BriskMonoStyle.copy(
+        fontSize = 15.sp,
+        lineHeight = 22.sp,
+        color = BriskColors.textPrimary()
+    )
+    val textInputStyle = MaterialTheme.typography.bodyLarge.copy(
+        color = BriskColors.textPrimary()
+    )
+    val monoPlaceholderStyle = BriskMonoStyle.copy(
+        fontSize = 13.sp,
+        lineHeight = 18.sp,
+        color = BriskColors.textTertiary()
+    )
+    val textPlaceholderStyle = MaterialTheme.typography.bodySmall.copy(
+        color = BriskColors.textTertiary()
     )
 
     Column(
@@ -356,30 +381,29 @@ fun PairingScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        OutlinedTextField(
+        CompactPairingField(
+            label = "Pairing code or QR JSON",
             value = inputPayload,
             onValueChange = { inputPayload = it },
-            label = { Text("Pairing code or QR JSON") },
-            placeholder = { Text("bsk_pair_…", style = BriskMonoStyle) },
-            textStyle = BriskMonoStyle.copy(color = BriskColors.textPrimary()),
-            shape = BriskShapes.medium,
+            placeholder = "bsk_pair_…",
+            textStyle = monoInputStyle,
+            placeholderStyle = monoPlaceholderStyle,
             colors = fieldColors,
             singleLine = false,
-            maxLines = 3,
-            modifier = Modifier.fillMaxWidth()
+            maxLines = 3
         )
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        OutlinedTextField(
+        CompactPairingField(
+            label = "Device label (optional)",
             value = deviceLabel,
             onValueChange = { deviceLabel = it },
-            label = { Text("Device label (optional)") },
-            placeholder = { Text("Dar office gateway 1") },
-            shape = BriskShapes.medium,
+            placeholder = "Dar office gateway 1",
+            textStyle = textInputStyle,
+            placeholderStyle = textPlaceholderStyle,
             colors = fieldColors,
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
+            singleLine = true
         )
 
         Spacer(modifier = Modifier.height(4.dp))
@@ -405,18 +429,16 @@ fun PairingScreen(
         }
 
         if (isAdvancedOpen) {
-            OutlinedTextField(
+            CompactPairingField(
+                label = "API base URL",
                 value = customEndpoint,
                 onValueChange = { customEndpoint = it },
-                label = { Text("API base URL") },
-                placeholder = { Text("https://api.brisksms.app", style = BriskMonoStyle) },
-                textStyle = BriskMonoStyle.copy(color = BriskColors.textPrimary()),
-                shape = BriskShapes.medium,
+                placeholder = "https://api.brisksms.app",
+                textStyle = monoInputStyle,
+                placeholderStyle = monoPlaceholderStyle,
                 colors = fieldColors,
                 singleLine = true,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 8.dp)
+                modifier = Modifier.padding(bottom = 8.dp)
             )
         }
 
@@ -450,6 +472,71 @@ fun PairingScreen(
             enabled = inputPayload.isNotBlank(),
             loading = isEnrolling
         )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CompactPairingField(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    textStyle: TextStyle,
+    placeholderStyle: TextStyle,
+    colors: TextFieldColors,
+    singleLine: Boolean,
+    maxLines: Int = if (singleLine) 1 else 3,
+    modifier: Modifier = Modifier
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    Column(modifier = modifier.fillMaxWidth()) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = BriskColors.textSecondary(),
+            modifier = Modifier.padding(bottom = 4.dp)
+        )
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            textStyle = textStyle,
+            singleLine = singleLine,
+            maxLines = maxLines,
+            cursorBrush = SolidColor(BriskColors.accentInk()),
+            interactionSource = interactionSource,
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 42.dp)
+        ) { innerTextField ->
+            OutlinedTextFieldDefaults.DecorationBox(
+                value = value,
+                innerTextField = innerTextField,
+                enabled = true,
+                singleLine = singleLine,
+                visualTransformation = VisualTransformation.None,
+                interactionSource = interactionSource,
+                placeholder = {
+                    Text(
+                        text = placeholder,
+                        style = placeholderStyle,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                },
+                colors = colors,
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+                container = {
+                    OutlinedTextFieldDefaults.ContainerBox(
+                        enabled = true,
+                        isError = false,
+                        interactionSource = interactionSource,
+                        colors = colors,
+                        shape = BriskShapes.medium
+                    )
+                }
+            )
+        }
     }
 }
 
